@@ -554,6 +554,99 @@ class StudentUserProfileView(APIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+class DepartmentHeadUserProfileView(APIView):
+    """View all Department Head profiles. College Admins and above only."""
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+
+    def get(self, request):
+        user = request.user
+        group = get_user_group(user)
+
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response(
+                {"detail": "You do not have permission to view department head profiles."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        profiles = DepartmentHeadProfile.objects.all().select_related('user', 'department')
+
+        result = []
+        for prof in profiles:
+            result.append({
+                "user": {
+                    "username": prof.user.username, "email": prof.user.email,
+                    "first_name": prof.user.first_name, "last_name": prof.user.last_name
+                },
+                "role": "Department Head",
+                "employee_id": prof.employee_id,
+                "department": prof.department.name if prof.department else None,
+                "middle_name": prof.middle_name, "date_of_birth": prof.date_of_birth,
+                "gender": prof.gender, "aadhaar_number": prof.aadhaar_number,
+                "emergency_contact_name": prof.emergency_contact_name,
+                "emergency_contact_relationship": prof.emergency_contact_relationship,
+                "emergency_contact_phone": prof.emergency_contact_phone,
+                "contact_number": prof.contact_number,
+                "current_address_line1": prof.current_address_line1, "current_address_line2": prof.current_address_line2,
+                "current_city": prof.current_city, "current_district": prof.current_district,
+                "current_state": prof.current_state, "current_pincode": prof.current_pincode,
+                "permanent_address_line1": prof.permanent_address_line1, "permanent_address_line2": prof.permanent_address_line2,
+                "permanent_city": prof.permanent_city, "permanent_district": prof.permanent_district,
+                "permanent_state": prof.permanent_state, "permanent_pincode": prof.permanent_pincode,
+                "date_of_joining": prof.date_of_joining, "designation": prof.designation,
+                "employee_type": prof.employee_type, "bank_account_number": prof.bank_account_number,
+                "pan_number": prof.pan_number, "staff_role": prof.staff_role, "status": prof.status,
+                "profile_picture": prof.profile_picture.url if prof.profile_picture else None,
+            })
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class NonTeachingStaffUserProfileView(APIView):
+    """View all Support Staff profiles. College Admins and above only."""
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+
+    def get(self, request):
+        user = request.user
+        group = get_user_group(user)
+
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response(
+                {"detail": "You do not have permission to view support staff profiles."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        profiles = NonTeachingStaffProfile.objects.all().select_related('user', 'department')
+
+        result = []
+        for prof in profiles:
+            result.append({
+                "user": {
+                    "username": prof.user.username, "email": prof.user.email,
+                    "first_name": prof.user.first_name, "last_name": prof.user.last_name
+                },
+                "role": "Support Staff",
+                "employee_id": prof.employee_id,
+                "department": prof.department.name if prof.department else None,
+                "middle_name": prof.middle_name, "date_of_birth": prof.date_of_birth,
+                "gender": prof.gender, "aadhaar_number": prof.aadhaar_number,
+                "emergency_contact_name": prof.emergency_contact_name,
+                "emergency_contact_relationship": prof.emergency_contact_relationship,
+                "emergency_contact_phone": prof.emergency_contact_phone,
+                "contact_number": prof.contact_number,
+                "current_address_line1": prof.current_address_line1, "current_address_line2": prof.current_address_line2,
+                "current_city": prof.current_city, "current_district": prof.current_district,
+                "current_state": prof.current_state, "current_pincode": prof.current_pincode,
+                "permanent_address_line1": prof.permanent_address_line1, "permanent_address_line2": prof.permanent_address_line2,
+                "permanent_city": prof.permanent_city, "permanent_district": prof.permanent_district,
+                "permanent_state": prof.permanent_state, "permanent_pincode": prof.permanent_pincode,
+                "date_of_joining": prof.date_of_joining, "designation": prof.designation,
+                "employee_type": prof.employee_type, "bank_account_number": prof.bank_account_number,
+                "pan_number": prof.pan_number, "staff_role": prof.staff_role, "status": prof.status,
+                "profile_picture": prof.profile_picture.url if prof.profile_picture else None,
+                "assigned_responsibilities": prof.assigned_responsibilities,
+            })
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class UserProfileView(APIView):
     """Return the requesting user's own profile."""
     permission_classes = [IsAuthenticated]
@@ -916,3 +1009,67 @@ class ApproveUserView(APIView):
         
         target_profile.save()
         return Response({"message": msg, "status": target_profile.status}, status=status.HTTP_200_OK)
+
+
+class CollegeEmployeesListView(APIView):
+    """
+    List all non-student, non-superuser users in the current tenant schema.
+    Only accessible by College Admins (Management or Administrator).
+    """
+    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+
+    def get(self, request):
+        from django.contrib.auth.models import User
+        # Exclude students and superusers
+        employees = User.objects.exclude(groups__name='student').exclude(is_superuser=True)
+        data = []
+        for e in employees:
+            group_name = e.groups.first().name if e.groups.exists() else "No Role"
+            data.append({
+                "id": e.id,
+                "username": e.username,
+                "email": e.email,
+                "first_name": e.first_name,
+                "last_name": e.last_name,
+                "role": group_name
+            })
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class UserPermissionsDetailView(APIView):
+    """
+    Retrieve or update direct permissions for a specific employee.
+    Only accessible by College Admins.
+    """
+    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+
+    def get(self, request, user_id):
+        from django.contrib.auth.models import User
+        try:
+            user = User.objects.exclude(groups__name='student').exclude(is_superuser=True).get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get direct user permissions codenames
+        direct_perms = list(user.user_permissions.values_list('codename', flat=True))
+        return Response({"permissions": direct_perms}, status=status.HTTP_200_OK)
+
+    def post(self, request, user_id):
+        from django.contrib.auth.models import User, Permission
+        try:
+            user = User.objects.exclude(groups__name='student').exclude(is_superuser=True).get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        permissions_list = request.data.get('permissions', [])
+        # Clear current direct permissions and assign new ones
+        user.user_permissions.clear()
+        for perm_codename in permissions_list:
+            try:
+                # Retrieve permission from database by codename
+                perm = Permission.objects.get(codename=perm_codename)
+                user.user_permissions.add(perm)
+            except Permission.DoesNotExist:
+                pass
+
+        return Response({"message": "Permissions updated successfully."}, status=status.HTTP_200_OK)

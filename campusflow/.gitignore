@@ -163,4 +163,6 @@ CampusFlow_Collection.postman_collection.json
 local_settings.py
 ####
 
+# Heavy models
+models/insightface/
 ###############

@@ -10,7 +10,6 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
-from logging import config
 from pathlib import Path
 import datetime
 import os
@@ -90,6 +89,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    'campusflow_app.middleware.audit.AuditMiddleware',
 ]
 
 REST_FRAMEWORK = {
@@ -256,7 +256,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ============================================================
 EMAIL_BACKEND = "anymail.backends.brevo.EmailBackend"
 ANYMAIL = {
-    "BREVO_API_KEY": config("BREVO_API_KEY"),
+    "BREVO_API_KEY": os.environ.get("BREVO_API_KEY", ""),
 }
 DEFAULT_FROM_EMAIL = "CampusFlow <soil@nagpuranalytics.com>"
 

@@ -5,17 +5,44 @@ from .views.users import (
     MyObtainTokenPairView, LogoutAPIView, UserProfileView,
     ManagementUserProfileView, AdministratorUserProfileView,
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
-    ResetDeviceLockView, PendingApprovalsView, ApproveUserView
+    ResetDeviceLockView, PendingApprovalsView, ApproveUserView,
+    DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
+    CollegeEmployeesListView, UserPermissionsDetailView
 )
 from .views.location import LocationDetailView
 from .views.attendance import (
     AttendanceMarkView, AllAttendanceView,
     LectureCheckinByCodeView
 )
+from .views.face_attendance import (
+    FaceRegistrationView, LivenessChallengeView,
+    MarkAttendanceView, AttendanceHistoryView
+)
 from .views.classroom import ClassroomCreateView, CheckAttendanceView, ClassroomListView, ClassroomLocationValidationView
 from .views.lecture import (
     LectureListCreateView, LectureDetailView, LectureByClassroomView,
     GenerateLectureCodeView
+)
+
+# ── New Module Imports ──
+from .views.audit import AuditLogListView
+from .views.announcement import AnnouncementListCreateView, AnnouncementDetailView
+from .views.leave import (
+    LeaveTypeListCreateView, LeaveTypeDetailView,
+    LeaveBalanceView, LeaveRequestCreateView, LeaveRequestListView,
+    LeaveRequestActionView, MyLeavesView
+)
+from .views.payroll import (
+    SalaryStructureListView, SalaryStructureDetailView,
+    GeneratePayslipView, BulkPayslipGenerationView, PayslipListView
+)
+from .views.exam import ExamTypeListCreateView, ExamListCreateView, ExamDetailView
+from .views.course import CourseListCreateView
+from .views.assignment import AssignmentListCreateView, AssignmentDetailView
+from .views.submission import SubmissionListCreateView, SubmissionGradeView
+from .views.analytics import (
+    OverviewKPIView, AttendanceTrendsView, DepartmentPerformanceView,
+    LeaveAnalyticsView, PayrollSummaryView
 )
 
 urlpatterns = [
@@ -43,6 +70,10 @@ urlpatterns = [
     path('administrator/user/', AdministratorUserProfileView.as_view(), name='administrator_user_profile'),
     # GET all teaching staff profiles (College Admins / SaaS Admin only)
     path('teaching-staff/user/', TeachingStaffUserProfileView.as_view(), name='teaching_staff_user_profile'),
+    # GET all department head profiles (College Admins / SaaS Admin only)
+    path('hod/user/', DepartmentHeadUserProfileView.as_view(), name='department_head_user_profile'),
+    # GET all non-teaching support staff profiles (College Admins / SaaS Admin only)
+    path('support-staff/user/', NonTeachingStaffUserProfileView.as_view(), name='non_teaching_staff_user_profile'),
     # GET all student profiles (Faculty and above only)
     path('student/user/', StudentUserProfileView.as_view(), name='student_user_profile'),
 
@@ -64,6 +95,12 @@ urlpatterns = [
     # POST mark attendance using random code and geofence
     path('attendance/lecture-checkin/', LectureCheckinByCodeView.as_view(), name='lecture-checkin-by-code'),
 
+    # ── Face Attendance ──
+    path('register-face/', FaceRegistrationView.as_view(), name='register-face'),
+    path('liveness-challenge/', LivenessChallengeView.as_view(), name='liveness-challenge'),
+    path('mark-attendance/', MarkAttendanceView.as_view(), name='mark-attendance'),
+    path('attendance-history/', AttendanceHistoryView.as_view(), name='attendance-history'),
+
     # ── Classroom ─────────────────────────────────────────────────────
     # POST create (College Admins+ only)
     path('classroom/', ClassroomCreateView.as_view(), name='ClassroomCreateView'),
@@ -80,4 +117,54 @@ urlpatterns = [
     path('classrooms/<int:classroom_id>/lectures/', LectureByClassroomView.as_view(), name='lectures-by-classroom'),
     # POST generate random code for a lecture
     path('lectures/<int:pk>/generate-code/', GenerateLectureCodeView.as_view(), name='generate-lecture-code'),
+
+    # ── Permissions & Employees (College Admin) ─────────────────────────
+    path('college/employees/', CollegeEmployeesListView.as_view(), name='college-employees-list'),
+    path('college/user-permissions/<int:user_id>/', UserPermissionsDetailView.as_view(), name='user-permissions-detail'),
+
+    # ══════════════════════════════════════════════════════════════════
+    # NEW MODULES
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── Audit Logs ────────────────────────────────────────────────────
+    path('audit-logs/', AuditLogListView.as_view(), name='audit-logs'),
+
+    # ── Announcements ─────────────────────────────────────────────────
+    path('announcements/', AnnouncementListCreateView.as_view(), name='announcement-list-create'),
+    path('announcements/<int:pk>/', AnnouncementDetailView.as_view(), name='announcement-detail'),
+
+    # ── Leave Management ──────────────────────────────────────────────
+    path('leave/types/', LeaveTypeListCreateView.as_view(), name='leave-type-list-create'),
+    path('leave/types/<int:pk>/', LeaveTypeDetailView.as_view(), name='leave-type-detail'),
+    path('leave/balance/', LeaveBalanceView.as_view(), name='leave-balance'),
+    path('leave/request/', LeaveRequestCreateView.as_view(), name='leave-request-create'),
+    path('leave/requests/', LeaveRequestListView.as_view(), name='leave-request-list'),
+    path('leave/action/', LeaveRequestActionView.as_view(), name='leave-request-action'),
+    path('leave/my/', MyLeavesView.as_view(), name='my-leaves'),
+
+    # ── Payroll ───────────────────────────────────────────────────────
+    path('payroll/structures/', SalaryStructureListView.as_view(), name='salary-structure-list'),
+    path('payroll/structures/<int:user_id>/', SalaryStructureDetailView.as_view(), name='salary-structure-detail'),
+    path('payroll/generate/', GeneratePayslipView.as_view(), name='generate-payslip'),
+    path('payroll/generate-bulk/', BulkPayslipGenerationView.as_view(), name='bulk-generate-payslips'),
+    path('payroll/payslips/', PayslipListView.as_view(), name='payslip-list'),
+
+    # ── Exam / Timetable ─────────────────────────────────────────────
+    path('exams/types/', ExamTypeListCreateView.as_view(), name='exam-type-list-create'),
+    path('exams/', ExamListCreateView.as_view(), name='exam-list-create'),
+    path('exams/<int:pk>/', ExamDetailView.as_view(), name='exam-detail'),
+    path('courses/', CourseListCreateView.as_view(), name='course-list-create'),
+
+    # ── Analytics ─────────────────────────────────────────────────────
+    path('analytics/overview/', OverviewKPIView.as_view(), name='analytics-overview'),
+    path('analytics/attendance-trends/', AttendanceTrendsView.as_view(), name='analytics-attendance-trends'),
+    path('analytics/department-performance/', DepartmentPerformanceView.as_view(), name='analytics-department-performance'),
+    path('analytics/leave/', LeaveAnalyticsView.as_view(), name='analytics-leave'),
+    path('analytics/payroll/', PayrollSummaryView.as_view(), name='analytics-payroll'),
+
+    # ── Assignments ──────────────────────────────────────────────────
+    path('assignments/', AssignmentListCreateView.as_view(), name='assignment-list-create'),
+    path('assignments/<int:pk>/', AssignmentDetailView.as_view(), name='assignment-detail'),
+    path('assignments/<int:assignment_id>/submissions/', SubmissionListCreateView.as_view(), name='submission-list-create'),
+    path('submissions/<int:pk>/grade/', SubmissionGradeView.as_view(), name='submission-grade'),
 ]

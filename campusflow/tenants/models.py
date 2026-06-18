@@ -15,6 +15,23 @@ class Tenant(TenantMixin):
     created_on = models.DateField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
 
+    # SMTP / Email configuration (optional/non-operational for now)
+    email_smtp_host = models.CharField(max_length=255, blank=True, null=True)
+    email_smtp_port = models.IntegerField(blank=True, null=True, default=587)
+    email_smtp_username = models.CharField(max_length=255, blank=True, null=True)
+    email_smtp_password = models.CharField(max_length=255, blank=True, null=True)
+
+    # ERP Product Integration configuration (optional/non-operational for now)
+    erp_system_name = models.CharField(max_length=100, blank=True, null=True, help_text="e.g. SAP, Banner, Custom ERP")
+    erp_api_url = models.CharField(max_length=500, blank=True, null=True)
+    erp_auth_token = models.CharField(max_length=500, blank=True, null=True)
+
+    # Billing Settings
+    billing_student_rate = models.DecimalField(max_digits=10, decimal_places=2, default=50.00)
+    billing_student_discount = models.DecimalField(max_digits=10, decimal_places=2, default=10.00)
+    billing_employee_rate = models.DecimalField(max_digits=10, decimal_places=2, default=100.00)
+    billing_employee_discount = models.DecimalField(max_digits=10, decimal_places=2, default=100.00)
+
     # Default: auto-create schema on save
     auto_create_schema = True
 

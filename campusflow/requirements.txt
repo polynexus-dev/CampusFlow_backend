@@ -45,3 +45,7 @@ user-agents==2.2.0
 whitenoise==6.9.0
 django-redis==5.4.0
 redis==5.0.1
+insightface>=0.7
+onnxruntime>=1.16
+numpy>=1.24
+opencv-python-headless

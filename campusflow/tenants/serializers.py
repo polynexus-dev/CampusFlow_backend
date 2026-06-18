@@ -14,7 +14,12 @@ class TenantCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tenant
-        fields = ['name', 'code', 'address', 'contact_email', 'permitted_email_domain', 'domain_name', 'admin_username', 'admin_email', 'admin_password']
+        fields = [
+            'name', 'code', 'address', 'contact_email', 'permitted_email_domain', 'domain_name',
+            'admin_username', 'admin_email', 'admin_password',
+            'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
+            'erp_system_name', 'erp_api_url', 'erp_auth_token'
+        ]
 
     def create(self, validated_data):
         domain_name = validated_data.pop('domain_name')
@@ -63,3 +68,90 @@ class TenantCreateSerializer(serializers.ModelSerializer):
             )
             
         return tenant
+
+
+class TenantListSerializer(serializers.ModelSerializer):
+    domain_name = serializers.SerializerMethodField()
+    student_count = serializers.SerializerMethodField()
+    faculty_count = serializers.SerializerMethodField()
+    management_count = serializers.SerializerMethodField()
+    support_staff_count = serializers.SerializerMethodField()
+    hod_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Tenant
+        fields = [
+            'id', 'name', 'code', 'address', 'contact_email', 'permitted_email_domain', 'domain_name',
+            'created_on', 'is_active',
+            'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
+            'erp_system_name', 'erp_api_url', 'erp_auth_token',
+            'student_count', 'faculty_count', 'management_count', 'support_staff_count', 'hod_count',
+            'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount'
+        ]
+
+    def get_domain_name(self, obj):
+        try:
+            return obj.get_primary_domain().domain
+        except Exception:
+            return None
+
+    def get_student_count(self, obj):
+        if obj.schema_name == 'public':
+            return 0
+        from campusflow_app.models.profile import StudentProfile
+        with schema_context(obj.schema_name):
+            try:
+                return StudentProfile.objects.count()
+            except Exception:
+                return 0
+
+    def get_faculty_count(self, obj):
+        if obj.schema_name == 'public':
+            return 0
+        from campusflow_app.models.profile import TeachingStaffProfile
+        with schema_context(obj.schema_name):
+            try:
+                return TeachingStaffProfile.objects.count()
+            except Exception:
+                return 0
+
+    def get_management_count(self, obj):
+        if obj.schema_name == 'public':
+            return 0
+        from campusflow_app.models.profile import ManagementProfile
+        with schema_context(obj.schema_name):
+            try:
+                return ManagementProfile.objects.count()
+            except Exception:
+                return 0
+
+    def get_support_staff_count(self, obj):
+        if obj.schema_name == 'public':
+            return 0
+        from campusflow_app.models.profile import NonTeachingStaffProfile
+        with schema_context(obj.schema_name):
+            try:
+                return NonTeachingStaffProfile.objects.count()
+            except Exception:
+                return 0
+
+    def get_hod_count(self, obj):
+        if obj.schema_name == 'public':
+            return 0
+        from campusflow_app.models.profile import DepartmentHeadProfile
+        with schema_context(obj.schema_name):
+            try:
+                return DepartmentHeadProfile.objects.count()
+            except Exception:
+                return 0
+
+
+class TenantUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tenant
+        fields = [
+            'name', 'address', 'contact_email', 'permitted_email_domain', 'is_active',
+            'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
+            'erp_system_name', 'erp_api_url', 'erp_auth_token',
+            'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount'
+        ]

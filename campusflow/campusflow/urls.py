@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from tenants.views import TenantCreateAPIView
+from tenants.views import TenantCreateAPIView, TenantDetailAPIView
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
@@ -37,10 +37,12 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # SaaS Management Routes (Public Schema only)
     path('api/saas/create-college/', TenantCreateAPIView.as_view(), name='create-college'),
+    path('api/saas/colleges/<int:pk>/', TenantDetailAPIView.as_view(), name='college-detail'),
     
     # Swagger Documentation
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 
     path('', include('campusflow_app.urls')),
+    path('api/', include('campusflow_app.urls')),
 ]

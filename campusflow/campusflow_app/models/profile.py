@@ -9,6 +9,10 @@ class StudentProfile(models.Model):
     student_id = models.CharField(max_length=20, unique=True, help_text="Unique student identifier within this college")
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True, related_name='students')
     locked_device_id = models.CharField(max_length=255, null=True, blank=True, help_text="Device ID for locking student to a specific phone")
+    is_face_registered = models.BooleanField(
+        default=False,
+        help_text="True once all three face angles have been captured and stored.",
+    )
 
     # Basic Information
     middle_name = models.CharField(max_length=100, blank=True, null=True)

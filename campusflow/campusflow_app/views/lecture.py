@@ -25,8 +25,17 @@ class LectureListCreateView(APIView):
     permission_classes = [IsAuthenticated, CanCreateLecture]
 
     def get(self, request):
-        """List all lectures. Any authenticated user can view."""
-        lectures = Lecture.objects.all().select_related('classroom')
+        """List all lectures. For students, filter by active code & department."""
+        user = request.user
+        if hasattr(user, 'student_profile'):
+            student_profile = user.student_profile
+            lectures = Lecture.objects.filter(
+                faculty__teaching_staff_profile__department=student_profile.department,
+                code__isnull=False
+            ).exclude(code='').select_related('classroom', 'faculty')
+        else:
+            lectures = Lecture.objects.all().select_related('classroom', 'faculty')
+        
         serializer = LectureSerializer(lectures, many=True)
         return Response(serializer.data)
 

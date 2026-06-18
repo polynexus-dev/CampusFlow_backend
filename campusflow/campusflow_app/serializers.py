@@ -16,6 +16,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from .models.classroom import Classroom
 from .models.lecture import Lecture
+from .models.attendance_log import FaceAttendanceLog
 
 
 class ClassroomSerializer(serializers.ModelSerializer):
@@ -27,14 +28,20 @@ class ClassroomSerializer(serializers.ModelSerializer):
 class LectureSerializer(serializers.ModelSerializer):
     classroom_name = serializers.CharField(required=False)
     faculty_username = serializers.CharField(source='faculty.username', read_only=True)
+    teacher_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Lecture
-        fields = ('id', 'name', 'subject', 'faculty', 'faculty_username', 'classroom', 'start_time', 'end_time', 'code', 'created_at')
+        fields = ('id', 'name', 'subject', 'faculty', 'faculty_username', 'teacher_name', 'classroom', 'start_time', 'end_time', 'code', 'created_at')
         read_only_fields = ('id', 'code', 'created_at')
         extra_kwargs = {
             'classroom': {'required': True, 'allow_null': False}
         }
+
+    def get_teacher_name(self, obj):
+        if obj.faculty:
+            return obj.faculty.get_full_name() or obj.faculty.username
+        return None
 
 
 class LectureAttendanceCodeSerializer(serializers.Serializer):
@@ -105,11 +112,36 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         if not password or " " in password:
             raise serializers.ValidationError("Password cannot contain spaces.", code='invalid_password')
 
-        users = User.objects.filter(username=username)
-        if not users.exists():
+        from tenants.models import Tenant
+        from django.db import connection
+
+        user = None
+        target_tenant = None
+
+        # First try to find user in current schema
+        user = User.objects.filter(username=username).first()
+        if user:
+            target_tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
+        elif connection.schema_name == 'public':
+            # Search all other tenant schemas
+            from django_tenants.utils import schema_context
+            for tenant in Tenant.objects.exclude(schema_name='public'):
+                with schema_context(tenant.schema_name):
+                    u = User.objects.filter(username=username).first()
+                    if u:
+                        user = u
+                        target_tenant = tenant
+                        break
+
+        if not user:
             raise serializers.ValidationError(f"{username} does not exist", code='not_found')
 
-        user = users.first()
+        # Switch context to the target tenant's schema for the rest of this request
+        if target_tenant and target_tenant.schema_name != connection.schema_name:
+            connection.set_tenant(target_tenant)
+            # Re-fetch user in the active tenant connection context
+            user = User.objects.get(id=user.id)
+
         profile_data = None
         user_group = None
 
@@ -164,6 +196,13 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['user_id'] = user.id
         data['user'] = user.username
         data['roleName'] = user_group.name if user_group else "Superuser"
+        if target_tenant:
+            try:
+                data['tenant_domain'] = target_tenant.get_primary_domain().domain
+                data['tenant_code'] = target_tenant.code
+            except Exception:
+                data['tenant_domain'] = None
+                data['tenant_code'] = None
 
         # --- SECURITY: AUTO-DEVICE BINDING ---
         if user_group and user_group.name == 'student':
@@ -498,3 +537,78 @@ class AttendanceSerializer(serializers.ModelSerializer):
         elif obj.user.is_superuser:
             return 'admin'
         return 'unknown'
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Face Attendance Serializers
+# ──────────────────────────────────────────────────────────────────────────────
+class FaceRegistrationSerializer(serializers.Serializer):
+    """
+    Accepts three face images as multipart file uploads.
+    """
+    front = serializers.ImageField(help_text="Front-facing photo of the student.")
+    left = serializers.ImageField(help_text="Left profile photo of the student.")
+    right = serializers.ImageField(help_text="Right profile photo of the student.")
+
+
+class MarkAttendanceSerializer(serializers.Serializer):
+    """
+    Request body for the face attendance verification endpoint.
+    """
+    lecture_id = serializers.IntegerField(
+        help_text="ID of the active lecture to mark attendance for."
+    )
+    photo = serializers.ImageField(
+        help_text="Live selfie captured by the student."
+    )
+    photo_prev = serializers.ImageField(
+        required=False,
+        help_text="Baseline frame captured before the challenge action, used for motion liveness check.",
+    )
+    challenge_id = serializers.CharField(
+        help_text="Single-use token from /api/liveness-challenge/.",
+    )
+
+
+class FaceAttendanceLogSerializer(serializers.ModelSerializer):
+    """Read-only attendance log for history."""
+    student_name = serializers.CharField(
+        source="student.user.get_full_name", read_only=True
+    )
+    enrollment_number = serializers.CharField(
+        source="student.student_id", read_only=True
+    )
+    lecture_info = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FaceAttendanceLog
+        fields = [
+            "id",
+            "student_name",
+            "enrollment_number",
+            "lecture",
+            "lecture_info",
+            "timestamp",
+            "confidence_score",
+            "is_verified",
+            "liveness_passed",
+        ]
+        read_only_fields = fields
+
+    def get_lecture_info(self, obj):
+        return {
+            "course_name": obj.lecture.name,
+            "course_code": obj.lecture.code,
+            "date": obj.lecture.start_time.strftime("%Y-%m-%d") if obj.lecture.start_time else "",
+        }
+
+
+class AttendanceResultSerializer(serializers.Serializer):
+    """
+    Response body for the face attendance verification endpoint.
+    """
+    success = serializers.BooleanField()
+    is_verified = serializers.BooleanField()
+    confidence_score = serializers.FloatField()
+    liveness_passed = serializers.BooleanField()
+    message = serializers.CharField()
