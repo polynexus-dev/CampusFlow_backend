@@ -7,6 +7,7 @@ from ..models.assignment import Assignment
 from ..models.department import Department
 from ..models.course import Course
 from ..permissions import IsFacultyOrAbove, get_user_group, is_college_admin
+from ..utils.tenant_utils import ensure_tenant_schema
 
 class AssignmentListCreateView(APIView):
     """
@@ -17,6 +18,7 @@ class AssignmentListCreateView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
+        ensure_tenant_schema(request)
         user = request.user
         user_group = get_user_group(user)
         qs = Assignment.objects.all().select_related('department', 'course', 'created_by')

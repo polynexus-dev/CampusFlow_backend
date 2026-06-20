@@ -5,7 +5,7 @@ from .views.users import (
     MyObtainTokenPairView, LogoutAPIView, UserProfileView,
     ManagementUserProfileView, AdministratorUserProfileView,
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
-    ResetDeviceLockView, PendingApprovalsView, ApproveUserView,
+    ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
     DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
     CollegeEmployeesListView, UserPermissionsDetailView
 )
@@ -16,7 +16,16 @@ from .views.attendance import (
 )
 from .views.face_attendance import (
     FaceRegistrationView, LivenessChallengeView,
-    MarkAttendanceView, AttendanceHistoryView
+    MarkAttendanceView, AttendanceHistoryView,
+    StudentRequestManualAttendanceView, StudentManualRequestStatusView
+)
+from .views.lecturer_attendance import (
+    LecturerCheckInView, LecturerStartSessionView,
+    LecturerAttendanceStatusView, LecturerManualRequestsView,
+    LecturerApproveManualRequestView, LecturerConductedHistoryView,
+    LecturerBulkApproveManualRequestsView, LecturerDeviceResetRequestsView,
+    LecturerApproveDeviceResetRequestView, LecturerGenerateDynamicQRView,
+    StudentVerifyQRAttendanceView
 )
 from .views.classroom import ClassroomCreateView, CheckAttendanceView, ClassroomListView, ClassroomLocationValidationView
 from .views.lecture import (
@@ -38,6 +47,7 @@ from .views.payroll import (
 )
 from .views.exam import ExamTypeListCreateView, ExamListCreateView, ExamDetailView
 from .views.course import CourseListCreateView
+from .views.schedule import ScheduleListView
 from .views.assignment import AssignmentListCreateView, AssignmentDetailView
 from .views.submission import SubmissionListCreateView, SubmissionGradeView
 from .views.analytics import (
@@ -56,6 +66,7 @@ urlpatterns = [
     path('logout/', LogoutAPIView.as_view(), name='logout'),
     path('token/verify/', VerifyTokenView.as_view(), name='verify-token'),
     path('student/reset-device-lock/', ResetDeviceLockView.as_view(), name='reset_device_lock'),
+    path('student/request-biometric-reset/', RequestBiometricResetView.as_view(), name='request_biometric_reset'),
 
     # ── Approvals ──
     path('approvals/pending/', PendingApprovalsView.as_view(), name='pending_approvals'),
@@ -100,6 +111,21 @@ urlpatterns = [
     path('liveness-challenge/', LivenessChallengeView.as_view(), name='liveness-challenge'),
     path('mark-attendance/', MarkAttendanceView.as_view(), name='mark-attendance'),
     path('attendance-history/', AttendanceHistoryView.as_view(), name='attendance-history'),
+    path('student/request-manual-attendance/', StudentRequestManualAttendanceView.as_view(), name='student-request-manual-attendance'),
+    path('student/manual-request-status/', StudentManualRequestStatusView.as_view(), name='student-manual-request-status'),
+
+    # ── Lecturer Attendance Session & Approvals ──
+    path('lecturer/check-in/', LecturerCheckInView.as_view(), name='lecturer-check-in'),
+    path('lecturer/start-attendance/', LecturerStartSessionView.as_view(), name='lecturer-start-attendance'),
+    path('lecturer/status/', LecturerAttendanceStatusView.as_view(), name='lecturer-status'),
+    path('lecturer/manual-requests/', LecturerManualRequestsView.as_view(), name='lecturer-manual-requests'),
+    path('lecturer/approve-manual-request/', LecturerApproveManualRequestView.as_view(), name='lecturer-approve-manual-request'),
+    path('lecturer/bulk-approve-manual-requests/', LecturerBulkApproveManualRequestsView.as_view(), name='lecturer-bulk-approve-manual-requests'),
+    path('lecturer/device-resets/', LecturerDeviceResetRequestsView.as_view(), name='lecturer-device-resets'),
+    path('lecturer/approve-device-reset/', LecturerApproveDeviceResetRequestView.as_view(), name='lecturer-approve-device-reset'),
+    path('lecturer/generate-dynamic-qr/', LecturerGenerateDynamicQRView.as_view(), name='lecturer-generate-dynamic-qr'),
+    path('student/verify-qr-attendance/', StudentVerifyQRAttendanceView.as_view(), name='student-verify-qr-attendance'),
+    path('lecturer/conducted-history/', LecturerConductedHistoryView.as_view(), name='lecturer-conducted-history'),
 
     # ── Classroom ─────────────────────────────────────────────────────
     # POST create (College Admins+ only)
@@ -154,6 +180,7 @@ urlpatterns = [
     path('exams/', ExamListCreateView.as_view(), name='exam-list-create'),
     path('exams/<int:pk>/', ExamDetailView.as_view(), name='exam-detail'),
     path('courses/', CourseListCreateView.as_view(), name='course-list-create'),
+    path('schedules/', ScheduleListView.as_view(), name='schedule-list'),
 
     # ── Analytics ─────────────────────────────────────────────────────
     path('analytics/overview/', OverviewKPIView.as_view(), name='analytics-overview'),

@@ -79,7 +79,7 @@ INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in S
 # ============================================================
 
 MIDDLEWARE = [
-    'django_tenants.middleware.main.TenantMainMiddleware',  # MUST be first
+    'campusflow.middleware.CampusFlowTenantMiddleware',  # MUST be first
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -94,10 +94,7 @@ MIDDLEWARE = [
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        # Ensure your custom authentication class is listed first.
-        # Replace 'your_app_name' with the actual name of your Django app.
-        # 'micronet.authentication.OneSessionJWTAuthentication',
-        # Keep as a fallback for other token types
+        'campusflow_app.authentication.TenantAwareJWTAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
@@ -259,6 +256,15 @@ ANYMAIL = {
     "BREVO_API_KEY": os.environ.get("BREVO_API_KEY", ""),
 }
 DEFAULT_FROM_EMAIL = "CampusFlow <soil@nagpuranalytics.com>"
+
+# ============================================================
+# FACE RECOGNITION & BIOMETRICS CONFIGURATION
+# ============================================================
+FACE_SIMILARITY_THRESHOLD = 0.55
+INSIGHTFACE_MODEL_NAME = "buffalo_l"
+INSIGHTFACE_MODEL_ROOT = BASE_DIR / "models" / "insightface"
+LIVENESS_BLINK_THRESHOLD = 5.5
+
 
 # try:
 #     from .local_settings import *

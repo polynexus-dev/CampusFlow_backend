@@ -108,6 +108,24 @@ class StudentRegistrationView(generics.CreateAPIView):
         data['role'] = 'student'
         
         email = data.get('email', '').strip().lower()
+
+        # ── Auto-tenant routing by email domain ──
+        if connection.schema_name == 'public':
+            if not email or '@' not in email:
+                return Response({"error": "A valid email address is required for registration."}, status=status.HTTP_400_BAD_REQUEST)
+            email_domain = email.split('@')[-1]
+            
+            from tenants.models import Tenant
+            # Find the tenant with this permitted email domain
+            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
+            if not target_tenant:
+                return Response(
+                    {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Switch context to the target tenant's schema for the rest of this request
+            connection.set_tenant(target_tenant)
         
         # ── Domain Check ──
         tenant = getattr(connection, 'tenant', None)
@@ -308,6 +326,60 @@ class ResetDeviceLockView(APIView):
                 "student": profile.user.username
             },
             status=status.HTTP_200_OK
+        )
+
+
+class RequestBiometricResetView(APIView):
+    """
+    Allow a student to submit a request to reset their biometric data / device lock.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not hasattr(request.user, 'student_profile'):
+            return Response({"error": "Only students can view reset requests."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        profile = request.user.student_profile
+        from ..models.device_reset import DeviceResetRequest
+        
+        latest_request = DeviceResetRequest.objects.filter(student=profile).order_by('-requested_at').first()
+        if not latest_request:
+            return Response({"has_request": False, "status": None}, status=status.HTTP_200_OK)
+        
+        return Response({
+            "has_request": True,
+            "status": latest_request.status,
+            "requested_at": latest_request.requested_at,
+            "reason": latest_request.reason
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        if not hasattr(request.user, 'student_profile'):
+            return Response({"error": "Only students can submit biometric reset requests."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        profile = request.user.student_profile
+        reason = request.data.get('reason', 'Request biometric reset').strip()
+
+        from ..models.device_reset import DeviceResetRequest
+        
+        # Check if there is already a pending request
+        existing_request = DeviceResetRequest.objects.filter(student=profile, status='pending').first()
+        if existing_request:
+            return Response(
+                {"error": "You already have a pending biometric reset request. Please wait for review or contact your HOD/Admin."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create a new reset request
+        DeviceResetRequest.objects.create(
+            student=profile,
+            reason=reason,
+            status='pending'
+        )
+
+        return Response(
+            {"message": "Biometric reset request submitted successfully. Please wait for HOD/Admin review."},
+            status=status.HTTP_201_CREATED
         )
 
 

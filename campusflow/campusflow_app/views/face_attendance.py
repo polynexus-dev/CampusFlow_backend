@@ -3,6 +3,11 @@ import secrets
 import numpy as np
 from django.core.cache import cache
 from django.db import transaction
+from django.utils import timezone
+from django.shortcuts import get_object_or_404
+from datetime import timedelta
+from ..models.attendance_session import AttendanceSession
+from ..models.manual_attendance_request import ManualAttendanceRequest
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -205,6 +210,24 @@ class MarkAttendanceView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # ── Validate active session window ─────────────────────────────────
+        session = AttendanceSession.objects.filter(lecture=lecture).first()
+        if not session or not session.is_active:
+            return Response(
+                {"error": "Attendance window is not active. Please wait for the lecturer to start the attendance period."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        elapsed = timezone.now() - session.started_at
+        limit = timedelta(minutes=session.duration_minutes)
+        if elapsed > limit:
+            session.is_active = False
+            session.save()
+            return Response(
+                {"error": "Attendance window has expired. Please request manual attendance from the lecturer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # ── Check for duplicate attendance ─────────────────────────────────
         if Attendance.objects.filter(user=request.user, lecture=lecture).exists():
             return Response(
@@ -328,37 +351,37 @@ class MarkAttendanceView(APIView):
         # ── Step 7: Record result ─────────────────────────────────────────
         is_verified = is_match and liveness_passed
 
-        FaceAttendanceLog.objects.update_or_create(
-            student=student,
-            lecture=lecture,
-            defaults={
-                "confidence_score": best_score,
-                "is_verified": is_verified,
-                "liveness_passed": liveness_passed,
-            },
-        )
-
-        if is_verified:
-            # Also create standard attendance check-in record
-            device_id = request.data.get("device_id") or "Face Verification"
-            Attendance.objects.get_or_create(
-                user=request.user,
+        with transaction.atomic():
+            FaceAttendanceLog.objects.update_or_create(
+                student=student,
                 lecture=lecture,
                 defaults={
-                    "device_id": device_id,
-                    "is_geofence_valid": True,
-                    "attendance_type": "lecture_attendance"
-                }
+                    "confidence_score": best_score,
+                    "is_verified": is_verified,
+                    "liveness_passed": liveness_passed,
+                },
             )
 
-            message = f"Attendance verified successfully (confidence: {best_score:.2%})."
-            resp_status = status.HTTP_200_OK
-        else:
-            message = (
-                f"Face verification failed (confidence: {best_score:.2%}). "
-                "The photo does not match the registered face."
-            )
-            resp_status = status.HTTP_400_BAD_REQUEST
+            if is_verified:
+                # Also create standard attendance check-in record
+                device_id = request.data.get("device_id") or "Face Verification"
+                Attendance.objects.get_or_create(
+                    user=request.user,
+                    lecture=lecture,
+                    defaults={
+                        "device_id": device_id,
+                        "is_geofence_valid": True,
+                        "verification_method": "face_geofence"
+                    }
+                )
+                message = f"Attendance verified successfully (confidence: {best_score:.2%})."
+                resp_status = status.HTTP_200_OK
+            else:
+                message = (
+                    f"Face verification failed (confidence: {best_score:.2%}). "
+                    "The photo does not match the registered face."
+                )
+                resp_status = status.HTTP_400_BAD_REQUEST
 
         logger.info(
             "Attendance attempt — student=%s, lecture=%d, verified=%s, score=%.4f",
@@ -398,3 +421,75 @@ class AttendanceHistoryView(generics.ListAPIView):
         return FaceAttendanceLog.objects.filter(student=student).select_related(
             "lecture", "student__user"
         )
+
+
+class StudentRequestManualAttendanceView(APIView):
+    """
+    POST /api/student/request-manual-attendance/
+    Allows a student to request manual attendance review from the lecturer.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsStudent]
+
+    def post(self, request):
+        lecture_id = request.data.get("lecture_id")
+        reason = request.data.get("reason", "Missed/Failed biometric match").strip()
+
+        if not lecture_id:
+            return Response({"error": "lecture_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        lecture = get_object_or_404(Lecture, id=lecture_id)
+        student = request.user.student_profile
+
+        # Check if already marked present
+        if Attendance.objects.filter(user=request.user, lecture=lecture).exists():
+            return Response(
+                {"error": "You are already marked present for this lecture."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check for existing request
+        existing_request = ManualAttendanceRequest.objects.filter(student=student, lecture=lecture).first()
+        if existing_request:
+            return Response(
+                {"error": f"A request already exists with status: '{existing_request.status}'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ManualAttendanceRequest.objects.create(
+            student=student,
+            lecture=lecture,
+            reason=reason,
+            status='pending'
+        )
+
+        return Response(
+            {"message": "Manual attendance request submitted to the lecturer."},
+            status=status.HTTP_201_CREATED
+        )
+
+
+class StudentManualRequestStatusView(APIView):
+    """
+    GET /api/student/manual-request-status/?lecture_id=...
+    Checks the status of the student's manual attendance request for a specific lecture.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsStudent]
+
+    def get(self, request):
+        lecture_id = request.query_params.get("lecture_id")
+        if not lecture_id:
+            return Response({"error": "lecture_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        lecture = get_object_or_404(Lecture, id=lecture_id)
+        student = request.user.student_profile
+
+        req = ManualAttendanceRequest.objects.filter(student=student, lecture=lecture).first()
+        if not req:
+            return Response({"has_request": False, "status": None}, status=status.HTTP_200_OK)
+
+        return Response({
+            "has_request": True,
+            "status": req.status,
+            "reason": req.reason,
+            "requested_at": req.requested_at
+        }, status=status.HTTP_200_OK)

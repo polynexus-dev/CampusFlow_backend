@@ -67,14 +67,14 @@ class AttendanceMarkView(APIView):
         location = get_object_or_404(Location, location_id=location_id)
 
         if location.is_premises_entry:
-            Attendance.objects.create(user=student, scanned_location=location, attendance_type='premises_entry', is_geofence_valid=True)
+            Attendance.objects.create(user=student, is_geofence_valid=True, verification_method='manual')
             return Response({'detail': 'Premises entry attendance marked.'}, status=status.HTTP_201_CREATED)
         elif location.is_classroom_entry:
-            Attendance.objects.create(user=student, scanned_location=location, attendance_type='classroom_entry', is_geofence_valid=True)
+            Attendance.objects.create(user=student, is_geofence_valid=True, verification_method='manual')
             return Response({'detail': 'Classroom attendance marked.'}, status=status.HTTP_201_CREATED)
         elif lecture_id is not None:
             lecture = get_object_or_404(Lecture, id=lecture_id)
-            Attendance.objects.create(user=student, scanned_location=location, attendance_type='lecture_attendance', lecture=lecture, is_geofence_valid=True)
+            Attendance.objects.create(user=student, lecture=lecture, is_geofence_valid=True, verification_method='manual')
             return Response({'detail': 'Lecture attendance marked.'}, status=status.HTTP_201_CREATED)
 
         return Response({'detail': 'Invalid attendance marking request.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -84,24 +84,21 @@ class AllAttendanceView(APIView):
     """
     View ALL attendance records (for reporting/admin purposes).
     Only Faculty and above can access this — students cannot see other students' records.
-    Supports optional filtering by user_id, date, and attendance_type.
+    Supports optional filtering by user_id and date.
     """
     permission_classes = [IsAuthenticated, IsFacultyOrAbove]
 
     def get(self, request):
-        qs = Attendance.objects.all().select_related('user', 'scanned_location')
+        qs = Attendance.objects.all().select_related('user')
 
         # Optional filters
         user_id = request.query_params.get('user_id')
         date = request.query_params.get('date')
-        attendance_type = request.query_params.get('type')
 
         if user_id:
             qs = qs.filter(user__id=user_id)
         if date:
             qs = qs.filter(check_in_time__date=date)
-        if attendance_type:
-            qs = qs.filter(attendance_type=attendance_type)
 
         serializer = AttendanceSerializer(qs.order_by('-check_in_time'), many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -191,7 +188,7 @@ class LectureCheckinByCodeView(APIView):
             lecture=lecture,
             device_id=device_id,
             is_geofence_valid=True,
-            attendance_type='lecture_attendance'
+            verification_method='face_geofence'
         )
 
         return Response({"detail": "Attendance marked successfully!"}, status=status.HTTP_201_CREATED)

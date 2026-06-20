@@ -26,3 +26,4 @@ from .payroll import SalaryStructure, Payslip
 from .exam import ExamType, Exam
 from .assignment import Assignment
 from .submission import AssignmentSubmission
+from .manual_attendance_request import ManualAttendanceRequest

@@ -12,11 +12,13 @@ from .models.profile import StudentProfile, TeachingStaffProfile, NonTeachingSta
 from .models.attendance import Attendance
 from .models.location import Location
 from django.db import transaction, connection
+from django.db.models import Q
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from .models.classroom import Classroom
 from .models.lecture import Lecture
 from .models.attendance_log import FaceAttendanceLog
+from .models.schedule import Schedule
 
 
 class ClassroomSerializer(serializers.ModelSerializer):
@@ -26,13 +28,13 @@ class ClassroomSerializer(serializers.ModelSerializer):
         read_only_fields = ('id',)
 
 class LectureSerializer(serializers.ModelSerializer):
-    classroom_name = serializers.CharField(required=False)
+    classroom_name = serializers.CharField(source='classroom.name', read_only=True)
     faculty_username = serializers.CharField(source='faculty.username', read_only=True)
     teacher_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Lecture
-        fields = ('id', 'name', 'subject', 'faculty', 'faculty_username', 'teacher_name', 'classroom', 'start_time', 'end_time', 'code', 'created_at')
+        fields = ('id', 'name', 'subject', 'faculty', 'faculty_username', 'teacher_name', 'classroom', 'classroom_name', 'start_time', 'end_time', 'code', 'created_at')
         read_only_fields = ('id', 'code', 'created_at')
         extra_kwargs = {
             'classroom': {'required': True, 'allow_null': False}
@@ -118,8 +120,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         user = None
         target_tenant = None
 
-        # First try to find user in current schema
-        user = User.objects.filter(username=username).first()
+        # First try to find user in current schema (search by username or email)
+        user = User.objects.filter(Q(username=username) | Q(email=username)).first()
         if user:
             target_tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
         elif connection.schema_name == 'public':
@@ -127,7 +129,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             from django_tenants.utils import schema_context
             for tenant in Tenant.objects.exclude(schema_name='public'):
                 with schema_context(tenant.schema_name):
-                    u = User.objects.filter(username=username).first()
+                    u = User.objects.filter(Q(username=username) | Q(email=username)).first()
                     if u:
                         user = u
                         target_tenant = tenant
@@ -191,6 +193,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         if not user.check_password(password):
             raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
 
+        attrs['username'] = user.username
         data = super().validate(attrs)
 
         data['user_id'] = user.id
@@ -200,9 +203,11 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             try:
                 data['tenant_domain'] = target_tenant.get_primary_domain().domain
                 data['tenant_code'] = target_tenant.code
+                data['tenant_schema'] = target_tenant.schema_name  # Used by mobile app for X-Tenant header
             except Exception:
                 data['tenant_domain'] = None
                 data['tenant_code'] = None
+                data['tenant_schema'] = target_tenant.schema_name if target_tenant else None
 
         # --- SECURITY: AUTO-DEVICE BINDING ---
         if user_group and user_group.name == 'student':
@@ -240,6 +245,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             if user_group.name == 'student':
                 data['profile']['student_id'] = profile_data.student_id
                 data['profile']['program_enrolled_in'] = profile_data.program_enrolled_in if hasattr(profile_data, 'program_enrolled_in') else None
+                data['profile']['is_face_registered'] = getattr(profile_data, 'is_face_registered', False)
+                data['profile']['locked_device_id'] = getattr(profile_data, 'locked_device_id', None)
             elif user_group.name in ['Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']:
                 data['profile']['employee_id'] = profile_data.employee_id
 
@@ -511,7 +518,6 @@ class LocationSerializer(serializers.ModelSerializer):
         read_only_fields = ['department_owner_name']
 
 class AttendanceSerializer(serializers.ModelSerializer):
-    scanned_location_details = LocationSerializer(source='scanned_location', read_only=True)
     user_username = serializers.CharField(source='user.username', read_only=True)
     user_role = serializers.SerializerMethodField()
 
@@ -519,11 +525,10 @@ class AttendanceSerializer(serializers.ModelSerializer):
         model = Attendance
         fields = [
             'id', 'user', 'user_username', 'user_role',
-            'scanned_location', 'scanned_location_details',
-            'schedule', 'lecture', 'check_in_time', 'check_in_lat', 'check_in_lon',
-            'is_geofence_valid', 'attendance_type'
+            'schedule', 'lecture', 'check_in_time', 'check_out_time',
+            'is_geofence_valid', 'device_id', 'verification_method'
         ]
-        read_only_fields = ['id', 'user_username', 'user_role', 'check_in_time', 'is_geofence_valid', 'scanned_location_details']
+        read_only_fields = ['id', 'user_username', 'user_role', 'check_in_time', 'is_geofence_valid']
 
     def get_user_role(self, obj):
         if hasattr(obj.user, 'student_profile'):
@@ -612,3 +617,25 @@ class AttendanceResultSerializer(serializers.Serializer):
     confidence_score = serializers.FloatField()
     liveness_passed = serializers.BooleanField()
     message = serializers.CharField()
+
+
+class ScheduleSerializer(serializers.ModelSerializer):
+    course_code = serializers.CharField(source='course.course_code', read_only=True)
+    course_name = serializers.CharField(source='course.course_name', read_only=True)
+    classroom_name = serializers.CharField(source='classroom.name', read_only=True)
+    classroom_code = serializers.CharField(source='classroom.code', read_only=True)
+    faculty_name = serializers.SerializerMethodField()
+    faculty_username = serializers.CharField(source='faculty.username', read_only=True)
+
+    class Meta:
+        model = Schedule
+        fields = [
+            'id', 'course', 'course_code', 'course_name',
+            'faculty', 'faculty_name', 'faculty_username',
+            'classroom', 'classroom_name', 'classroom_code',
+            'day_of_week', 'start_time', 'end_time',
+            'semester', 'academic_year'
+        ]
+
+    def get_faculty_name(self, obj):
+        return obj.faculty.get_full_name() or obj.faculty.username

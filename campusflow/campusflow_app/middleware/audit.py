@@ -12,15 +12,18 @@ class AuditMiddleware(MiddlewareMixin):
     """
     def process_request(self, request):
         request._audit_token = _current_request.set(request)
+        request._audit_token_used = False
 
     def process_response(self, request, response):
-        if hasattr(request, '_audit_token'):
+        if hasattr(request, '_audit_token') and not getattr(request, '_audit_token_used', False):
             _current_request.reset(request._audit_token)
+            request._audit_token_used = True
         return response
 
     def process_exception(self, request, exception):
-        if hasattr(request, '_audit_token'):
+        if hasattr(request, '_audit_token') and not getattr(request, '_audit_token_used', False):
             _current_request.reset(request._audit_token)
+            request._audit_token_used = True
 
 
 def get_current_request():
