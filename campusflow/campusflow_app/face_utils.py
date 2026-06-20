@@ -564,16 +564,11 @@ def check_head_motion(
     """
     Two-frame liveness check for head-motion challenges.
 
-    frame1 — baseline captured before the challenge action
-    frame2 — captured after the student performs the action
+    frame1 — baseline captured before the challenge action (must be front-facing)
+    frame2 — captured after the student performs the action (must match challenge pose)
 
-    Nose displacement is normalised by inter-eye distance so the check is
-    scale-invariant (works at different camera distances).
-
-    challenge_type:
-        'nod'        — nose must move downward  (dy > threshold)
-        'turn_left'  — nose must move rightward (dx > threshold, front-cam mirrored)
-        'turn_right' — nose must move leftward  (dx < -threshold)
+    Validates both absolute coordinate displacement and face pose (yaw/pitch angles)
+    to prevent spoofing using static profile photos.
     """
     analyzer = _get_face_analyzer()
 
@@ -592,6 +587,19 @@ def check_head_motion(
             "Please centre your face in the oval and try again."
         )
 
+    # 1. Enforce front-facing pose on baseline frame (frame1)
+    yaw1 = pitch1 = None
+    if hasattr(face1, "pose") and face1.pose is not None:
+        yaw1, pitch1, _ = float(face1.pose[0]), float(face1.pose[1]), float(face1.pose[2])
+        
+        # Verify baseline is looking straight
+        if abs(yaw1) > 15.0 or abs(pitch1) > 15.0:
+            logger.warning("Baseline pose invalid: yaw=%.1f, pitch=%.1f. Failing check.", yaw1, pitch1)
+            return False, 0.0, (
+                "Please look straight at the camera at the start of the challenge. "
+                "Do not start with your head turned."
+            )
+
     kps1 = face1.kps.astype(np.float32)
 
     # Scale-invariant normalisation by inter-eye distance
@@ -600,7 +608,7 @@ def check_head_motion(
         eye_dist = 1.0
 
     nose1 = kps1[2]
-    THRESHOLD = 0.25   # ≥25% of inter-eye distance — requires conscious movement
+    THRESHOLD = 0.22   # Adjusted slightly to be more responsive
 
     img2 = _decode_image(frame2_bytes)
     face2 = _largest(analyzer.get(img2))
@@ -612,25 +620,58 @@ def check_head_motion(
     dx = float(nose2[0] - nose1[0]) / eye_dist
     dy = float(nose2[1] - nose1[1]) / eye_dist
 
+    # 2. Extract pose for final frame (frame2)
+    yaw2 = pitch2 = None
+    if hasattr(face2, "pose") and face2.pose is not None:
+        yaw2, pitch2, _ = float(face2.pose[0]), float(face2.pose[1]), float(face2.pose[2])
+
+    pose_passed = True
+    pose_msg = ""
+
     if challenge_type == "nod":
-        score, passed = dy, dy > THRESHOLD
+        motion_passed = dy > THRESHOLD
+        if pitch2 is not None and pitch1 is not None:
+            # Looking down leads to a positive pitch increase
+            pose_passed = pitch2 >= 10.0 and (pitch2 - pitch1) >= 8.0
+            pose_msg = "Please nod your head clearly downward."
+        score = dy
         fail_msg = "No head nod detected. Please nod your head downward once."
+
     elif challenge_type == "turn_left":
-        score, passed = dx, dx > THRESHOLD
+        motion_passed = dx > THRESHOLD
+        if yaw2 is not None:
+            # Mirror front camera: user turns left -> nose points right -> yaw > 0 (>= 15 degrees)
+            pose_passed = yaw2 >= 15.0
+            pose_msg = "Please turn your head clearly to the LEFT."
+        score = dx
         fail_msg = "No head turn detected. Please turn your head to the LEFT."
+
     elif challenge_type == "turn_right":
-        score, passed = -dx, dx < -THRESHOLD
+        motion_passed = dx < -THRESHOLD
+        if yaw2 is not None:
+            # Mirror front camera: user turns right -> nose points left -> yaw < 0 (<= -15 degrees)
+            pose_passed = yaw2 <= -15.0
+            pose_msg = "Please turn your head clearly to the RIGHT."
+        score = -dx
         fail_msg = "No head turn detected. Please turn your head to the RIGHT."
+
     else:
         return False, 0.0, f"Unknown challenge type: {challenge_type}"
 
+    # Verify both motion displacement AND head pose angle transition
+    passed = motion_passed and pose_passed
+    actual_fail_msg = pose_msg if (motion_passed and not pose_passed) else fail_msg
+
     logger.warning(
-        "HEAD MOTION | challenge=%-12s | dx=%.3f dy=%.3f → %s",
-        challenge_type, dx, dy, "LIVE" if passed else "FAIL",
+        "HEAD MOTION | challenge=%-12s | dx=%.3f dy=%.3f | yaw1=%.1f->yaw2=%.1f, pitch1=%.1f->pitch2=%.1f | passed=%s",
+        challenge_type, dx, dy, 
+        yaw1 or 0, yaw2 or 0, pitch1 or 0, pitch2 or 0,
+        "LIVE" if passed else "FAIL"
     )
 
     if not passed:
-        return False, score, fail_msg
+        return False, score, actual_fail_msg
+
     return True, score, f"Head motion verified ({challenge_type}): score={score:.3f}."
 
 
