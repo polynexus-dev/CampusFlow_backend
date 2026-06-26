@@ -1,0 +1,22 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8200:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+    command: python manage.py runserver 0.0.0.0:8000
+
+  db:
+    image: postgres:17
+    env_file:
+      - .env
+    volumes:
+      - CampusFlow_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  CampusFlow_postgres_data:
