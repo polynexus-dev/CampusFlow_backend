@@ -41,7 +41,7 @@
   <text x="120" y="64" font-family="Poppins, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="600" fill="#FFFFFF" letter-spacing="-0.5">CampusFl</text>
 
   <!-- "o" styled as Infinity Loop (∞) -->
-  <path d="M 326 62 C 326 53, 338 53, 344 62 C 350 71, 362 71, 362 62 C 362 53, 350 53, 344 62 C 338 71, 326 71, 326 62 Z" 
+  <path d="M 288 62 C 288 53, 300 53, 306 62 C 312 71, 324 71, 324 62 C 324 53, 312 53, 306 62 C 300 71, 288 71, 288 62 Z" 
         fill="none" 
         stroke="url(#infinity-grad)" 
         stroke-width="7" 
@@ -50,7 +50,7 @@
         filter="drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.4))" />
 
   <!-- "w" -->
-  <text x="368" y="64" font-family="Poppins, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="600" fill="#FFFFFF" letter-spacing="-0.5">w</text>
+  <text x="328" y="64" font-family="Poppins, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="600" fill="#FFFFFF" letter-spacing="-0.5">w</text>
 
   <!-- 3. Subtext: "POWERED BY POLYNEXUS" -->
   <text x="122" y="86" font-family="Poppins, 'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="500" fill="#c3cefa" letter-spacing="4.5">POWERED BY POLYNEXUS</text>
