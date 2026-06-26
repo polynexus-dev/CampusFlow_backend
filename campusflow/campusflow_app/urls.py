@@ -24,8 +24,7 @@ from .views.lecturer_attendance import (
     LecturerAttendanceStatusView, LecturerManualRequestsView,
     LecturerApproveManualRequestView, LecturerConductedHistoryView,
     LecturerBulkApproveManualRequestsView, LecturerDeviceResetRequestsView,
-    LecturerApproveDeviceResetRequestView, LecturerGenerateDynamicQRView,
-    StudentVerifyQRAttendanceView
+    LecturerApproveDeviceResetRequestView
 )
 from .views.classroom import ClassroomCreateView, CheckAttendanceView, ClassroomListView, ClassroomLocationValidationView
 from .views.lecture import (
@@ -123,8 +122,6 @@ urlpatterns = [
     path('lecturer/bulk-approve-manual-requests/', LecturerBulkApproveManualRequestsView.as_view(), name='lecturer-bulk-approve-manual-requests'),
     path('lecturer/device-resets/', LecturerDeviceResetRequestsView.as_view(), name='lecturer-device-resets'),
     path('lecturer/approve-device-reset/', LecturerApproveDeviceResetRequestView.as_view(), name='lecturer-approve-device-reset'),
-    path('lecturer/generate-dynamic-qr/', LecturerGenerateDynamicQRView.as_view(), name='lecturer-generate-dynamic-qr'),
-    path('student/verify-qr-attendance/', StudentVerifyQRAttendanceView.as_view(), name='student-verify-qr-attendance'),
     path('lecturer/conducted-history/', LecturerConductedHistoryView.as_view(), name='lecturer-conducted-history'),
 
     # ── Classroom ─────────────────────────────────────────────────────

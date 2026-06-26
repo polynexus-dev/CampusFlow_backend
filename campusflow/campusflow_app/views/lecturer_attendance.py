@@ -93,6 +93,13 @@ class LecturerStartSessionView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Generate a random 6-character code if not already set
+        if not lecture.code:
+            import random
+            import string
+            lecture.code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            lecture.save()
+
         # Create/restart active attendance session (3 minutes)
         session, created = AttendanceSession.objects.update_or_create(
             lecture=lecture,
@@ -164,7 +171,8 @@ class LecturerAttendanceStatusView(APIView):
             "seconds_remaining": seconds_remaining,
             "marked_students_count": len(marked_students),
             "marked_students": marked_students,
-            "pending_requests_count": pending_requests_count
+            "pending_requests_count": pending_requests_count,
+            "code": lecture.code
         }, status=status.HTTP_200_OK)
 
 
@@ -429,121 +437,4 @@ class LecturerApproveDeviceResetRequestView(APIView):
             req.reviewed_at = timezone.now()
             req.save()
             return Response({"message": "Device reset rejected."}, status=status.HTTP_200_OK)
-
-
-class LecturerGenerateDynamicQRView(APIView):
-    """
-    GET /api/lecturer/generate-dynamic-qr/?lecture_id=...
-    Generates a dynamic 15-second rotating QR code for the given lecture.
-    Returns base64 PNG data URL.
-    """
-    permission_classes = [permissions.IsAuthenticated, IsFacultyOrAbove]
-
-    def get(self, request):
-        import hashlib
-        import time
-        import qrcode
-        import base64
-        import json
-        from io import BytesIO
-        from django.conf import settings
-
-        lecture_id = request.query_params.get("lecture_id")
-        if not lecture_id:
-            return Response({"error": "lecture_id is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        lecture = get_object_or_404(Lecture, id=lecture_id)
-
-        # Check if the session is currently active
-        session = AttendanceSession.objects.filter(lecture=lecture, is_active=True).first()
-        if not session:
-            return Response({"error": "No active attendance session found for this lecture. Start verification first."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Compute dynamic 15-second rotating code
-        now_ts = time.time()
-        interval = int(now_ts) // 15
-        expires_in = 15 - (int(now_ts) % 15)
-
-        # Cryptographic sign
-        data_str = f"{lecture_id}-{interval}-{settings.SECRET_KEY}"
-        token = hashlib.sha256(data_str.encode('utf-8')).hexdigest()[:16]
-
-        # Render QR code image containing JSON payload
-        qr_payload = {
-            "lecture_id": int(lecture_id),
-            "token": token
-        }
-        
-        qr = qrcode.QRCode(box_size=8, border=1)
-        qr.add_data(json.dumps(qr_payload))
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-
-        buffered = BytesIO()
-        img.save(buffered, format="PNG")
-        qr_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        qr_image_data = f"data:image/png;base64,{qr_base64}"
-
-        return Response({
-            "qr_image": qr_image_data,
-            "expires_in": expires_in
-        }, status=status.HTTP_200_OK)
-
-
-class StudentVerifyQRAttendanceView(APIView):
-    """
-    POST /api/student/verify-qr-attendance/
-    Allows a student to scan the lecturer's rotating QR code to verify proximity.
-    """
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request):
-        import hashlib
-        import time
-        from django.conf import settings
-
-        lecture_id = request.data.get("lecture_id")
-        token = request.data.get("token")
-
-        if not lecture_id or not token:
-            return Response({"error": "lecture_id and token are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Verify the student has a student profile
-        if not hasattr(request.user, 'student_profile'):
-            return Response({"error": "Only students can mark attendance."}, status=status.HTTP_400_BAD_REQUEST)
-
-        student_profile = request.user.student_profile
-        lecture = get_object_or_404(Lecture, id=lecture_id)
-
-        # Validate token against current and previous 15-second buckets
-        now_ts = time.time()
-        current_interval = int(now_ts) // 15
-        is_token_valid = False
-
-        for offset in [0, -1, 1]:  # check current, previous, and next (for minor clock drifts)
-            interval = current_interval + offset
-            data_str = f"{lecture_id}-{interval}-{settings.SECRET_KEY}"
-            expected = hashlib.sha256(data_str.encode('utf-8')).hexdigest()[:16]
-            if token == expected:
-                is_token_valid = True
-                break
-
-        if not is_token_valid:
-            return Response({"error": "The scanned QR code has expired or is invalid. Please scan the active QR code again."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if attendance was already marked
-        existing = Attendance.objects.filter(user=request.user, lecture=lecture).exists()
-        if existing:
-            return Response({"message": "Attendance already marked for this lecture."}, status=status.HTTP_200_OK)
-
-        # Mark attendance successfully under 'qr_fallback' verification method
-        Attendance.objects.create(
-            user=request.user,
-            lecture=lecture,
-            is_geofence_valid=True,
-            verification_method='qr_fallback',
-            device_id=request.data.get("device_id", "QR Scanned Fallback")
-        )
-
-        return Response({"message": "Attendance marked successfully via QR code scanner!"}, status=status.HTTP_200_OK)
 
