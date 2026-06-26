@@ -19,10 +19,10 @@
     </style>
   </defs>
 
-  <!-- 1. Centered Graduation Cap (Grid Network Style) -->
+  <!-- 1. Centered Graduation Cap (Professional Negative-Space Grid Style) -->
   <g id="cap-icon">
     <!-- Cap Under-side/Base Outline -->
-    <path d="M 210,93 L 210,115 C 210,126 290,126 290,115 L 290,93" fill="none" stroke="#611f69" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" />
+    <path d="M 210,95 L 210,117 C 210,128 290,128 290,117 L 290,95" fill="none" stroke="#611f69" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" />
 
     <!-- Tassel String -->
     <path d="M 250,75 L 190,85 L 190,115" fill="none" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -30,17 +30,18 @@
     <!-- Tassel Tip -->
     <path d="M 185,115 L 195,115 L 195,130 C 195,133 185,133 185,130 Z" fill="#611f69" />
 
-    <!-- Grid Cap Board (Rhombus Outline + Grid Lines) -->
-    <polygon points="250,40 330,75 250,110 170,75" fill="none" stroke="#611f69" stroke-width="6" stroke-linejoin="round" />
-    <line x1="170" y1="75" x2="330" y2="75" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" />
-    <line x1="250" y1="40" x2="250" y2="110" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" />
-
-    <!-- Grid Nodes (Circles at vertices and center) -->
-    <circle cx="250" cy="40" r="7" fill="#FFFFFF" stroke="#611f69" stroke-width="4" />
-    <circle cx="330" cy="75" r="7" fill="#FFFFFF" stroke="#611f69" stroke-width="4" />
-    <circle cx="250" cy="110" r="7" fill="#FFFFFF" stroke="#611f69" stroke-width="4" />
-    <circle cx="170" cy="75" r="7" fill="#FFFFFF" stroke="#611f69" stroke-width="4" />
-    <circle cx="250" cy="75" r="7" fill="#FFFFFF" stroke="#611f69" stroke-width="4" />
+    <!-- 2x2 Grid Cap Board (4 floating diamonds separated by negative space) -->
+    <!-- Top Diamond -->
+    <polygon points="250,43 286,59 250,72 214,59" fill="#611f69" />
+    
+    <!-- Right Diamond -->
+    <polygon points="289,60 326,76 290,92 253,76" fill="#611f69" />
+    
+    <!-- Bottom Diamond -->
+    <polygon points="250,78 286,94 250,107 214,94" fill="#611f69" />
+    
+    <!-- Left Diamond -->
+    <polygon points="211,60 247,76 210,92 174,76" fill="#611f69" />
   </g>
 
   <!-- 2. Centered Typography -->
