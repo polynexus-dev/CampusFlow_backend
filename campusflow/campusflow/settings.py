@@ -28,7 +28,17 @@ SECRET_KEY = "django-insecure-=ixi*^lb0h(3^%d=xg6xustfjolujglwpi7fu^#shkmt^@@wz@
 DEBUG = True
 
 ALLOWED_HOSTS = ['*']
-CSRF_TRUSTED_ORIGINS = ['https://campusflow.backend.polynexus.in']
+CSRF_TRUSTED_ORIGINS = [
+    'https://campusflow.backend.polynexus.in',
+    'https://campusflow.polynexus.in',
+    'https://*.campusflow.polynexus.in',
+    'https://campusnexus.api.polynexus',
+    'https://campusnexus.polynexus',
+    'https://*.campusnexus.polynexus',
+    'https://campusnexus.api.polynexus.in',
+    'https://campusnexus.polynexus.in',
+    'https://*.campusnexus.polynexus.in',
+]
 
 CORS_ALLOW_ALL_ORIGINS = True
 
