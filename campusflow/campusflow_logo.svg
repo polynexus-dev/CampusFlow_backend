@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 120" width="100%" height="100%">
+  <defs>
+    <!-- Primary Deep Purple Gradient -->
+    <linearGradient id="purple-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#4a154b" />
+    </linearGradient>
+
+    <!-- Accent Plum/Magenta Gradient -->
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d946ef" />
+      <stop offset="100%" stop-color="#611f69" />
+    </linearGradient>
+
+    <!-- Infinity Loop Gradient -->
+    <linearGradient id="infinity-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#611f69" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#d946ef" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. Geometric Graduation Cap Icon -->
+  <g transform="translate(10, 0)">
+    <!-- Cap Board (Rhombus) -->
+    <polygon points="60,25 100,45 60,65 20,45" fill="url(#purple-grad)" filter="drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.3))" />
+    
+    <!-- Cap Under-side/Base -->
+    <path d="M38,54 C38,64 82,64 82,54" fill="none" stroke="url(#accent-grad)" stroke-width="8" stroke-linecap="round" />
+    <path d="M38,53.5 L38,62 C38,68 82,68 82,62 L82,53.5" fill="url(#purple-grad)" />
+
+    <!-- Tassel String -->
+    <path d="M60,45 L95,48 L95,64" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" />
+    
+    <!-- Tassel Tip -->
+    <rect x="92" y="64" width="6" height="12" rx="2" fill="url(#accent-grad)" />
+  </g>
+
+  <!-- 2. Typography -->
+  <!-- "CampusFl" -->
+  <text x="120" y="64" font-family="Poppins, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="600" fill="#FFFFFF" letter-spacing="-0.5">CampusFl</text>
+
+  <!-- "o" styled as Infinity Loop (∞) -->
+  <path d="M 326 62 C 326 53, 338 53, 344 62 C 350 71, 362 71, 362 62 C 362 53, 350 53, 344 62 C 338 71, 326 71, 326 62 Z" 
+        fill="none" 
+        stroke="url(#infinity-grad)" 
+        stroke-width="7" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        filter="drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.4))" />
+
+  <!-- "w" -->
+  <text x="368" y="64" font-family="Poppins, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="600" fill="#FFFFFF" letter-spacing="-0.5">w</text>
+
+  <!-- 3. Subtext: "POWERED BY POLYNEXUS" -->
+  <text x="122" y="86" font-family="Poppins, 'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="500" fill="#c3cefa" letter-spacing="4.5">POWERED BY POLYNEXUS</text>
+</svg>
