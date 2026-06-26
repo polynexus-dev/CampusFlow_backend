@@ -201,9 +201,24 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['roleName'] = user_group.name if user_group else "Superuser"
         if target_tenant:
             try:
-                data['tenant_domain'] = target_tenant.get_primary_domain().domain
+                schema = target_tenant.schema_name
+
+                # Dynamically compute the redirect domain based on the current request host.
+                # This ensures the redirect works correctly in both dev and production
+                # without relying on potentially stale domain values stored in the database.
+                #
+                # Dev:        request host = "localhost"           → "mit.localhost"
+                # Production: request host = "campusflow.polynexus.in" → "mit.campusflow.polynexus.in"
+                request_host = request.get_host().split(':')[0]  # strip port if present
+
+                if request_host in ('localhost', '127.0.0.1'):
+                    computed_domain = f"{schema}.localhost"
+                else:
+                    computed_domain = f"{schema}.{request_host}"
+
+                data['tenant_domain'] = computed_domain
                 data['tenant_code'] = target_tenant.code
-                data['tenant_schema'] = target_tenant.schema_name  # Used by mobile app for X-Tenant header
+                data['tenant_schema'] = schema  # Used by mobile app for X-Tenant header
             except Exception:
                 data['tenant_domain'] = None
                 data['tenant_code'] = None
