@@ -199,22 +199,29 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['user_id'] = user.id
         data['user'] = user.username
         data['roleName'] = user_group.name if user_group else "Superuser"
-        if target_tenant:
+        if target_tenant and target_tenant.schema_name != 'public':
             try:
                 schema = target_tenant.schema_name
 
-                # Dynamically compute the redirect domain based on the current request host.
-                # This ensures the redirect works correctly in both dev and production
-                # without relying on potentially stale domain values stored in the database.
+                # Use the Origin (or Referer) header to get the FRONTEND domain.
+                # request.get_host() returns the BACKEND host — we need the frontend host
+                # so the redirect URL points to the correct frontend subdomain.
                 #
-                # Dev:        request host = "localhost"           → "mit.localhost"
-                # Production: request host = "campusflow.polynexus.in" → "mit.campusflow.polynexus.in"
-                request_host = request.get_host().split(':')[0]  # strip port if present
+                # Dev:        Origin = "http://localhost:5173"         → "mit.localhost"
+                # Production: Origin = "https://campusflow.polynexus.in" → "mit.campusflow.polynexus.in"
+                from urllib.parse import urlparse
+                origin = request.headers.get('Origin') or request.headers.get('Referer', '')
+                parsed_origin = urlparse(origin)
+                frontend_host = parsed_origin.hostname  # strips port automatically
 
-                if request_host in ('localhost', '127.0.0.1'):
+                # Fallback: strip known backend prefix from request host
+                if not frontend_host:
+                    frontend_host = request.get_host().split(':')[0]
+
+                if frontend_host in ('localhost', '127.0.0.1'):
                     computed_domain = f"{schema}.localhost"
                 else:
-                    computed_domain = f"{schema}.{request_host}"
+                    computed_domain = f"{schema}.{frontend_host}"
 
                 data['tenant_domain'] = computed_domain
                 data['tenant_code'] = target_tenant.code
@@ -223,6 +230,12 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 data['tenant_domain'] = None
                 data['tenant_code'] = None
                 data['tenant_schema'] = target_tenant.schema_name if target_tenant else None
+        elif target_tenant:
+            # Public schema / superuser: no cross-domain redirect needed.
+            # They are already on the correct host.
+            data['tenant_domain'] = None
+            data['tenant_code'] = target_tenant.code
+            data['tenant_schema'] = target_tenant.schema_name
 
         # --- SECURITY: AUTO-DEVICE BINDING ---
         if user_group and user_group.name == 'student':
