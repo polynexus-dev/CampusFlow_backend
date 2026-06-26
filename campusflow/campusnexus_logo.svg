@@ -1,69 +1,44 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 280" width="100%" height="100%">
   <defs>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&amp;display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&amp;display=swap');
       .cf-title {
         font-family: 'Poppins', 'Segoe UI', Roboto, sans-serif;
         font-weight: 600;
         font-size: 52px;
+        text-anchor: middle;
       }
       .cf-sub {
         font-family: 'Poppins', 'Segoe UI', Roboto, sans-serif;
-        font-weight: 400;
-        font-size: 16px;
+        font-weight: 300;
+        font-size: 14px;
         text-anchor: middle;
         fill: #a78bfa;
-        letter-spacing: 0.5px;
+        letter-spacing: 3px;
       }
     </style>
   </defs>
 
-  <!-- 1. Centered Graduation Cap (Nexus Central Hub Style) -->
-  <g id="cap-icon">
-    <!-- Cap Under-side/Base Outline -->
-    <path d="M 210,95 L 210,117 C 210,128 290,128 290,117 L 290,95" fill="none" stroke="#611f69" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" />
-
+  <!-- 1. Centered Graduation Cap -->
+  <g transform="translate(250, 78)">
+    <!-- Cap Board (Rhombus Outline) -->
+    <polygon points="0,-28 68,5 0,38 -68,5" fill="none" stroke="#611f69" stroke-width="6" stroke-linejoin="round"/>
+    <!-- Cap Under-side -->
+    <path d="M -36,20 L -36,38 C -36,46 36,46 36,38 L 36,20" fill="none" stroke="#611f69" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     <!-- Tassel String -->
-    <path d="M 250,75 L 190,85 L 190,115" fill="none" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
-    
+    <path d="M 0,5 L -50,13 L -50,38" fill="none" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
     <!-- Tassel Tip -->
-    <path d="M 185,115 L 195,115 L 195,130 C 195,133 185,133 185,130 Z" fill="#611f69" />
-
-    <!-- Outer Cap Board Rhombus -->
-    <polygon points="250,40 330,75 250,110 170,75" fill="none" stroke="#611f69" stroke-width="6" stroke-linejoin="round" />
-
-    <!-- Central Nexus Hub (Solid Circle) -->
-    <circle cx="250" cy="75" r="9" fill="#611f69" />
-
-    <!-- Connecting Channels with clean negative-space gaps -->
-    <line x1="250" y1="40" x2="250" y2="61" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" />
-    <line x1="330" y1="75" x2="264" y2="75" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" />
-    <line x1="250" y1="110" x2="250" y2="89" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" />
-    <line x1="170" y1="75" x2="236" y2="75" stroke="#611f69" stroke-width="4.5" stroke-linecap="round" />
+    <path d="M -55,38 L -45,38 L -45,50 C -45,53 -55,53 -55,50 Z" fill="#611f69"/>
   </g>
 
-  <!-- 2. Typography using natural spacing with invisible 'x' placeholder -->
-  <!-- Center is maintained, and letter 'x' space is reserved -->
-  <text x="250" y="190" class="cf-title" text-anchor="middle">
-    <tspan fill="#611f69">Campus</tspan><tspan fill="#FFFFFF">Ne</tspan><tspan fill="none">x</tspan><tspan fill="#FFFFFF">us</tspan>
+  <!-- 2. Wordmark -->
+  <text x="250" y="192" class="cf-title">
+    <tspan fill="#611f69">Campus</tspan><tspan fill="#FFFFFF">Nexus</tspan>
   </text>
 
-  <!-- Custom Infinity-X (Centered precisely on the invisible 'x' position for Poppins) -->
-  <g id="infinity-x" transform="translate(352.7, 168)">
-    <!-- 1st Diagonal: Clean Crossing Stroke (Top-Left to Bottom-Right) -->
-    <line x1="-12" y1="-12" x2="12" y2="12" stroke="#611f69" stroke-width="5" stroke-linecap="round" />
-    
-    <!-- 2nd Diagonal: Tilted Infinity Loop (Bottom-Left to Top-Right) -->
-    <!-- fill="none" and stroke ensures loops remain hollow and legible at any size -->
-    <path d="M 0,0 C 2.5,2 6,4.5 9,4.5 C 12,4.5 15,2.5 15,0 C 15,-2.5 12,-4.5 9,-4.5 C 6,-4.5 2.5,-2 0,0 C -2.5,2 -6,4.5 -9,4.5 C -12,4.5 -15,2.5 -15,0 C -15,-2.5 -12,-4.5 -9,-4.5 C -6,-4.5 -2.5,-2 0,0 Z" 
-          fill="none" 
-          stroke="#611f69" 
-          stroke-width="5" 
-          stroke-linecap="round" 
-          stroke-linejoin="round"
-          transform="rotate(-35)" />
-  </g>
+  <!-- 3. Accent dot above 'N' — the connection point / nexus node -->
+  <circle cx="275" cy="155" r="5" fill="#a78bfa"/>
 
-  <!-- 3. Subtext: "powered by Polynexus" -->
-  <text x="250" y="232" class="cf-sub">powered by Polynexus</text>
+  <!-- 4. Subtext -->
+  <text x="250" y="228" class="cf-sub">POWERED BY POLYNEXUS</text>
 </svg>
