@@ -39,6 +39,7 @@ class CampusFlowTenantMiddleware(TenantMainMiddleware):
                 tenant = TenantModel.objects.get(schema_name=tenant_schema)
                 request.tenant = tenant
                 connection.set_tenant(tenant)
+                self.activate_tenant_timezone(request)
                 return
             except TenantModel.DoesNotExist:
                 pass
@@ -46,6 +47,7 @@ class CampusFlowTenantMiddleware(TenantMainMiddleware):
         # 2. Run standard django-tenants domain resolution
         try:
             super().process_request(request)
+            self.activate_tenant_timezone(request)
             return
         except Exception:
             pass
@@ -58,6 +60,7 @@ class CampusFlowTenantMiddleware(TenantMainMiddleware):
                 tenant = TenantModel.objects.get(schema_name=jwt_schema)
                 request.tenant = tenant
                 connection.set_tenant(tenant)
+                self.activate_tenant_timezone(request)
                 return
             except TenantModel.DoesNotExist:
                 pass
@@ -67,5 +70,18 @@ class CampusFlowTenantMiddleware(TenantMainMiddleware):
             public_tenant = TenantModel.objects.get(schema_name=get_public_schema_name())
             request.tenant = public_tenant
             connection.set_tenant(public_tenant)
+            self.activate_tenant_timezone(request)
         except Exception:
             pass
+
+    def activate_tenant_timezone(self, request):
+        from django.utils import timezone
+        if hasattr(request, 'tenant') and request.tenant:
+            tzname = getattr(request.tenant, 'timezone', 'Asia/Kolkata')
+            if tzname:
+                try:
+                    timezone.activate(tzname)
+                except Exception:
+                    timezone.activate('Asia/Kolkata')
+            else:
+                timezone.activate('Asia/Kolkata')

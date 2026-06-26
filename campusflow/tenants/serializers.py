@@ -16,7 +16,7 @@ class TenantCreateSerializer(serializers.ModelSerializer):
         model = Tenant
         fields = [
             'name', 'code', 'address', 'contact_email', 'permitted_email_domain', 'domain_name',
-            'admin_username', 'admin_email', 'admin_password',
+            'admin_username', 'admin_email', 'admin_password', 'timezone',
             'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
             'erp_system_name', 'erp_api_url', 'erp_auth_token'
         ]
@@ -82,7 +82,7 @@ class TenantListSerializer(serializers.ModelSerializer):
         model = Tenant
         fields = [
             'id', 'name', 'code', 'address', 'contact_email', 'permitted_email_domain', 'domain_name',
-            'created_on', 'is_active',
+            'created_on', 'is_active', 'timezone',
             'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
             'student_count', 'faculty_count', 'management_count', 'support_staff_count', 'hod_count',
@@ -150,7 +150,7 @@ class TenantUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = [
-            'name', 'address', 'contact_email', 'permitted_email_domain', 'is_active',
+            'name', 'address', 'contact_email', 'permitted_email_domain', 'is_active', 'timezone',
             'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
             'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount'

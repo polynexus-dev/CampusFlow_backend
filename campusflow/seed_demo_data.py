@@ -62,7 +62,8 @@ if not tenant:
         code=TENANT_CODE,
         address="123 Education Lane, Demo City",
         contact_email="admin@demo.localhost",
-        permitted_email_domain="demo.localhost"
+        permitted_email_domain="demo.localhost",
+        timezone="Asia/Kolkata"
     )
     print(f"✅ Tenant '{SCHEMA}' created successfully.")
 else:

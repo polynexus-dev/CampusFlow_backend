@@ -14,6 +14,7 @@ class Tenant(TenantMixin):
     permitted_email_domain = models.CharField(max_length=100, blank=True, null=True, help_text="e.g. mit.edu.in. If set, students must register with this domain.")
     created_on = models.DateField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
+    timezone = models.CharField(max_length=100, default='Asia/Kolkata', help_text="e.g. Asia/Kolkata")
 
     # SMTP / Email configuration (optional/non-operational for now)
     email_smtp_host = models.CharField(max_length=255, blank=True, null=True)
