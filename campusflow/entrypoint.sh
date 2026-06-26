@@ -8,6 +8,9 @@ while ! pg_isready -h db -U postgres > /dev/null 2>&1; do
 done
 echo "✅ PostgreSQL is ready!"
 
+# 0. Sync migrations to clear any drifted files
+python migrate_sync.py
+
 # 1. Run shared (public) schema migrations
 echo "🔄 Running shared schema migrations..."
 python manage.py migrate_schemas --shared

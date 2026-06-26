@@ -9,7 +9,7 @@ services:
       - .env
     depends_on:
       - db
-    command: python manage.py runserver 0.0.0.0:8000
+    command: /bin/bash ./entrypoint.sh
 
   db:
     image: postgres:17

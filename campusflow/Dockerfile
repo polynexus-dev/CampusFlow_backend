@@ -36,4 +36,7 @@ RUN pip install -r requirements.txt
 # Copy project
 COPY . .
 
+# Backup clean migration files (tracked in git) to a safe place in the image
+RUN cp -r campusflow_app/migrations /tmp/clean_migrations
+
 EXPOSE 8000
