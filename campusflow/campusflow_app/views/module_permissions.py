@@ -77,7 +77,8 @@ class RoleModulePermissionView(APIView):
         tenant = connection.tenant
         subscribed = tenant.subscribed_modules or []
 
-        roles = ['student', 'Faculty', 'Department Head', 'Support Staff', 'Management', 'Administrator']
+        from django.contrib.auth.models import Group
+        roles = [g.name for g in Group.objects.all().order_by('name')]
         data = []
 
         for role in roles:
@@ -103,9 +104,9 @@ class RoleModulePermissionView(APIView):
         if not isinstance(allowed_modules, list):
             return Response({"error": "allowed_modules must be a list."}, status=status.HTTP_400_BAD_REQUEST)
 
-        roles = ['student', 'Faculty', 'Department Head', 'Support Staff', 'Management', 'Administrator']
-        if group_name not in roles:
-            return Response({"error": f"Invalid group_name. Must be one of: {', '.join(roles)}"}, status=status.HTTP_400_BAD_REQUEST)
+        from django.contrib.auth.models import Group
+        if not Group.objects.filter(name=group_name).exists():
+            return Response({"error": f"Invalid group_name. Role '{group_name}' does not exist."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Intersect with currently subscribed modules to prevent bypass
         tenant = connection.tenant
