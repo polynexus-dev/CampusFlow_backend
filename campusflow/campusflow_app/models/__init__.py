@@ -40,5 +40,12 @@ from .fees import (
 # ── Module Subscriptions & Permissions ──
 from .module_permissions import TenantModulePermission
 
+# ── Competitive PARITY Modules ──
+from .hostel import Hostel, HostelRoom, HostelAllocation
+from .tpo import RecruitmentDrive, PlacementApplication
+from .library import Book, BookCopy, BookIssue
+from .inventory import InventoryCategory, InventoryItem, Supplier, InventoryTransaction
+from .valuation import ValuationSession, ScannedPaper
+
 
 

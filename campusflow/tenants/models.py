@@ -39,6 +39,14 @@ class Tenant(TenantMixin):
     billing_employee_rate = models.DecimalField(max_digits=10, decimal_places=2, default=100.00)
     billing_employee_discount = models.DecimalField(max_digits=10, decimal_places=2, default=100.00)
 
+    # Subscribed Modules
+    subscribed_modules = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Modules subscribed by this tenant (e.g. ['Hostel', 'TPO', 'Library', 'Inventory', 'Valuation', 'Leave', 'Payroll', 'Exams', 'Assignments', 'Attendance', 'Announcements'])"
+    )
+
+
     # Default: auto-create schema on save
     auto_create_schema = True
 

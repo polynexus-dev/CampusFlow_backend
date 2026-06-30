@@ -19,6 +19,14 @@ from .models.classroom import Classroom
 from .models.lecture import Lecture
 from .models.attendance_log import FaceAttendanceLog
 from .models.schedule import Schedule
+from .models.hostel import Hostel, HostelRoom, HostelAllocation
+from .models.tpo import RecruitmentDrive, PlacementApplication
+from .models.library import Book, BookCopy, BookIssue
+from .models.inventory import InventoryCategory, InventoryItem, Supplier, InventoryTransaction
+from .models.valuation import ValuationSession, ScannedPaper
+
+
+
 
 
 class ClassroomSerializer(serializers.ModelSerializer):
@@ -667,3 +675,111 @@ class ScheduleSerializer(serializers.ModelSerializer):
 
     def get_faculty_name(self, obj):
         return obj.faculty.get_full_name() or obj.faculty.username
+
+
+# ── Hostel Management Serializers ──
+class HostelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Hostel
+        fields = '__all__'
+
+class HostelRoomSerializer(serializers.ModelSerializer):
+    hostel_name = serializers.CharField(source='hostel.name', read_only=True)
+    class Meta:
+        model = HostelRoom
+        fields = '__all__'
+
+class HostelAllocationSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
+    student_id = serializers.CharField(source='student.student_id', read_only=True)
+    hostel_name = serializers.CharField(source='room.hostel.name', read_only=True)
+    room_number = serializers.CharField(source='room.room_number', read_only=True)
+    class Meta:
+        model = HostelAllocation
+        fields = '__all__'
+
+
+# ── Training & Placement (TPO) Serializers ──
+class RecruitmentDriveSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecruitmentDrive
+        fields = '__all__'
+
+class PlacementApplicationSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
+    student_id = serializers.CharField(source='student.student_id', read_only=True)
+    company_name = serializers.CharField(source='drive.company_name', read_only=True)
+    job_title = serializers.CharField(source='drive.job_title', read_only=True)
+    class Meta:
+        model = PlacementApplication
+        fields = '__all__'
+
+
+# ── Library Management Serializers ──
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = '__all__'
+
+class BookCopySerializer(serializers.ModelSerializer):
+    book_title = serializers.CharField(source='book.title', read_only=True)
+    class Meta:
+        model = BookCopy
+        fields = '__all__'
+
+class BookIssueSerializer(serializers.ModelSerializer):
+    book_title = serializers.CharField(source='book_copy.book.title', read_only=True)
+    barcode = serializers.CharField(source='book_copy.barcode', read_only=True)
+    student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
+    student_id = serializers.CharField(source='student.student_id', read_only=True)
+    staff_name = serializers.CharField(source='staff_user.get_full_name', read_only=True)
+    class Meta:
+        model = BookIssue
+        fields = '__all__'
+
+
+# ── Inventory & Store Serializers ──
+class InventoryCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryCategory
+        fields = '__all__'
+
+class InventoryItemSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    class Meta:
+        model = InventoryItem
+        fields = '__all__'
+
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = '__all__'
+
+class InventoryTransactionSerializer(serializers.ModelSerializer):
+    item_name = serializers.CharField(source='item.name', read_only=True)
+    category_name = serializers.CharField(source='item.category.name', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    class Meta:
+        model = InventoryTransaction
+        fields = '__all__'
+
+
+# ── Digital Valuation Serializers ──
+class ValuationSessionSerializer(serializers.ModelSerializer):
+    exam_name = serializers.CharField(source='exam.name', read_only=True)
+    evaluator_name = serializers.CharField(source='evaluator.user.get_full_name', read_only=True)
+    class Meta:
+        model = ValuationSession
+        fields = '__all__'
+
+class ScannedPaperSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
+    student_id = serializers.CharField(source='student.student_id', read_only=True)
+    exam_name = serializers.CharField(source='session.exam.name', read_only=True)
+    class Meta:
+        model = ScannedPaper
+        fields = '__all__'
+
+
+

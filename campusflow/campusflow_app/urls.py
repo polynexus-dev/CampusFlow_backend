@@ -69,6 +69,12 @@ from .views.fees import (
 from .views.module_permissions import (
     TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView
 )
+from .views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
+from .views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
+from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
+from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
+from .views.valuation import ValuationSessionViewSet, ScannedPaperViewSet
+
 
 urlpatterns = [
 
@@ -243,4 +249,45 @@ urlpatterns = [
     path('tenant/subscriptions/<int:tenant_id>/', TenantSubscriptionView.as_view(), name='tenant-subscription'),
     path('tenant/module-permissions/', RoleModulePermissionView.as_view(), name='role-module-permissions'),
     path('user/allowed-modules/', MyAllowedModulesView.as_view(), name='user-allowed-modules'),
+
+    # ── Competitive PARITY Modules ──
+    # Hostel Management
+    path('hostels/', HostelViewSet.as_view({'get': 'list', 'post': 'create'}), name='hostel-list'),
+    path('hostels/<int:pk>/', HostelViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='hostel-detail'),
+    path('hostel-rooms/', HostelRoomViewSet.as_view({'get': 'list', 'post': 'create'}), name='hostelroom-list'),
+    path('hostel-rooms/<int:pk>/', HostelRoomViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='hostelroom-detail'),
+    path('hostel-allocations/', HostelAllocationViewSet.as_view({'get': 'list', 'post': 'create'}), name='hostelallocation-list'),
+    path('hostel-allocations/<int:pk>/', HostelAllocationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='hostelallocation-detail'),
+
+    # Training & Placement
+    path('recruitment-drives/', RecruitmentDriveViewSet.as_view({'get': 'list', 'post': 'create'}), name='recruitmentdrive-list'),
+    path('recruitment-drives/<int:pk>/', RecruitmentDriveViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='recruitmentdrive-detail'),
+    path('placement-applications/', PlacementApplicationViewSet.as_view({'get': 'list', 'post': 'create'}), name='placementapplication-list'),
+    path('placement-applications/<int:pk>/', PlacementApplicationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='placementapplication-detail'),
+
+    # Library Management
+    path('books/', BookViewSet.as_view({'get': 'list', 'post': 'create'}), name='book-list'),
+    path('books/<int:pk>/', BookViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='book-detail'),
+    path('book-copies/', BookCopyViewSet.as_view({'get': 'list', 'post': 'create'}), name='bookcopy-list'),
+    path('book-copies/<int:pk>/', BookCopyViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookcopy-detail'),
+    path('book-issues/', BookIssueViewSet.as_view({'get': 'list', 'post': 'create'}), name='bookissue-list'),
+    path('book-issues/<int:pk>/', BookIssueViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookissue-detail'),
+
+    # Inventory & Store
+    path('inventory-categories/', InventoryCategoryViewSet.as_view({'get': 'list', 'post': 'create'}), name='inventorycategory-list'),
+    path('inventory-categories/<int:pk>/', InventoryCategoryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='inventorycategory-detail'),
+    path('inventory-items/', InventoryItemViewSet.as_view({'get': 'list', 'post': 'create'}), name='inventoryitem-list'),
+    path('inventory-items/<int:pk>/', InventoryItemViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='inventoryitem-detail'),
+    path('suppliers/', SupplierViewSet.as_view({'get': 'list', 'post': 'create'}), name='supplier-list'),
+    path('suppliers/<int:pk>/', SupplierViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='supplier-detail'),
+    path('inventory-transactions/', InventoryTransactionViewSet.as_view({'get': 'list', 'post': 'create'}), name='inventorytransaction-list'),
+    path('inventory-transactions/<int:pk>/', InventoryTransactionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='inventorytransaction-detail'),
+
+    # Digital Valuation
+    path('valuation-sessions/', ValuationSessionViewSet.as_view({'get': 'list', 'post': 'create'}), name='valuationsession-list'),
+    path('valuation-sessions/<int:pk>/', ValuationSessionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='valuationsession-detail'),
+    path('scanned-papers/', ScannedPaperViewSet.as_view({'get': 'list', 'post': 'create'}), name='scannedpaper-list'),
+    path('scanned-papers/<int:pk>/', ScannedPaperViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='scannedpaper-detail'),
+
 ]
+

@@ -12,8 +12,9 @@ ALL_ERP_MODULES = [
     "management", "administrator", "department", "room", "staff",
     "student", "attendance", "schedule", "leave", "payroll",
     "exams", "analytics", "announcements", "audit-logs", "assignments",
-    "fees", "bus-tracking"
+    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation"
 ]
+
 
 
 class TenantSubscriptionView(APIView):
