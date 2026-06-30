@@ -60,6 +60,11 @@ from .views.bus_tracking import (
     BusSubscriptionListCreateView, BusSubscriptionDetailView,
     BusBoardingScanView, BusAttendanceListView,
 )
+from .views.fees import (
+    FeeCategoryViewSet, FeeStructureViewSet, StudentFeeInvoiceViewSet,
+    BulkGenerateInvoicesView, RecordFeePaymentView, FeePaymentListView,
+    FeeDashboardView
+)
 
 urlpatterns = [
 
@@ -215,4 +220,16 @@ urlpatterns = [
     path('bus/attendance/', BusAttendanceListView.as_view(), name='bus-attendance-list'),
     # Student: board the bus (QR scan)
     path('bus/scan/', BusBoardingScanView.as_view(), name='bus-boarding-scan'),
+
+    # ── Fees & Accounts ──────────────────────────────────────────────
+    path('fees/categories/', FeeCategoryViewSet.as_view({'get': 'list', 'post': 'create'}), name='fee-category-list'),
+    path('fees/categories/<int:pk>/', FeeCategoryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name='fee-category-detail'),
+    path('fees/structures/', FeeStructureViewSet.as_view({'get': 'list', 'post': 'create'}), name='fee-structure-list'),
+    path('fees/structures/<int:pk>/', FeeStructureViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name='fee-structure-detail'),
+    path('fees/invoices/', StudentFeeInvoiceViewSet.as_view({'get': 'list', 'post': 'create'}), name='student-fee-invoice-list'),
+    path('fees/invoices/<int:pk>/', StudentFeeInvoiceViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name='student-fee-invoice-detail'),
+    path('fees/invoices/bulk-generate/', BulkGenerateInvoicesView.as_view(), name='fee-invoice-bulk-generate'),
+    path('fees/invoices/<int:invoice_id>/pay/', RecordFeePaymentView.as_view(), name='fee-invoice-pay'),
+    path('fees/payments/', FeePaymentListView.as_view(), name='fee-payment-list'),
+    path('fees/dashboard/', FeeDashboardView.as_view(), name='fee-dashboard'),
 ]

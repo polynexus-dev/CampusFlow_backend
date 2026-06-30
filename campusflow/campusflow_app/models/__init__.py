@@ -31,3 +31,10 @@ from .manual_attendance_request import ManualAttendanceRequest
 # ── Bus Tracking ──
 from .bus_tracking import BusRoute, BusLocation, BusTrail, BusSubscription, BusAttendance
 
+# ── Fees & Accounts ──
+from .fees import (
+    FeeCategory, FeeStructure, FeeStructureItem,
+    StudentFeeInvoice, StudentFeeInvoiceItem, FeePayment
+)
+
+
