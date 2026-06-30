@@ -1,0 +1,489 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    /* Premium UX overrides */
+    body {
+        font-family: 'Plus Jakarta Sans', 'Inter', sans-serif !important;
+        background-color: #F8FAFC !important;
+    }
+
+    #content {
+        padding: 30px 40px !important;
+        background-color: #F8FAFC !important;
+    }
+
+    /* Hide standard heading */
+    #content h1 {
+        display: none !important;
+    }
+
+    /* Custom Dashboard Header */
+    .dashboard-header {
+        margin-bottom: 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .welcome-text h1 {
+        display: block !important;
+        font-family: 'Outfit', sans-serif !important;
+        font-size: 28px !important;
+        font-weight: 800 !important;
+        color: #1E1B4B !important;
+        margin: 0 0 6px 0 !important;
+        letter-spacing: -0.5px !important;
+    }
+
+    .welcome-text p {
+        color: #64748B;
+        font-size: 14px;
+        margin: 0;
+        font-weight: 500;
+    }
+
+    .header-actions {
+        display: flex;
+        gap: 12px;
+    }
+
+    .btn-quick {
+        background: #ffffff;
+        border: 1px solid #E2E8F0;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #475569;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+    }
+
+    .btn-quick:hover {
+        background: #F8FAFC;
+        border-color: #CBD5E1;
+        color: #1E293B;
+        transform: translateY(-1px);
+    }
+
+    .btn-quick.primary {
+        background: linear-gradient(135deg, #7C3085, #4A154B);
+        border: none;
+        color: #ffffff;
+        box-shadow: 0 4px 10px rgba(124, 48, 133, 0.25);
+    }
+
+    .btn-quick.primary:hover {
+        background: linear-gradient(135deg, #8E3A97, #591A5A);
+        color: #ffffff;
+        box-shadow: 0 6px 14px rgba(124, 48, 133, 0.35);
+    }
+
+    /* Main Dashboard Layout Split */
+    .dashboard-layout {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 30px;
+        align-items: start;
+    }
+
+    /* Cards Grid */
+    .apps-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 20px;
+    }
+
+    .app-card {
+        background: #ffffff;
+        border-radius: 16px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
+        padding: 24px;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    .app-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 20px -3px rgba(0,0,0,0.04), 0 4px 6px -2px rgba(0,0,0,0.02);
+        border-color: #D8B4FE;
+    }
+
+    .app-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 20px;
+        border-bottom: 1.5px solid #F1F5F9;
+        padding-bottom: 12px;
+    }
+
+    .app-title-group h2 {
+        background: transparent !important;
+        color: #1E1B4B !important;
+        font-family: 'Outfit', sans-serif !important;
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        text-transform: capitalize !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        letter-spacing: -0.2px !important;
+    }
+
+    .app-title-group span {
+        font-size: 11px;
+        color: #94A3B8;
+        text-transform: uppercase;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        margin-top: 2px;
+        display: block;
+    }
+
+    .app-icon-badge {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        background: #F5EDF6;
+        color: #7C3085;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: inset 0 2px 4px rgba(124,48,133,0.05);
+    }
+
+    /* Model items within a card */
+    .model-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .model-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: #F8FAFC;
+        border: 1.2px solid #F1F5F9;
+        transition: all 0.2s ease;
+    }
+
+    .model-row:hover {
+        background: #F1F5F9;
+        border-color: #E2E8F0;
+    }
+
+    .model-name {
+        font-weight: 600;
+        font-size: 13.5px;
+        color: #334155;
+        text-decoration: none;
+        transition: color 0.15s ease;
+    }
+
+    .model-name:hover {
+        color: #7C3085;
+    }
+
+    .model-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .link-action {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        text-decoration: none;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: all 0.15s ease;
+    }
+
+    .link-action.add {
+        color: #10B981;
+        background: #ECFDF5;
+    }
+
+    .link-action.add:hover {
+        background: #D1FAE5;
+    }
+
+    .link-action.change {
+        color: #7C3085;
+        background: #F5EDF6;
+    }
+
+    .link-action.change:hover {
+        background: #E8D3EC;
+    }
+
+    /* Sidebar: Recent Actions */
+    .sidebar-panel {
+        background: #ffffff;
+        border-radius: 16px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
+        padding: 24px;
+    }
+
+    .sidebar-panel h3 {
+        font-family: 'Outfit', sans-serif;
+        font-size: 16px;
+        font-weight: 700;
+        color: #1E1B4B;
+        margin: 0 0 18px 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        position: relative;
+        padding-left: 20px;
+    }
+
+    .timeline::before {
+        content: '';
+        position: absolute;
+        left: 5px;
+        top: 8px;
+        bottom: 8px;
+        width: 2px;
+        background: #E2E8F0;
+    }
+
+    .timeline-item {
+        position: relative;
+    }
+
+    .timeline-dot {
+        position: absolute;
+        left: -19px;
+        top: 5px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #CBD5E1;
+        border: 2px solid #ffffff;
+        box-shadow: 0 0 0 2px #E2E8F0;
+    }
+
+    .timeline-item.add .timeline-dot { background: #10B981; box-shadow: 0 0 0 2px #D1FAE5; }
+    .timeline-item.change .timeline-dot { background: #7C3085; box-shadow: 0 0 0 2px #F5EDF6; }
+    .timeline-item.delete .timeline-dot { background: #EF4444; box-shadow: 0 0 0 2px #FEE2E2; }
+
+    .timeline-content {
+        font-size: 12px;
+        line-height: 1.5;
+        color: #475569;
+    }
+
+    .timeline-title {
+        font-weight: 600;
+        color: #334155;
+    }
+
+    .timeline-meta {
+        font-size: 10px;
+        color: #94A3B8;
+        margin-top: 2px;
+        font-weight: 500;
+    }
+
+    /* Alert Boxes */
+    .empty-message {
+        text-align: center;
+        padding: 24px;
+        color: #94A3B8;
+        font-size: 13px;
+        border: 1.5px dashed #E2E8F0;
+        border-radius: 12px;
+    }
+
+    .college-shortcuts-card {
+        background: linear-gradient(135deg, #4A154B, #7C3085);
+        border-radius: 16px;
+        padding: 24px;
+        color: #ffffff;
+        margin-bottom: 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 10px 25px -5px rgba(124, 48, 133, 0.2);
+    }
+
+    .shortcuts-info h2 {
+        font-family: 'Outfit', sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        margin: 0 0 6px 0;
+        color: #ffffff !important;
+    }
+
+    .shortcuts-info p {
+        font-size: 13.5px;
+        color: #F5EDF6;
+        margin: 0;
+        opacity: 0.9;
+    }
+
+    /* Inline Icons */
+    .icon-svg {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    
+    <!-- 1. Header Section -->
+    <div class="dashboard-header">
+        <div class="welcome-text">
+            <h1>SaaS Control Cockpit</h1>
+            <p>Welcome back, {{ user.get_full_name|default:user.username }}. Manage system schemas, configure API integrations, and manage users.</p>
+        </div>
+        <div class="header-actions">
+            <a href="/swagger/" target="_blank" class="btn-quick">
+                <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-16.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18c-2.305 0-4.408.867-6 2.292m0-16.25v16.25" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>API Docs (Swagger)</span>
+            </a>
+            <a href="{% url 'admin:tenants_tenant_add' %}" class="btn-quick primary">
+                <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>Register College</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- 2. Hero Quick Settings -->
+    <div class="college-shortcuts-card">
+        <div class="shortcuts-info">
+            <h2>CampusNexus SaaS Portal</h2>
+            <p>You are logged into the central parent directory. Manage core organization records, blacklisted JWT tokens, and domains.</p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+            <a href="{% url 'admin:tenants_tenant_changelist' %}" class="btn-quick" style="border: none; background: rgba(255,255,255,0.15); color: white;">
+                <span>Manage Colleges</span>
+            </a>
+            <a href="{% url 'admin:auth_user_changelist' %}" class="btn-quick" style="border: none; background: rgba(255,255,255,0.15); color: white;">
+                <span>Manage Admins</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- 3. Primary Grid -->
+    <div class="dashboard-layout">
+        
+        <!-- Left: Model App Cards -->
+        <div class="apps-grid">
+            {% if app_list %}
+                {% for app in app_list %}
+                    <div class="app-card">
+                        <div>
+                            <div class="app-card-header">
+                                <div class="app-title-group">
+                                    <h2>{{ app.name }}</h2>
+                                    <span>System Component</span>
+                                </div>
+                                <div class="app-icon-badge">
+                                    {% if "Auth" in app.name or "Authentication" in app.name %}
+                                        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-.999.43-1.563A6 6 0 1 1 21.75 8.25Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    {% elif "Tenant" in app.name %}
+                                        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h18" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    {% else %}
+                                        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="model-list">
+                                {% for model in app.models %}
+                                    <div class="model-row">
+                                        {% if model.admin_url %}
+                                            <a href="{{ model.admin_url }}" class="model-name">{{ model.name }}</a>
+                                        {% else %}
+                                            <span class="model-name" style="color: #94A3B8;">{{ model.name }}</span>
+                                        {% endif %}
+                                        
+                                        <div class="model-actions">
+                                            {% if model.add_url %}
+                                                <a href="{{ model.add_url }}" class="link-action add">＋ Add</a>
+                                            {% endif %}
+                                            {% if model.admin_url %}
+                                                <a href="{{ model.admin_url }}" class="link-action change">✎ Edit</a>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-message">
+                    <p>No system applications available for this schema context.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Right: Recent Actions Sidepanel -->
+        <div class="sidebar-panel">
+            <h3>
+                <svg class="icon-svg" style="width: 20px; height: 20px;" viewBox="0 0 24 24"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>Audit Trail Logs</span>
+            </h3>
+            
+            {% load log %}
+            {% get_admin_log 8 as admin_log for_user user %}
+            
+            {% if not admin_log %}
+                <div class="empty-message">
+                    <p>No recent actions logged by your admin account.</p>
+                </div>
+            {% else %}
+                <div class="timeline">
+                    {% for entry in admin_log %}
+                        <div class="timeline-item {% if entry.is_addition %}add{% elif entry.is_change %}change{% elif entry.is_deletion %}delete{% endif %}">
+                            <div class="timeline-dot"></div>
+                            <div class="timeline-content">
+                                <span class="timeline-title">
+                                    {% if entry.is_addition %}Added{% elif entry.is_change %}Modified{% elif entry.is_deletion %}Deleted{% endif %}
+                                </span>
+                                <span>{{ entry.object_repr }}</span>
+                                <div class="timeline-meta">
+                                    <span>{{ entry.content_type.name|capfirst }} • {{ entry.action_time|timesince }} ago</span>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
