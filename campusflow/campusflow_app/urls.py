@@ -67,7 +67,7 @@ from .views.fees import (
     FeeDashboardView
 )
 from .views.module_permissions import (
-    TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView
+    TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView, CustomRolesView
 )
 from .views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
 from .views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
@@ -248,6 +248,7 @@ urlpatterns = [
     # ── Module Subscriptions & Permissions ───────────────────────────
     path('tenant/subscriptions/<int:tenant_id>/', TenantSubscriptionView.as_view(), name='tenant-subscription'),
     path('tenant/module-permissions/', RoleModulePermissionView.as_view(), name='role-module-permissions'),
+    path('tenant/roles/', CustomRolesView.as_view(), name='tenant-custom-roles'),
     path('user/allowed-modules/', MyAllowedModulesView.as_view(), name='user-allowed-modules'),
 
     # ── Competitive PARITY Modules ──

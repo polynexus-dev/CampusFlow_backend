@@ -174,3 +174,48 @@ class MyAllowedModulesView(APIView):
             "role": group_name,
             "allowed_modules": final_modules
         })
+
+
+class CustomRolesView(APIView):
+    """
+    College Admin level: Manage custom role groups within a Tenant.
+    GET /api/tenant/roles/  - List all roles
+    POST /api/tenant/roles/ - Create a new custom role
+    """
+    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+
+    def get(self, request):
+        from django.contrib.auth.models import Group
+        groups = Group.objects.all().order_by('name')
+        return Response({
+            "roles": [g.name for g in groups]
+        })
+
+    def post(self, request):
+        from django.contrib.auth.models import Group
+        role_name = request.data.get("role_name", "").strip()
+
+        if not role_name:
+            return Response({"error": "role_name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(role_name) < 2 or len(role_name) > 50:
+            return Response({"error": "Role name must be between 2 and 50 characters."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check duplicates case-insensitively
+        if Group.objects.filter(name__iexact=role_name).exists():
+            return Response({"error": f"Role '{role_name}' already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create role Group
+        group = Group.objects.create(name=role_name)
+
+        # Initialize tenant permissions with core basics default list
+        TenantModulePermission.objects.get_or_create(
+            group_name=group.name,
+            defaults={"allowed_modules": ["dashboard", "settings", "profile"]}
+        )
+
+        return Response({
+            "message": f"Custom role '{group.name}' created successfully.",
+            "role_name": group.name
+        }, status=status.HTTP_201_CREATED)
+
