@@ -86,7 +86,8 @@ class TenantListSerializer(serializers.ModelSerializer):
             'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
             'student_count', 'faculty_count', 'management_count', 'support_staff_count', 'hod_count',
-            'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount'
+            'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount',
+            'subscribed_modules'
         ]
 
     def get_domain_name(self, obj):
@@ -153,5 +154,6 @@ class TenantUpdateSerializer(serializers.ModelSerializer):
             'name', 'address', 'contact_email', 'permitted_email_domain', 'is_active', 'timezone',
             'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
-            'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount'
+            'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount',
+            'subscribed_modules'
         ]
