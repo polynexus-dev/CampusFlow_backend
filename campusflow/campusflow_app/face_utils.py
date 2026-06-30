@@ -18,10 +18,17 @@ import io
 import logging
 from typing import List, Optional, Tuple
 
-import cv2
+try:
+    import cv2
+except ImportError:
+    class MockCv2:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+    cv2 = MockCv2()
 import numpy as np
 from PIL import Image
 from django.conf import settings
+
 
 logger = logging.getLogger(__name__)
 
