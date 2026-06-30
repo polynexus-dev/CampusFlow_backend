@@ -55,7 +55,10 @@ from .views.analytics import (
 )
 from .views.bus_tracking import (
     BusRouteListCreateView, BusRouteDetailView,
-    BusLiveLocationsView, BusTrailView
+    BusRouteQRView, BusRouteRegenQRView,
+    BusLiveLocationsView, BusTrailView,
+    BusSubscriptionListCreateView, BusSubscriptionDetailView,
+    BusBoardingScanView, BusAttendanceListView,
 )
 
 urlpatterns = [
@@ -197,8 +200,19 @@ urlpatterns = [
     path('submissions/<int:pk>/grade/', SubmissionGradeView.as_view(), name='submission-grade'),
 
     # ── Bus Tracking ─────────────────────────────────────────────────
+    # Admin: route management
     path('bus/routes/', BusRouteListCreateView.as_view(), name='bus-route-list'),
     path('bus/routes/<int:pk>/', BusRouteDetailView.as_view(), name='bus-route-detail'),
+    path('bus/routes/<int:pk>/qr/', BusRouteQRView.as_view(), name='bus-route-qr'),
+    path('bus/routes/<int:pk>/regen-qr/', BusRouteRegenQRView.as_view(), name='bus-route-regen-qr'),
+    # Admin: subscription management
+    path('bus/subscriptions/', BusSubscriptionListCreateView.as_view(), name='bus-subscription-list'),
+    path('bus/subscriptions/<int:pk>/', BusSubscriptionDetailView.as_view(), name='bus-subscription-detail'),
+    # Admin: live tracking & trail
     path('bus/live/', BusLiveLocationsView.as_view(), name='bus-live-locations'),
     path('bus/trail/<int:driver_id>/', BusTrailView.as_view(), name='bus-trail'),
+    # Admin: attendance log
+    path('bus/attendance/', BusAttendanceListView.as_view(), name='bus-attendance-list'),
+    # Student: board the bus (QR scan)
+    path('bus/scan/', BusBoardingScanView.as_view(), name='bus-boarding-scan'),
 ]
