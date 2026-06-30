@@ -15,6 +15,12 @@ class Tenant(TenantMixin):
     created_on = models.DateField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
     timezone = models.CharField(max_length=100, default='Asia/Kolkata', help_text="e.g. Asia/Kolkata")
+    subscribed_modules = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of modules subscribed by this college, e.g. ['attendance', 'exams', 'fees']"
+    )
+
 
     # SMTP / Email configuration (optional/non-operational for now)
     email_smtp_host = models.CharField(max_length=255, blank=True, null=True)

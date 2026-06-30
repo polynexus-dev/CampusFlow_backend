@@ -37,4 +37,8 @@ from .fees import (
     StudentFeeInvoice, StudentFeeInvoiceItem, FeePayment
 )
 
+# ── Module Subscriptions & Permissions ──
+from .module_permissions import TenantModulePermission
+
+
 

@@ -66,6 +66,9 @@ from .views.fees import (
     BulkGenerateInvoicesView, RecordFeePaymentView, FeePaymentListView,
     FeeDashboardView
 )
+from .views.module_permissions import (
+    TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView
+)
 
 urlpatterns = [
 
@@ -235,4 +238,9 @@ urlpatterns = [
     path('fees/dashboard/', FeeDashboardView.as_view(), name='fee-dashboard'),
     # Conductor/Driver dashboard
     path('bus/driver/dashboard/', BusDriverDashboardView.as_view(), name='bus-driver-dashboard'),
+
+    # ── Module Subscriptions & Permissions ───────────────────────────
+    path('tenant/subscriptions/<int:tenant_id>/', TenantSubscriptionView.as_view(), name='tenant-subscription'),
+    path('tenant/module-permissions/', RoleModulePermissionView.as_view(), name='role-module-permissions'),
+    path('user/allowed-modules/', MyAllowedModulesView.as_view(), name='user-allowed-modules'),
 ]
