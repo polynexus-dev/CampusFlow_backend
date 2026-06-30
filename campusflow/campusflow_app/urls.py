@@ -59,6 +59,7 @@ from .views.bus_tracking import (
     BusLiveLocationsView, BusTrailView,
     BusSubscriptionListCreateView, BusSubscriptionDetailView,
     BusBoardingScanView, BusAttendanceListView,
+    BusDriverDashboardView,
 )
 from .views.fees import (
     FeeCategoryViewSet, FeeStructureViewSet, StudentFeeInvoiceViewSet,
@@ -232,4 +233,6 @@ urlpatterns = [
     path('fees/invoices/<int:invoice_id>/pay/', RecordFeePaymentView.as_view(), name='fee-invoice-pay'),
     path('fees/payments/', FeePaymentListView.as_view(), name='fee-payment-list'),
     path('fees/dashboard/', FeeDashboardView.as_view(), name='fee-dashboard'),
+    # Conductor/Driver dashboard
+    path('bus/driver/dashboard/', BusDriverDashboardView.as_view(), name='bus-driver-dashboard'),
 ]

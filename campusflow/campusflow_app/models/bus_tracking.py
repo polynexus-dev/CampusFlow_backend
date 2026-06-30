@@ -83,8 +83,14 @@ class BusSubscription(models.Model):
         blank=True,
         help_text="Leave blank for no expiry",
     )
+    boarding_stop = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Name of the stop where student boards the bus (e.g. Wardha Road stop)",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True, help_text="e.g. Semester 1 fees paid")
+
 
     class Meta:
         verbose_name = "Bus Subscription"

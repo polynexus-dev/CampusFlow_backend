@@ -76,8 +76,9 @@ class BusSubscriptionSerializer(drf_serializers.ModelSerializer):
             "id", "user", "student_name",
             "route", "route_name",
             "status", "valid_from", "valid_until",
-            "notes", "is_valid", "created_at",
+            "boarding_stop", "notes", "is_valid", "created_at",
         ]
+
         read_only_fields = ["created_at"]
 
     def get_student_name(self, obj):
@@ -605,3 +606,74 @@ class BusTrailView(generics.ListAPIView):
             "point_count": len(coords),
             "trail": coords,
         })
+
+
+class BusDriverDashboardView(APIView):
+    """
+    GET /api/bus/driver/dashboard/
+    Conductor/Driver dashboard view on mobile app.
+    Shows assigned Route, its Stops, expected passenger lift counts per stop,
+    and boarding stats (boarded vs absent).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        driver = request.user
+        route = BusRoute.objects.filter(driver=driver, is_active=True).first()
+
+        if not route:
+            return Response(
+                {"error": "No active route assigned to your driver account."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Get list of all active subscriptions for this route
+        active_subs = BusSubscription.objects.filter(route=route, status=BusSubscription.STATUS_ACTIVE)
+        expected_user_ids = active_subs.values_list("user_id", flat=True)
+
+        # Boarded today
+        today = timezone.localdate()
+        boarded_attendance = BusAttendance.objects.filter(route=route, scanned_at__date=today)
+        boarded_user_ids = boarded_attendance.values_list("user_id", flat=True)
+
+        # Calculate totals
+        expected_total = len(expected_user_ids)
+        boarded_total = len(boarded_user_ids)
+        absent_total = max(0, expected_total - boarded_total)
+
+        # Breakdown per stop
+        stops_breakdown = []
+        stops_list = route.stops if isinstance(route.stops, list) else []
+
+        for stop in stops_list:
+            stop_name = stop.get("name", "")
+            lat = stop.get("lat")
+            lng = stop.get("lng")
+
+            # How many students are registered for this stop
+            stop_subs = active_subs.filter(boarding_stop=stop_name)
+            stop_expected = stop_subs.count()
+
+            # How many of these stop-specific students scanned today
+            stop_boarded = boarded_attendance.filter(user_id__in=stop_subs.values_list("user_id", flat=True)).count()
+            stop_absent = max(0, stop_expected - stop_boarded)
+
+            stops_breakdown.append({
+                "name": stop_name,
+                "lat": lat,
+                "lng": lng,
+                "expected": stop_expected,
+                "boarded": stop_boarded,
+                "absent": stop_absent
+            })
+
+        return Response({
+            "route_id": route.id,
+            "route_name": route.name,
+            "qr_token": str(route.qr_token),
+            "expected_total": expected_total,
+            "boarded_total": boarded_total,
+            "absent_total": absent_total,
+            "stops": stops_breakdown
+        })
+
