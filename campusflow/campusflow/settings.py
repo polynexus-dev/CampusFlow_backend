@@ -68,6 +68,7 @@ SHARED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "drf_yasg",
+    "channels",
 ]
 
 # Apps that are tenant-specific (each college gets its own tables)
@@ -207,6 +208,22 @@ else:
             "LOCATION": "unique-snowflake",
         }
     }
+
+
+# ============================================================
+# DJANGO CHANNELS (WebSocket for Bus Tracking)
+# ============================================================
+ASGI_APPLICATION = "campusflow.asgi.application"
+
+_redis_url = REDIS_URL or "redis://redis:6379/0"
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [_redis_url],
+        },
+    },
+}
 
 
 # Static files (CSS, JavaScript, Images)

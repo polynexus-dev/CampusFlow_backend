@@ -27,3 +27,7 @@ from .exam import ExamType, Exam
 from .assignment import Assignment
 from .submission import AssignmentSubmission
 from .manual_attendance_request import ManualAttendanceRequest
+
+# ── Bus Tracking ──
+from .bus_tracking import BusRoute, BusLocation, BusTrail
+

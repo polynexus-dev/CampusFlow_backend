@@ -25,6 +25,11 @@ sqlparse==0.5.5
 django-redis==5.4.0
 redis==5.0.1
 
+# ── WebSockets (Django Channels) ───────────────────────────────
+channels==4.2.2
+channels_redis==4.2.1
+daphne==4.1.2
+
 # ── Email ────────────────────────────────────────────────────────────────────
 django-anymail[brevo]
 

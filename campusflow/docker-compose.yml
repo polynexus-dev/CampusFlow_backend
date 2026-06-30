@@ -9,6 +9,7 @@ services:
       - .env
     depends_on:
       - db
+      - redis
     command: /bin/bash ./entrypoint.sh
 
   db:
@@ -18,5 +19,14 @@ services:
     volumes:
       - CampusFlow_postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - CampusFlow_redis_data:/data
+
 volumes:
   CampusFlow_postgres_data:
+  CampusFlow_redis_data:
+

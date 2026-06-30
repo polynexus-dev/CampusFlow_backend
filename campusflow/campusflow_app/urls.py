@@ -53,6 +53,10 @@ from .views.analytics import (
     OverviewKPIView, AttendanceTrendsView, DepartmentPerformanceView,
     LeaveAnalyticsView, PayrollSummaryView
 )
+from .views.bus_tracking import (
+    BusRouteListCreateView, BusRouteDetailView,
+    BusLiveLocationsView, BusTrailView
+)
 
 urlpatterns = [
 
@@ -191,4 +195,10 @@ urlpatterns = [
     path('assignments/<int:pk>/', AssignmentDetailView.as_view(), name='assignment-detail'),
     path('assignments/<int:assignment_id>/submissions/', SubmissionListCreateView.as_view(), name='submission-list-create'),
     path('submissions/<int:pk>/grade/', SubmissionGradeView.as_view(), name='submission-grade'),
+
+    # ── Bus Tracking ─────────────────────────────────────────────────
+    path('bus/routes/', BusRouteListCreateView.as_view(), name='bus-route-list'),
+    path('bus/routes/<int:pk>/', BusRouteDetailView.as_view(), name='bus-route-detail'),
+    path('bus/live/', BusLiveLocationsView.as_view(), name='bus-live-locations'),
+    path('bus/trail/<int:driver_id>/', BusTrailView.as_view(), name='bus-trail'),
 ]
