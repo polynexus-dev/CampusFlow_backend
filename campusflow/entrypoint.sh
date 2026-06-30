@@ -11,6 +11,11 @@ echo "✅ PostgreSQL is ready!"
 # 0. Sync migrations to clear any drifted files
 python migrate_sync.py
 
+# 0.5. Make new migrations for any model changes
+echo "🔄 Auto-generating migrations for any updated models..."
+python manage.py makemigrations
+
+
 # 1. Run shared (public) schema migrations
 echo "🔄 Running shared schema migrations..."
 python manage.py migrate_schemas --shared
