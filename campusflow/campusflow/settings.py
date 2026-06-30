@@ -289,7 +289,8 @@ DEFAULT_FROM_EMAIL = "CampusFlow <soil@nagpuranalytics.com>"
 # ============================================================
 FACE_SIMILARITY_THRESHOLD = 0.55
 INSIGHTFACE_MODEL_NAME = "buffalo_l"
-INSIGHTFACE_MODEL_ROOT = BASE_DIR / "models" / "insightface"
+INSIGHTFACE_MODEL_ROOT = os.environ.get("INSIGHTFACE_MODEL_ROOT", BASE_DIR / "models" / "insightface")
+
 LIVENESS_BLINK_THRESHOLD = 5.5
 
 
