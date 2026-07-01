@@ -64,13 +64,36 @@ class TenantSubscriptionView(APIView):
         })
 
 
+class CanManageModulePermissions(BasePermission):
+    """
+    Permission class allowing access to primary College Admins (Management, Administrator),
+    OR any user role that has been explicitly allocated the 'module-assignment' permission.
+    """
+    def has_permission(self, request, view):
+        user = request.user
+        if not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        group_name = get_user_group(user)
+        if not group_name:
+            return False
+        if group_name in ('Management', 'Administrator'):
+            return True
+        try:
+            perm = TenantModulePermission.objects.get(group_name=group_name)
+            return "module-assignment" in (perm.allowed_modules or [])
+        except TenantModulePermission.DoesNotExist:
+            return False
+
+
 class RoleModulePermissionView(APIView):
     """
     College Admin level: Manage active modules for each user role.
     GET /api/tenant/module-permissions/
     POST /api/tenant/module-permissions/
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = [IsAuthenticated, CanManageModulePermissions]
 
     def get(self, request):
         # Subscribed pool for current tenant
@@ -103,6 +126,14 @@ class RoleModulePermissionView(APIView):
             return Response({"error": "group_name is required."}, status=status.HTTP_400_BAD_REQUEST)
         if not isinstance(allowed_modules, list):
             return Response({"error": "allowed_modules must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Lock organization admin roles from modification by delegated managers
+        if group_name in ('Management', 'Administrator'):
+            if not request.user.is_superuser:
+                return Response(
+                    {"error": "Permissions for organization admin roles (Management, Administrator) are locked and cannot be modified."}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
 
         from django.contrib.auth.models import Group
         if not Group.objects.filter(name=group_name).exists():
@@ -152,15 +183,15 @@ class MyAllowedModulesView(APIView):
                 "allowed_modules": ["dashboard", "settings", "profile"]
             })
 
-        # Get role allowed modules from db
-        try:
-            perm = TenantModulePermission.objects.get(group_name=group_name)
-            allowed = perm.allowed_modules or []
-        except TenantModulePermission.DoesNotExist:
-            # Defaults if not configured yet
-            if group_name in ('Management', 'Administrator'):
-                allowed = ALL_ERP_MODULES
-            else:
+        # Always guarantee Management and Administrator have all subscribed modules
+        if group_name in ('Management', 'Administrator'):
+            allowed = ALL_ERP_MODULES
+        else:
+            # Get role allowed modules from db
+            try:
+                perm = TenantModulePermission.objects.get(group_name=group_name)
+                allowed = perm.allowed_modules or []
+            except TenantModulePermission.DoesNotExist:
                 allowed = ["dashboard", "attendance", "schedule", "settings", "profile"]
 
         # Intersect to find final list
@@ -183,7 +214,7 @@ class CustomRolesView(APIView):
     GET /api/tenant/roles/  - List all roles
     POST /api/tenant/roles/ - Create a new custom role
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = [IsAuthenticated, CanManageModulePermissions]
 
     def get(self, request):
         from django.contrib.auth.models import Group
