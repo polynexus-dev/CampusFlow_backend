@@ -416,6 +416,9 @@ class ManagementUserProfileView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": ManagementProfile.objects.count()}, status=status.HTTP_200_OK)
+
         management_profiles = ManagementProfile.objects.all().select_related('user', 'department')
 
         result = []
@@ -470,6 +473,9 @@ class AdministratorUserProfileView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": AdministratorProfile.objects.count()}, status=status.HTTP_200_OK)
+
         admin_profiles = AdministratorProfile.objects.all().select_related('user', 'department')
 
         result = []
@@ -522,6 +528,9 @@ class TeachingStaffUserProfileView(APIView):
                 {"detail": "You do not have permission to view teaching staff profiles."},
                 status=status.HTTP_403_FORBIDDEN
             )
+
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": TeachingStaffProfile.objects.count()}, status=status.HTTP_200_OK)
 
         teaching_staff_profiles = TeachingStaffProfile.objects.all().select_related('user', 'department')
 
@@ -576,6 +585,9 @@ class StudentUserProfileView(APIView):
     permission_classes = [IsAuthenticated, IsFacultyOrAbove]
 
     def get(self, request):
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": StudentProfile.objects.count()}, status=status.HTTP_200_OK)
+
         student_profiles = StudentProfile.objects.all().select_related('user', 'department')
 
         result = []
@@ -643,6 +655,9 @@ class DepartmentHeadUserProfileView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": DepartmentHeadProfile.objects.count()}, status=status.HTTP_200_OK)
+
         profiles = DepartmentHeadProfile.objects.all().select_related('user', 'department')
 
         result = []
@@ -688,6 +703,9 @@ class NonTeachingStaffUserProfileView(APIView):
                 {"detail": "You do not have permission to view support staff profiles."},
                 status=status.HTTP_403_FORBIDDEN
             )
+
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": NonTeachingStaffProfile.objects.count()}, status=status.HTTP_200_OK)
 
         profiles = NonTeachingStaffProfile.objects.all().select_related('user', 'department')
 
