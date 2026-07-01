@@ -129,9 +129,10 @@ class RoleModulePermissionView(APIView):
 
         # Lock organization admin roles from modification by delegated managers
         if group_name in ('Management', 'Administrator'):
-            if not request.user.is_superuser:
+            requesting_group = get_user_group(request.user)
+            if not request.user.is_superuser and requesting_group not in ('Management', 'Administrator'):
                 return Response(
-                    {"error": "Permissions for organization admin roles (Management, Administrator) are locked and cannot be modified."}, 
+                    {"error": "Permissions for organization admin roles (Management, Administrator) can only be modified by primary admins themselves."}, 
                     status=status.HTTP_403_FORBIDDEN
                 )
 
@@ -183,15 +184,14 @@ class MyAllowedModulesView(APIView):
                 "allowed_modules": ["dashboard", "settings", "profile"]
             })
 
-        # Always guarantee Management and Administrator have all subscribed modules
-        if group_name in ('Management', 'Administrator'):
-            allowed = ALL_ERP_MODULES
-        else:
-            # Get role allowed modules from db
-            try:
-                perm = TenantModulePermission.objects.get(group_name=group_name)
-                allowed = perm.allowed_modules or []
-            except TenantModulePermission.DoesNotExist:
+        # Get role allowed modules from db, falling back to defaults
+        try:
+            perm = TenantModulePermission.objects.get(group_name=group_name)
+            allowed = perm.allowed_modules or []
+        except TenantModulePermission.DoesNotExist:
+            if group_name in ('Management', 'Administrator'):
+                allowed = ALL_ERP_MODULES
+            else:
                 allowed = ["dashboard", "attendance", "schedule", "settings", "profile"]
 
         # Intersect to find final list
