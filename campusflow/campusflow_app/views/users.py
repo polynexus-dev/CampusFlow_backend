@@ -61,10 +61,11 @@ class RequestOTPView(APIView):
         # Any role that belongs to the college should ideally use the official domain.
         if role in ('student', 'Faculty', 'Support Staff', 'Department Head'):
             tenant = getattr(connection, 'tenant', None)
-            if tenant and tenant.permitted_email_domain:
-                if not email.endswith(f"@{tenant.permitted_email_domain}"):
+            permitted_domain = getattr(tenant, 'permitted_email_domain', None)
+            if tenant and permitted_domain:
+                if not email.endswith(f"@{permitted_domain}"):
                     return Response(
-                        {"error": f"Registration for '{role}' is only allowed with @{tenant.permitted_email_domain} emails."},
+                        {"error": f"Registration for '{role}' is only allowed with @{permitted_domain} emails."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
@@ -129,10 +130,11 @@ class StudentRegistrationView(generics.CreateAPIView):
         
         # ── Domain Check ──
         tenant = getattr(connection, 'tenant', None)
-        if tenant and tenant.permitted_email_domain:
-            if not email.endswith(f"@{tenant.permitted_email_domain}"):
+        permitted_domain = getattr(tenant, 'permitted_email_domain', None)
+        if tenant and permitted_domain:
+            if not email.endswith(f"@{permitted_domain}"):
                 return Response(
-                    {"error": f"Student registration must use @{tenant.permitted_email_domain} emails."},
+                    {"error": f"Student registration must use @{permitted_domain} emails."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -202,10 +204,11 @@ class StaffRegistrationView(generics.CreateAPIView):
         # ── Domain Check ──
         email = request.data.get('email', '').strip().lower()
         tenant = getattr(connection, 'tenant', None)
-        if tenant and tenant.permitted_email_domain:
-            if not email.endswith(f"@{tenant.permitted_email_domain}"):
+        permitted_domain = getattr(tenant, 'permitted_email_domain', None)
+        if tenant and permitted_domain:
+            if not email.endswith(f"@{permitted_domain}"):
                 return Response(
-                    {"error": f"Staff email must end with @{tenant.permitted_email_domain}."},
+                    {"error": f"Staff email must end with @{permitted_domain}."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -729,8 +732,13 @@ class UserProfileView(APIView):
 
         # Get tenant info
         tenant = getattr(connection, 'tenant', None)
-        tenant_name = tenant.name if tenant else None
-        tenant_logo = request.build_absolute_uri(tenant.logo.url) if tenant and tenant.logo else None
+        tenant_name = getattr(tenant, 'name', None) or (tenant.schema_name if tenant and hasattr(tenant, 'schema_name') else None)
+        tenant_logo = None
+        if tenant and hasattr(tenant, 'logo') and tenant.logo:
+            try:
+                tenant_logo = request.build_absolute_uri(tenant.logo.url)
+            except (ValueError, AttributeError):
+                pass
 
         profile_data = {}
 
@@ -1159,7 +1167,7 @@ class ActiveTenantSettingsView(APIView):
     def get(self, request):
         from django.db import connection
         tenant = getattr(connection, 'tenant', None)
-        if not tenant:
+        if not tenant or not getattr(tenant, 'pk', None) or tenant.schema_name == 'public':
             return Response({"error": "No tenant context found."}, status=status.HTTP_400_BAD_REQUEST)
         
         from tenants.serializers import TenantListSerializer
@@ -1174,7 +1182,7 @@ class ActiveTenantSettingsView(APIView):
             return Response({"error": "Only college administrators can update settings."}, status=status.HTTP_403_FORBIDDEN)
 
         tenant = getattr(connection, 'tenant', None)
-        if not tenant:
+        if not tenant or not getattr(tenant, 'pk', None) or tenant.schema_name == 'public':
             return Response({"error": "No tenant context found."}, status=status.HTTP_400_BAD_REQUEST)
 
         from tenants.serializers import TenantUpdateSerializer

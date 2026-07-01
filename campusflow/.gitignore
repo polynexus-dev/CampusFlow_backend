@@ -159,3 +159,9 @@ local_settings.py
 # Heavy models
 models/insightface/
 ###############
+
+# Django Migrations
+**/migrations/*.py
+!**/migrations/__init__.py
+
+

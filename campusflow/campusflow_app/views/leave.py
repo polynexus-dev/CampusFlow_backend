@@ -195,6 +195,16 @@ class LeaveRequestCreateView(APIView):
         if not leave_type_id or not start_date or not end_date or not reason:
             return Response({"error": "leave_type_id, start_date, end_date, and reason are required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        from datetime import datetime
+        try:
+            parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+            parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if parsed_start_date > parsed_end_date:
+            return Response({"error": "Start date cannot be after end date."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             leave_type = LeaveType.objects.get(id=leave_type_id, is_active=True)
         except LeaveType.DoesNotExist:
@@ -211,8 +221,8 @@ class LeaveRequestCreateView(APIView):
         leave_req = LeaveRequest.objects.create(
             user=request.user,
             leave_type=leave_type,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=parsed_start_date,
+            end_date=parsed_end_date,
             reason=reason,
         )
         return Response(

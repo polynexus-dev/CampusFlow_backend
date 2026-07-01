@@ -57,6 +57,7 @@ class FeeStructureSerializer(drf_serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        validated_data.pop('items', None)
         items_data = self.context['request'].data.get('items', [])
         structure = FeeStructure.objects.create(**validated_data)
         for item_data in items_data:
@@ -69,6 +70,7 @@ class FeeStructureSerializer(drf_serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        validated_data.pop('items', None)
         items_data = self.context['request'].data.get('items', None)
         instance.name = validated_data.get('name', instance.name)
         instance.department = validated_data.get('department', instance.department)

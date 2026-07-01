@@ -98,7 +98,7 @@ class RoleModulePermissionView(APIView):
     def get(self, request):
         # Subscribed pool for current tenant
         tenant = connection.tenant
-        subscribed = tenant.subscribed_modules or []
+        subscribed = getattr(tenant, 'subscribed_modules', None) or []
 
         from django.contrib.auth.models import Group
         roles = [g.name for g in Group.objects.all().order_by('name')]
@@ -142,7 +142,7 @@ class RoleModulePermissionView(APIView):
 
         # Intersect with currently subscribed modules to prevent bypass
         tenant = connection.tenant
-        subscribed = tenant.subscribed_modules or []
+        subscribed = getattr(tenant, 'subscribed_modules', None) or []
         validated_allowed = [m for m in allowed_modules if m in subscribed]
 
         perm, _ = TenantModulePermission.objects.get_or_create(group_name=group_name)
@@ -167,7 +167,7 @@ class MyAllowedModulesView(APIView):
         user = request.user
         tenant = connection.tenant
 
-        subscribed = tenant.subscribed_modules or []
+        subscribed = getattr(tenant, 'subscribed_modules', None) or []
 
         # If SaaS Admin (superuser), grant access to all subscribed modules
         if user.is_superuser:
