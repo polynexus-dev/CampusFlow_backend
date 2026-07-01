@@ -730,6 +730,7 @@ class UserProfileView(APIView):
         # Get tenant info
         tenant = getattr(connection, 'tenant', None)
         tenant_name = tenant.name if tenant else None
+        tenant_logo = request.build_absolute_uri(tenant.logo.url) if tenant and tenant.logo else None
 
         profile_data = {}
 
@@ -928,6 +929,7 @@ class UserProfileView(APIView):
         else:
             return Response({"detail": "User group not recognized."}, status=status.HTTP_400_BAD_REQUEST)
 
+        profile_data["tenant_logo"] = tenant_logo
         return Response(profile_data, status=status.HTTP_200_OK)
 
 
@@ -1145,3 +1147,39 @@ class UserPermissionsDetailView(APIView):
                 pass
 
         return Response({"message": "Permissions updated successfully."}, status=status.HTTP_200_OK)
+
+
+class ActiveTenantSettingsView(APIView):
+    """
+    GET  /api/tenant/settings/       — Get active tenant details (College Admin / Management)
+    PATCH /api/tenant/settings/      — Update active tenant details (logo, name, email, SMTP, ERP, etc.)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db import connection
+        tenant = getattr(connection, 'tenant', None)
+        if not tenant:
+            return Response({"error": "No tenant context found."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        from tenants.serializers import TenantListSerializer
+        serializer = TenantListSerializer(tenant)
+        return Response(serializer.data)
+
+    def patch(self, request):
+        from django.db import connection
+        user = request.user
+        usergroup = get_user_group(user)
+        if usergroup not in ['Management', 'Administrator']:
+            return Response({"error": "Only college administrators can update settings."}, status=status.HTTP_403_FORBIDDEN)
+
+        tenant = getattr(connection, 'tenant', None)
+        if not tenant:
+            return Response({"error": "No tenant context found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from tenants.serializers import TenantUpdateSerializer
+        serializer = TenantUpdateSerializer(tenant, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

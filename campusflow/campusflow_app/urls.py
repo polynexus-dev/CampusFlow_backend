@@ -7,7 +7,7 @@ from .views.users import (
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
     ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
     DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
-    CollegeEmployeesListView, UserPermissionsDetailView
+    CollegeEmployeesListView, UserPermissionsDetailView, ActiveTenantSettingsView
 )
 from .views.location import LocationDetailView
 from .views.attendance import (
@@ -96,6 +96,8 @@ urlpatterns = [
     # ── Profiles ─────────────────────────────────────────────────────
     # GET own profile (any authenticated user)
     path('user/', UserProfileView.as_view(), name='user_profile'),
+    # GET / PATCH active tenant details & logo
+    path('tenant/settings/', ActiveTenantSettingsView.as_view(), name='tenant_settings'),
     # GET all management profiles (Management / SaaS Admin only)
     path('management/user/', ManagementUserProfileView.as_view(), name='management_user_profile'),
     # GET all administrator profiles (Management / SaaS Admin only)
