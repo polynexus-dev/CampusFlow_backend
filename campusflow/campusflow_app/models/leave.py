@@ -108,7 +108,23 @@ class LeaveRequest(models.Model):
     def num_days(self):
         """Calculate the number of leave days (inclusive)."""
         if self.start_date and self.end_date:
-            return (self.end_date - self.start_date).days + 1
+            from datetime import date, datetime
+            s_date = self.start_date
+            e_date = self.end_date
+            if isinstance(s_date, str):
+                try:
+                    s_date = datetime.strptime(s_date, "%Y-%m-%d").date()
+                except ValueError:
+                    pass
+            if isinstance(e_date, str):
+                try:
+                    e_date = datetime.strptime(e_date, "%Y-%m-%d").date()
+                except ValueError:
+                    pass
+            try:
+                return (e_date - s_date).days + 1
+            except TypeError:
+                return 0
         return 0
 
     class Meta:

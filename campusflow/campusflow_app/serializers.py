@@ -268,8 +268,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         tenant = getattr(connection, 'tenant', None)
         if tenant:
             data['tenant'] = {
-                'name': tenant.name,
-                'schema': tenant.schema_name,
+                'name': getattr(tenant, 'name', None) or getattr(tenant, 'schema_name', 'Public'),
+                'schema': getattr(tenant, 'schema_name', 'public'),
                 'code': getattr(tenant, 'code', None),
             }
 

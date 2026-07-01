@@ -28,7 +28,9 @@ def get_current_tenant():
 def get_current_tenant_name():
     """Get the name of the current tenant (college)."""
     tenant = get_current_tenant()
-    return tenant.name if tenant else None
+    if tenant:
+        return getattr(tenant, 'name', None) or getattr(tenant, 'schema_name', 'Public')
+    return None
 
 
 # Helper to get user's role string
