@@ -332,7 +332,7 @@ class BusRouteQRView(APIView):
             font_title = ImageFont.load_default()
             font_sub = ImageFont.load_default()
 
-        text_title = "CAMPUSFLOW TRANSIT BOARDING PASS"
+        text_title = "CAMPUSNEXUS TRANSIT BOARDING PASS"
         text_sub = "Powered & Developed by Polynexus Technologies"
 
         if hasattr(card_draw, "textlength"):
