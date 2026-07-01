@@ -16,8 +16,11 @@ from django.contrib.auth.hashers import make_password
 from campusflow_app.models.department import Department
 from campusflow_app.models.course import Course
 from campusflow_app.models.profile import (
-    StudentProfile, TeachingStaffProfile, NonTeachingStaffProfile
+    StudentProfile, TeachingStaffProfile, NonTeachingStaffProfile, DepartmentHeadProfile
 )
+
+def make_aadhaar(prefix_digit, num):
+    return f"{prefix_digit}{num:011d}"
 
 # Parse args or set defaults
 schema = 'demo'
@@ -38,7 +41,7 @@ print(f"Target Count : {count} users")
 
 with schema_context(schema):
     # 1. Ensure groups/roles exist
-    roles = ['student', 'Faculty', 'Support Staff']
+    roles = ['student', 'Faculty', 'Support Staff', 'Department Head']
     group_map = {}
     for role_name in roles:
         group, created = Group.objects.get_or_create(name=role_name)
@@ -116,6 +119,55 @@ with schema_context(schema):
             if created:
                 print(f"Created Course: {cname} ({ccode})")
 
+    # 3.5 Ensure HOD users & profiles exist for each department
+    print("\nEnsuring Department Heads exist...")
+    hod_group = group_map['Department Head']
+    for dept in departments:
+        profile_exists = DepartmentHeadProfile.objects.filter(department=dept).exists()
+        if not profile_exists:
+            username = f"hod_{dept.code.lower()}"
+            email = f"hod_{dept.code.lower()}@{schema}.edu"
+            
+            # Clean existing user with this username
+            User.objects.filter(username=username).delete()
+            
+            # Hash a generic password
+            hp = make_password('Password123')
+            
+            hod_user = User.objects.create(
+                username=username,
+                email=email,
+                password=hp,
+                first_name="Head Of",
+                last_name=f"{dept.code} Dept",
+                is_active=True
+            )
+            # Add to group
+            hod_user.groups.add(hod_group)
+            
+            # Create profile
+            DepartmentHeadProfile.objects.create(
+                user=hod_user,
+                employee_id=f"HOD-{dept.code}-{schema.upper()}",
+                department=dept,
+                designation="Department Head",
+                staff_role="HOD",
+                status="active",
+                aadhaar_number=make_aadhaar(5, random.randint(1000, 99999))
+            )
+            
+            # Link department HOD
+            dept.hod = hod_user
+            dept.save()
+            print(f"  Created HOD '{username}' for department {dept.code}")
+        else:
+            # Update department's HOD to point to the correct user if null
+            hod_profile = DepartmentHeadProfile.objects.get(department=dept)
+            if dept.hod != hod_profile.user:
+                dept.hod = hod_profile.user
+                dept.save()
+                print(f"  Linked existing HOD '{hod_profile.user.username}' to department {dept.code}")
+
     # 4. User generation parameters
     # Students: ~80%
     # Faculty: ~16%
@@ -173,9 +225,6 @@ with schema_context(schema):
     print(f"  - Driver start index : {start_drv_idx}")
     print(f"  - Conductor start index: {start_cnd_idx}")
 
-    # Helpers to ensure unique Aadhaar numbers (12-digit string)
-    def make_aadhaar(prefix_digit, num):
-        return f"{prefix_digit}{num:011d}"
 
     # Generate Student lists
     student_users = []
