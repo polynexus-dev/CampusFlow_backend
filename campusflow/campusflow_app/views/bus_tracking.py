@@ -677,3 +677,35 @@ class BusDriverDashboardView(APIView):
             "stops": stops_breakdown
         })
 
+
+class BusSummaryStatsView(APIView):
+    """
+    GET /api/bus/summary-stats/
+    Returns summary statistics for the transit/bus tracking module.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        total_routes = BusRoute.objects.filter(is_active=True).count()
+        active_subs = BusSubscription.objects.filter(status=BusSubscription.STATUS_ACTIVE)
+        total_subscribers = active_subs.count()
+
+        # Group count filter
+        student_subscribers = active_subs.filter(user__groups__name='student').distinct().count()
+        employee_subscribers = max(0, total_subscribers - student_subscribers)
+
+        total_drivers = BusRoute.objects.filter(is_active=True, driver__isnull=False).values("driver").distinct().count()
+
+        cutoff = timezone.now() - timedelta(hours=12)
+        active_buses_live = BusLocation.objects.filter(updated_at__gte=cutoff).count()
+
+        return Response({
+            "total_routes": total_routes,
+            "total_subscribers": total_subscribers,
+            "student_subscribers": student_subscribers,
+            "employee_subscribers": employee_subscribers,
+            "total_drivers": total_drivers,
+            "active_buses_live": active_buses_live
+        })
+
+

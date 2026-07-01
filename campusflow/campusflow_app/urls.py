@@ -59,7 +59,7 @@ from .views.bus_tracking import (
     BusLiveLocationsView, BusTrailView,
     BusSubscriptionListCreateView, BusSubscriptionDetailView,
     BusBoardingScanView, BusAttendanceListView,
-    BusDriverDashboardView,
+    BusDriverDashboardView, BusSummaryStatsView,
 )
 from .views.fees import (
     FeeCategoryViewSet, FeeStructureViewSet, StudentFeeInvoiceViewSet,
@@ -230,6 +230,8 @@ urlpatterns = [
     path('bus/attendance/', BusAttendanceListView.as_view(), name='bus-attendance-list'),
     # Student: board the bus (QR scan)
     path('bus/scan/', BusBoardingScanView.as_view(), name='bus-boarding-scan'),
+    path('bus/summary-stats/', BusSummaryStatsView.as_view(), name='bus-summary-stats'),
+
 
     # ── Fees & Accounts ──────────────────────────────────────────────
     path('fees/categories/', FeeCategoryViewSet.as_view({'get': 'list', 'post': 'create'}), name='fee-category-list'),
