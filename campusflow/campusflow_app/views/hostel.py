@@ -11,12 +11,13 @@ class HostelViewSet(viewsets.ModelViewSet):
 
 
 class HostelRoomViewSet(viewsets.ModelViewSet):
-    queryset = HostelRoom.objects.all().order_by('room_number')
+    queryset = HostelRoom.objects.select_related('hostel').all().order_by('room_number')
     serializer_class = HostelRoomSerializer
     permission_classes = [IsAuthenticated]
 
 
 class HostelAllocationViewSet(viewsets.ModelViewSet):
-    queryset = HostelAllocation.objects.all().order_by('-allocated_date')
+    queryset = HostelAllocation.objects.select_related('student__user', 'room__hostel').all().order_by('-allocated_date')
     serializer_class = HostelAllocationSerializer
     permission_classes = [IsAuthenticated]
+

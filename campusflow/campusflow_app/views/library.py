@@ -11,12 +11,12 @@ class BookViewSet(viewsets.ModelViewSet):
 
 
 class BookCopyViewSet(viewsets.ModelViewSet):
-    queryset = BookCopy.objects.all().order_by('barcode')
+    queryset = BookCopy.objects.select_related('book').all().order_by('barcode')
     serializer_class = BookCopySerializer
     permission_classes = [IsAuthenticated]
 
 
 class BookIssueViewSet(viewsets.ModelViewSet):
-    queryset = BookIssue.objects.all().order_by('-issued_date')
+    queryset = BookIssue.objects.select_related('book_copy__book', 'student__user', 'staff_user').all().order_by('-issued_date')
     serializer_class = BookIssueSerializer
     permission_classes = [IsAuthenticated]

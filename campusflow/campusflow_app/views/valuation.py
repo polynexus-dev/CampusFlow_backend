@@ -5,12 +5,12 @@ from ..serializers import ValuationSessionSerializer, ScannedPaperSerializer
 
 
 class ValuationSessionViewSet(viewsets.ModelViewSet):
-    queryset = ValuationSession.objects.all().order_by('-started_at')
+    queryset = ValuationSession.objects.select_related('exam', 'evaluator__user').all().order_by('-started_at')
     serializer_class = ValuationSessionSerializer
     permission_classes = [IsAuthenticated]
 
 
 class ScannedPaperViewSet(viewsets.ModelViewSet):
-    queryset = ScannedPaper.objects.all().order_by('-evaluated_at')
+    queryset = ScannedPaper.objects.select_related('student__user', 'session__exam').all().order_by('-evaluated_at')
     serializer_class = ScannedPaperSerializer
     permission_classes = [IsAuthenticated]

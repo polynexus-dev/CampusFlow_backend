@@ -14,7 +14,7 @@ class InventoryCategoryViewSet(viewsets.ModelViewSet):
 
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
-    queryset = InventoryItem.objects.all().order_by('name')
+    queryset = InventoryItem.objects.select_related('category').all().order_by('name')
     serializer_class = InventoryItemSerializer
     permission_classes = [IsAuthenticated]
 
@@ -26,6 +26,6 @@ class SupplierViewSet(viewsets.ModelViewSet):
 
 
 class InventoryTransactionViewSet(viewsets.ModelViewSet):
-    queryset = InventoryTransaction.objects.all().order_by('-transaction_date')
+    queryset = InventoryTransaction.objects.select_related('item__category', 'department', 'supplier').all().order_by('-transaction_date')
     serializer_class = InventoryTransactionSerializer
     permission_classes = [IsAuthenticated]
