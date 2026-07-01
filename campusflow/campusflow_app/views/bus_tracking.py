@@ -45,12 +45,14 @@ from campusflow_app.permissions import IsSaaSOrCollegeAdmin
 
 class BusRouteSerializer(drf_serializers.ModelSerializer):
     driver_name = drf_serializers.SerializerMethodField()
+    conductor_name = drf_serializers.SerializerMethodField()
     subscriber_count = drf_serializers.SerializerMethodField()
 
     class Meta:
         model = BusRoute
         fields = [
             "id", "name", "driver", "driver_name",
+            "conductor", "conductor_name",
             "stops", "qr_token", "is_active",
             "subscriber_count", "created_at",
         ]
@@ -61,6 +63,11 @@ class BusRouteSerializer(drf_serializers.ModelSerializer):
             return obj.driver.get_full_name() or obj.driver.username
         return None
 
+    def get_conductor_name(self, obj):
+        if obj.conductor:
+            return obj.conductor.get_full_name() or obj.conductor.username
+        return None
+
     def get_subscriber_count(self, obj):
         return obj.subscriptions.filter(status="active").count()
 
@@ -69,6 +76,10 @@ class BusSubscriptionSerializer(drf_serializers.ModelSerializer):
     student_name = drf_serializers.SerializerMethodField()
     route_name   = drf_serializers.SerializerMethodField()
     is_valid     = drf_serializers.SerializerMethodField()
+    allocated_fee = drf_serializers.SerializerMethodField()
+    paid_fee      = drf_serializers.SerializerMethodField()
+    balance_fee   = drf_serializers.SerializerMethodField()
+    last_payment_date = drf_serializers.SerializerMethodField()
 
     class Meta:
         model = BusSubscription
@@ -76,9 +87,10 @@ class BusSubscriptionSerializer(drf_serializers.ModelSerializer):
             "id", "user", "student_name",
             "route", "route_name",
             "status", "valid_from", "valid_until",
-            "boarding_stop", "notes", "is_valid", "created_at",
+            "boarding_stop", "notes", "is_valid",
+            "allocated_fee", "paid_fee", "balance_fee", "last_payment_date",
+            "created_at",
         ]
-
         read_only_fields = ["created_at"]
 
     def get_student_name(self, obj):
@@ -89,6 +101,62 @@ class BusSubscriptionSerializer(drf_serializers.ModelSerializer):
 
     def get_is_valid(self, obj):
         return obj.is_valid
+
+    def _get_bus_fee_metrics(self, obj):
+        if hasattr(obj, "_fee_metrics"):
+            return obj._fee_metrics
+
+        from campusflow_app.models import StudentFeeInvoice
+
+        invoices = StudentFeeInvoice.objects.filter(
+            student=obj.user,
+            items__category__name__icontains="Bus"
+        ).distinct()
+
+        allocated = 0.0
+        paid = 0.0
+        last_payment = None
+
+        for inv in invoices:
+            bus_item = inv.items.filter(category__name__icontains="Bus").first()
+            if not bus_item:
+                continue
+            item_allocated = float(bus_item.amount)
+            allocated += item_allocated
+
+            net_amount = float(inv.total_amount - inv.discount_amount)
+            if net_amount > 0:
+                paid_ratio = min(1.0, float(inv.paid_amount) / net_amount)
+                paid += item_allocated * paid_ratio
+            elif inv.status == "paid":
+                paid += item_allocated
+
+            latest_pay = inv.payments.order_by("-payment_date").first()
+            if latest_pay:
+                if not last_payment or latest_pay.payment_date > last_payment:
+                    last_payment = latest_pay.payment_date
+
+        balance = max(0.0, allocated - paid)
+
+        obj._fee_metrics = {
+            "allocated": round(allocated, 2),
+            "paid": round(paid, 2),
+            "balance": round(balance, 2),
+            "last_payment_date": last_payment.strftime("%Y-%m-%d %H:%M:%S") if last_payment else None
+        }
+        return obj._fee_metrics
+
+    def get_allocated_fee(self, obj):
+        return self._get_bus_fee_metrics(obj)["allocated"]
+
+    def get_paid_fee(self, obj):
+        return self._get_bus_fee_metrics(obj)["paid"]
+
+    def get_balance_fee(self, obj):
+        return self._get_bus_fee_metrics(obj)["balance"]
+
+    def get_last_payment_date(self, obj):
+        return self._get_bus_fee_metrics(obj)["last_payment_date"]
 
 
 class BusAttendanceSerializer(drf_serializers.ModelSerializer):
@@ -536,7 +604,7 @@ class BusRouteListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
 
     def get_queryset(self):
-        return BusRoute.objects.select_related("driver").order_by("-created_at")
+        return BusRoute.objects.select_related("driver", "conductor").order_by("-created_at")
 
 
 class BusRouteDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -549,7 +617,7 @@ class BusRouteDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
 
     def get_queryset(self):
-        return BusRoute.objects.select_related("driver")
+        return BusRoute.objects.select_related("driver", "conductor")
 
 
 class BusLiveLocationsView(generics.ListAPIView):

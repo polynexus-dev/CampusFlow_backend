@@ -21,6 +21,14 @@ class BusRoute(models.Model):
         related_name="assigned_bus_routes",
         help_text="The staff user who drives this bus",
     )
+    conductor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_conductor_bus_routes",
+        help_text="The staff user who acts as conductor on this bus",
+    )
     stops = models.JSONField(
         default=list,
         help_text='List of stops: [{"name": "Stop Name", "lat": 0.0, "lng": 0.0}]',
