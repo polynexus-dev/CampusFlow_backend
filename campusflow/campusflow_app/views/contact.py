@@ -42,12 +42,12 @@ Message:
 {message}
 """
 
-            # Send mail using Django's configured Anymail/Brevo email setup
+            # Send mail using Django's configured PolyMX SMTP server
             send_mail(
                 subject=subject,
                 message=email_body,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=['soil@nagpuranalytics.com'], # Adjust to your primary inbox
+                recipient_list=settings.CONTACT_RECIPIENT_LIST,
                 fail_silently=False,
             )
 

@@ -277,13 +277,21 @@ SIMPLE_JWT = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ============================================================
-# EMAIL CONFIGURATION (Anymail / Brevo API)
+# EMAIL CONFIGURATION (PolyMX SMTP Server)
 # ============================================================
-EMAIL_BACKEND = "anymail.backends.brevo.EmailBackend"
-ANYMAIL = {
-    "BREVO_API_KEY": os.environ.get("BREVO_API_KEY", ""),
-}
-DEFAULT_FROM_EMAIL = "CampusFlow <soil@nagpuranalytics.com>"
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "mail.polynexus.in")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "noreply@polynexus.in")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "_1U5-UWkJqq8l8MdDTORQ2erpvANHUWT")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
+
+DEFAULT_FROM_EMAIL = f"CampusNexus <{EMAIL_HOST_USER}>"
+
+# Recipient list for landing page enquiries
+CONTACT_RECIPIENT_LIST = [
+    os.environ.get("CONTACT_RECIPIENT_EMAIL", "hello@campusnexus.in")
+]
 
 # ============================================================
 # FACE RECOGNITION & BIOMETRICS CONFIGURATION
