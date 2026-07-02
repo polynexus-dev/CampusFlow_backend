@@ -288,10 +288,10 @@ EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
 
 DEFAULT_FROM_EMAIL = f"CampusNexus <{EMAIL_HOST_USER}>"
 
-# Recipient list for landing page enquiries
-CONTACT_RECIPIENT_LIST = [
-    os.environ.get("CONTACT_RECIPIENT_EMAIL", "hello@campusnexus.in")
-]
+# Recipient list configuration for landing page enquiries
+CONTACT_RECIPIENT_EMAIL = os.environ.get("CONTACT_RECIPIENT_EMAIL", "hello@campusnexus.in")
+CONTACT_CC_LIST = ["sales@polynexus.in"]
+CONTACT_BCC_LIST = ["admin@polynexus.in"]
 
 # ============================================================
 # FACE RECOGNITION & BIOMETRICS CONFIGURATION

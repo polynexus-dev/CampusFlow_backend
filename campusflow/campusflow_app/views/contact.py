@@ -1,4 +1,4 @@
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -42,14 +42,16 @@ Message:
 {message}
 """
 
-            # Send mail using Django's configured PolyMX SMTP server
-            send_mail(
+            # Send mail using EmailMessage for To, CC, and BCC support
+            email_msg = EmailMessage(
                 subject=subject,
-                message=email_body,
+                body=email_body,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=settings.CONTACT_RECIPIENT_LIST,
-                fail_silently=False,
+                to=[settings.CONTACT_RECIPIENT_EMAIL],
+                cc=settings.CONTACT_CC_LIST,
+                bcc=settings.CONTACT_BCC_LIST,
             )
+            email_msg.send(fail_silently=False)
 
             return Response({'message': 'Enquiry received successfully.'}, status=status.HTTP_200_OK)
 
