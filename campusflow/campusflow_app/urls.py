@@ -74,9 +74,13 @@ from .views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
 from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
 from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from .views.valuation import ValuationSessionViewSet, ScannedPaperViewSet
+from .views.contact import ContactEnquiryView
 
 
 urlpatterns = [
+
+    # ── Contact/Enquiry from Landing Page ────────────────────────────
+    path('contact/', ContactEnquiryView.as_view(), name='contact_enquiry'),
 
     # ── Auth ─────────────────────────────────────────────────────────
     path('register/student/', StudentRegistrationView.as_view(), name='student_registration'),
