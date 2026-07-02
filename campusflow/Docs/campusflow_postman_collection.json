@@ -1,0 +1,1804 @@
+{
+  "info": {
+    "_postman_id": "8b5f3a09-9f44-4866-9e90-1c3905cf69a2",
+    "name": "CampusFlow API Collection",
+    "description": "Comprehensive API collection for CampusFlow Multi-Tenant SaaS College Management system.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "SaaS Management",
+      "item": [
+        {
+          "name": "Create College (Tenant)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"MIT College of Engineering\",\n  \"code\": \"MIT\",\n  \"address\": \"Pune, Maharashtra\",\n  \"contact_email\": \"admin@mit.edu.in\",\n  \"permitted_email_domain\": \"mit.edu.in\",\n  \"domain_name\": \"mit.localhost\",\n  \"admin_username\": \"mit_admin\",\n  \"admin_email\": \"admin@mit.edu.in\",\n  \"admin_password\": \"SuperSecurePassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/saas/create-college/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "create-college",
+                ""
+              ]
+            },
+            "description": "SaaS Admin (Superuser) creates a new college tenant, provisioning a separate database schema, role groups, and the initial College Admin profile."
+          },
+          "response": []
+        },
+        {
+          "name": "Get College Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/saas/colleges/{{tenant_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "colleges",
+                "{{tenant_id}}",
+                ""
+              ]
+            },
+            "description": "Retrieve general configuration, SMTP setup, billing rates, and active subscriptions of a college."
+          },
+          "response": []
+        },
+        {
+          "name": "Update College Details",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"New Campus Plaza, Pune\",\n  \"contact_email\": \"support@mit.edu.in\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/saas/colleges/{{tenant_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "colleges",
+                "{{tenant_id}}",
+                ""
+              ]
+            },
+            "description": "Update address, logo, rates or modules for a specific college tenant."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register Student",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"student_aniket\",\n  \"email\": \"aniket@mit.edu.in\",\n  \"password\": \"SecureStudentPassword123\",\n  \"password2\": \"SecureStudentPassword123\",\n  \"first_name\": \"Aniket\",\n  \"last_name\": \"Kumar\",\n  \"student_id\": \"STU1001\",\n  \"program_enrolled_in_id\": \"BTech-CSE\",\n  \"department_id\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/register/student/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "register",
+                "student",
+                ""
+              ]
+            },
+            "description": "Self-registration for students. Validates that the email domain matches the college's permitted domain."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"faculty_prof_desai\",\n  \"email\": \"desai@mit.edu.in\",\n  \"password\": \"FacultyPassword123\",\n  \"password2\": \"FacultyPassword123\",\n  \"first_name\": \"Milind\",\n  \"last_name\": \"Desai\",\n  \"role\": \"Faculty\",\n  \"employee_id\": \"EMP5001\",\n  \"department_id\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/register/staff/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "register",
+                "staff",
+                ""
+              ]
+            },
+            "description": "Admin endpoint to register Faculty, HODs, Management, or support staff."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Account OTP",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"aniket@mit.edu.in\",\n  \"otp\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/verify-account/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "verify-account",
+                ""
+              ]
+            },
+            "description": "Enter the 6-digit OTP received via email to activate the user account."
+          },
+          "response": []
+        },
+        {
+          "name": "Resend OTP",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"aniket@mit.edu.in\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/resend-otp/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "resend-otp",
+                ""
+              ]
+            },
+            "description": "Resends a new registration OTP code to the specified email address."
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.access) {",
+                  "    pm.environment.set(\"access_token\", jsonData.access);",
+                  "}",
+                  "if (jsonData.refresh) {",
+                  "    pm.environment.set(\"refresh_token\", jsonData.refresh);",
+                  "}",
+                  "if (jsonData.tenant_schema) {",
+                  "    pm.environment.set(\"tenant_slug\", jsonData.tenant_schema);",
+                  "}",
+                  "if (jsonData.user_id) {",
+                  "    pm.environment.set(\"user_id\", jsonData.user_id);",
+                  "}",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"student_aniket\",\n  \"password\": \"SecureStudentPassword123\",\n  \"device_id\": \"android_uuid_123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login",
+                ""
+              ]
+            },
+            "description": "Authenticate user credentials. Automatically extracts and stores authorization tokens upon success."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Token Status",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{access_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/verify/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                "verify",
+                ""
+              ]
+            },
+            "description": "Verify if the current token is valid or expired."
+          },
+          "response": []
+        },
+        {
+          "name": "Request Device Reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"student_id\": \"{{student_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/student/reset-device-lock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "student",
+                "reset-device-lock",
+                ""
+              ]
+            },
+            "description": "Request reset of the auto-bound hardware device ID (requires Admin approval)."
+          },
+          "response": []
+        },
+        {
+          "name": "Request Biometric Reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Need to register new face embeddings due to camera issues.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/student/request-biometric-reset/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "student",
+                "request-biometric-reset",
+                ""
+              ]
+            },
+            "description": "Student requests permission to clear and re-register face embeddings."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/logout/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "logout",
+                ""
+              ]
+            },
+            "description": "Blacklist the refresh token to terminate session."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Approvals Workflow",
+      "item": [
+        {
+          "name": "Get Pending Approvals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/approvals/pending/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "approvals",
+                "pending",
+                ""
+              ]
+            },
+            "description": "Fetch a list of user registrations (e.g. Faculty, HOD) awaiting admin approval."
+          },
+          "response": []
+        },
+        {
+          "name": "Action Approval Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": 3,\n  \"action\": \"approve\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/approvals/action/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "approvals",
+                "action",
+                ""
+              ]
+            },
+            "description": "Approve or reject a pending staff user account registration."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "User Profiles",
+      "item": [
+        {
+          "name": "Get Own Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                ""
+              ]
+            },
+            "description": "Get detailed profile information and role assignments of the logged-in user."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Student Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/student/user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "student",
+                "user",
+                ""
+              ]
+            },
+            "description": "List all active student profiles under the current college (Faculty and above only)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Faculty Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/teaching-staff/user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "teaching-staff",
+                "user",
+                ""
+              ]
+            },
+            "description": "List teaching staff profiles."
+          },
+          "response": []
+        },
+        {
+          "name": "Get HOD Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/hod/user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "hod",
+                "user",
+                ""
+              ]
+            },
+            "description": "List Department Head profiles."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Support Staff Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/support-staff/user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "support-staff",
+                "user",
+                ""
+              ]
+            },
+            "description": "List non-teaching support staff profiles."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Active College Settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/tenant/settings/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "tenant",
+                "settings",
+                ""
+              ]
+            },
+            "description": "Retrieve current tenant settings, logo, name, and customized defaults."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Departments & Locations",
+      "item": [
+        {
+          "name": "List Departments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/department/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "department",
+                ""
+              ]
+            },
+            "description": "List all departments in the college."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Department",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Computer Science & Engineering\",\n  \"code\": \"CSE\",\n  \"description\": \"Department of CSE\",\n  \"email\": \"cse.dept@mit.edu.in\",\n  \"phone_number\": \"9876543210\",\n  \"accreditation_status\": \"NBA Accredited\",\n  \"date_established\": \"2020-06-15\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/department/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "department",
+                ""
+              ]
+            },
+            "description": "Create a new department under the current tenant."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Department Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/department/{{department_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "department",
+                "{{department_id}}",
+                ""
+              ]
+            },
+            "description": "Get detailed attributes and HOD profile assignments of a specific department."
+          },
+          "response": []
+        },
+        {
+          "name": "List/Create Locations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Campus Library Building Entry Gate\",\n  \"location_id\": \"LOC_LIB_GATE\",\n  \"latitude\": \"18.520430\",\n  \"longitude\": \"73.856740\",\n  \"geofence_radius_meters\": 35,\n  \"is_premises_entry\": true,\n  \"department_owner\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/location/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                ""
+              ]
+            },
+            "description": "Create a new geolocation verification point (premises entry gate or classroom radius)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Attendance & Biometrics",
+      "item": [
+        {
+          "name": "Register Face Images",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "front",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "left",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "right",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/register-face/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "register-face",
+                ""
+              ]
+            },
+            "description": "Student uploads front, left, and right profile photos to register face embeddings in the database."
+          },
+          "response": []
+        },
+        {
+          "name": "Request Liveness Challenge",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/liveness-challenge/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "liveness-challenge",
+                ""
+              ]
+            },
+            "description": "Requests an random eye-blink verification challenge script token for student mobile attendance."
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Face Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "lecture_id",
+                  "value": "{{lecture_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "challenge_id",
+                  "value": "challenge_challenge_token",
+                  "type": "text"
+                },
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "photo_prev",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/mark-attendance/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "mark-attendance",
+                ""
+              ]
+            },
+            "description": "Upload challenge confirmation photo frame to match against stored embeddings."
+          },
+          "response": []
+        },
+        {
+          "name": "Lecture Check-in (Random Code)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"A7C93F\",\n  \"latitude\": \"18.520435\",\n  \"longitude\": \"73.856742\",\n  \"device_id\": \"android_uuid_123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/attendance/lecture-checkin/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "attendance",
+                "lecture-checkin",
+                ""
+              ]
+            },
+            "description": "Student marks attendance by entering the random code generated by the lecturer, inside the geofence."
+          },
+          "response": []
+        },
+        {
+          "name": "Student Manual Request Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/student/manual-request-status/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "student",
+                "manual-request-status",
+                ""
+              ]
+            },
+            "description": "Student views pending/resolved manual attendance request logs."
+          },
+          "response": []
+        },
+        {
+          "name": "Lecturer Check-In Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lecture_id\": \"{{lecture_id}}\",\n  \"latitude\": \"18.520430\",\n  \"longitude\": \"73.856740\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/lecturer/check-in/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lecturer",
+                "check-in",
+                ""
+              ]
+            },
+            "description": "Lecturer initiates geofence validation to start their class session."
+          },
+          "response": []
+        },
+        {
+          "name": "Lecturer Start Code Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lecture_id\": \"{{lecture_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/lecturer/start-attendance/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lecturer",
+                "start-attendance",
+                ""
+              ]
+            },
+            "description": "Start the attendance verification window and generate a dynamic code."
+          },
+          "response": []
+        },
+        {
+          "name": "Lecturer Approve Manual Log",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": 1,\n  \"action\": \"approve\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/lecturer/approve-manual-request/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lecturer",
+                "approve-manual-request",
+                ""
+              ]
+            },
+            "description": "Approve or reject a student's manual attendance override request."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Classrooms & Lectures",
+      "item": [
+        {
+          "name": "Create Classroom",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Auditorium 302\",\n  \"code\": \"AUD302\",\n  \"main_entry_location\": \"LOC_GATE_01\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/classroom/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "classroom",
+                ""
+              ]
+            },
+            "description": "Add a classroom hall associated with a default entrance location gate."
+          },
+          "response": []
+        },
+        {
+          "name": "List Classrooms",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/classrooms/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "classrooms",
+                ""
+              ]
+            },
+            "description": "Retrieve all registered classrooms in the college."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Lecture Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"System Programming Laboratory\",\n  \"subject\": \"SysProg\",\n  \"faculty\": 2,\n  \"classroom\": 1,\n  \"start_time\": \"2026-07-02T14:00:00Z\",\n  \"end_time\": \"2026-07-02T16:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/lectures/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lectures",
+                ""
+              ]
+            },
+            "description": "Schedule a lecture session linking a faculty user, subject code, and classroom."
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Random Code for Lecture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": \"18.520430\",\n  \"longitude\": \"73.856740\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/lectures/{{lecture_id}}/generate-code/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lectures",
+                "{{lecture_id}}",
+                "generate-code",
+                ""
+              ]
+            },
+            "description": "Faculty generates a random geofenced code for student checkout."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Leave Management",
+      "item": [
+        {
+          "name": "Create Leave Type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sick Leave\",\n  \"code\": \"SL\",\n  \"description\": \"Medical/sick leave requests\",\n  \"max_days\": 15,\n  \"is_paid\": true,\n  \"carry_forward\": true,\n  \"applicable_to\": \"all\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/leave/types/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "leave",
+                "types",
+                ""
+              ]
+            },
+            "description": "Define custom leave policies (Sick, Earned, Maternity) for staff."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Leave Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leave_type_id\": 1,\n  \"start_date\": \"2026-07-10\",\n  \"end_date\": \"2026-07-12\",\n  \"reason\": \"Medical treatment\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/leave/request/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "leave",
+                "request",
+                ""
+              ]
+            },
+            "description": "Employee submits a request for leave."
+          },
+          "response": []
+        },
+        {
+          "name": "Action Leave Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leave_id\": 1,\n  \"action\": \"approve\",\n  \"rejection_reason\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/leave/action/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "leave",
+                "action",
+                ""
+              ]
+            },
+            "description": "Approve or reject a submitted leave request."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Payroll Module",
+      "item": [
+        {
+          "name": "Get Salary Structures",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payroll/structures/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "structures",
+                ""
+              ]
+            },
+            "description": "Retrieve salary configuration matrices for college employees."
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Employee Payslip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"month\": 7,\n  \"year\": 2026\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payroll/generate/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "generate",
+                ""
+              ]
+            },
+            "description": "Generates pay statements for a specific worker."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Exams & Timetables",
+      "item": [
+        {
+          "name": "Create Exam Type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Final Semester Examination\",\n  \"code\": \"FINALSEM\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/exams/types/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "exams",
+                "types",
+                ""
+              ]
+            },
+            "description": "Define classification labels for exams (Midsem, Practicals, End-Semester)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Exam Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Algorithms & Structures Endsem\",\n  \"exam_type_id\": 1,\n  \"department_id\": 1,\n  \"course_id\": 1,\n  \"classroom_id\": 1,\n  \"invigilator_id\": 2,\n  \"date\": \"2026-07-20\",\n  \"start_time\": \"10:00:00\",\n  \"end_time\": \"13:00:00\",\n  \"total_marks\": \"100.00\",\n  \"passing_marks\": \"40.00\",\n  \"instructions\": \"Closed-book examination. Mathematical tables provided.\",\n  \"academic_year\": \"2026-27\",\n  \"semester\": \"Semester 5\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/exams/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "exams",
+                ""
+              ]
+            },
+            "description": "Schedule a new test session detailing rules and locations."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Fees & Accounts",
+      "item": [
+        {
+          "name": "Create Fee Category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Tuition Fee\",\n  \"description\": \"Semester-wise academic charges\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fees/categories/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "fees",
+                "categories",
+                ""
+              ]
+            },
+            "description": "Register a fee category grouping."
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk Generate Invoices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fee_structure_id\": 1,\n  \"department_id\": 1,\n  \"batch_academic_year\": \"2026-27\",\n  \"current_semester_year\": \"Semester 5\",\n  \"program_enrolled_in\": \"BTech-CSE\",\n  \"due_date\": \"2026-08-31\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fees/invoices/bulk-generate/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "fees",
+                "invoices",
+                "bulk-generate",
+                ""
+              ]
+            },
+            "description": "Trigger generation of billing invoices across a whole department stream."
+          },
+          "response": []
+        },
+        {
+          "name": "Record Fee Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_paid\": \"75000.00\",\n  \"payment_method\": \"UPI/NetBanking\",\n  \"transaction_reference\": \"TXN837264817\",\n  \"remarks\": \"Online Payment Success\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fees/invoices/{{invoice_id}}/pay/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "fees",
+                "invoices",
+                "{{invoice_id}}",
+                "pay",
+                ""
+              ]
+            },
+            "description": "Log a student payment reference details."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Others",
+      "item": [
+        {
+          "name": "Hostel Management",
+          "item": [
+            {
+              "name": "Create Hostel",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant_slug}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Newton Hall\",\n  \"gender_type\": \"Boys\",\n  \"capacity\": 120,\n  \"address\": \"Block E campus\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/hostels/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "hostels",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Allocate Room",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant_slug}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"student\": 1,\n  \"room\": 1,\n  \"status\": \"Allocated\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/hostel-allocations/",
+                  "host": [
+                    "worksheet"
+                  ],
+                  "path": [
+                    "api",
+                    "hostel-allocations",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Library Management",
+          "item": [
+            {
+              "name": "Add Book",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant_slug}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Compilers: Principles, Techniques, and Tools\",\n  \"author\": \"Aho, Lam, Sethi, Ullman\",\n  \"isbn\": \"978-0321486813\",\n  \"publisher\": \"Addison-Wesley\",\n  \"total_copies\": 5,\n  \"available_copies\": 5\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/books/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "books",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Issue Book",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant_slug}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"book_copy\": 1,\n  \"student\": 1,\n  \"due_date\": \"2026-07-16\",\n  \"status\": \"Issued\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/book-issues/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "book-issues",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Digital Valuation",
+          "item": [
+            {
+              "name": "Create Valuation Session",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant_slug}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"exam\": 1,\n  \"evaluator\": 1,\n  \"status\": \"Active\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/valuation-sessions/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "valuation-sessions",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Score Scanned Paper",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant_slug}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"allocated_marks\": \"84.50\",\n  \"status\": \"Evaluated\",\n  \"remarks\": \"Good problem solving\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/scanned-papers/{{file_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scanned-papers",
+                    "{{file_id}}",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "exec": [
+          "// Set dynamic metadata"
+        ],
+        "type": "text/javascript"
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "exec": [
+          "// Collection global schema validation placeholder"
+        ],
+        "type": "text/javascript"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  }
+}
