@@ -35,7 +35,7 @@ if not SECRET_KEY:
     else:
         raise Exception("SECRET_KEY environment variable must be set when DEBUG=False.")
 
-_default_hosts = "campusflow.backend.polynexus.in,.campusflow.polynexus.in,campusnexus.api.polynexus,campusnexus.polynexus,.campusnexus.polynexus,campusnexus.api.polynexus.in,campusnexus.polynexus.in,.campusnexus.polynexus.in"
+_default_hosts = "campusflow.backend.polynexus.in,.campusflow.polynexus.in,campusnexus.api.polynexus,.campusnexus.api.polynexus,campusnexus.polynexus,.campusnexus.polynexus,campusnexus.api.polynexus.in,.campusnexus.api.polynexus.in,campusnexus.polynexus.in,.campusnexus.polynexus.in"
 ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", _default_hosts).split(",") if h]
 if DEBUG:
     ALLOWED_HOSTS += ["localhost", "127.0.0.1"]
@@ -45,9 +45,11 @@ CSRF_TRUSTED_ORIGINS = [
     'https://campusflow.polynexus.in',
     'https://*.campusflow.polynexus.in',
     'https://campusnexus.api.polynexus',
+    'https://*.campusnexus.api.polynexus',
     'https://campusnexus.polynexus',
     'https://*.campusnexus.polynexus',
     'https://campusnexus.api.polynexus.in',
+    'https://*.campusnexus.api.polynexus.in',
     'https://campusnexus.polynexus.in',
     'https://*.campusnexus.polynexus.in',
 ]
