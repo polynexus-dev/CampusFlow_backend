@@ -36,7 +36,7 @@ from campusflow_app.models import (
     BusRoute, BusLocation, BusTrail,
     BusSubscription, BusAttendance,
 )
-from campusflow_app.permissions import IsSaaSOrCollegeAdmin
+from campusflow_app.permissions import IsSaaSOrCollegeAdmin, is_saas_or_college_admin
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -713,6 +713,10 @@ class BusTrailView(generics.ListAPIView):
     def get(self, request, driver_id, *args, **kwargs):
         from django.contrib.auth import get_user_model
         User = get_user_model()
+
+        # Only admins, or the driver viewing their own trail, may access this.
+        if str(request.user.id) != str(driver_id) and not is_saas_or_college_admin(request.user):
+            return Response({"error": "You are not authorized to view this driver's trail."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             driver = User.objects.get(id=driver_id)

@@ -1161,6 +1161,84 @@
           "response": []
         },
         {
+          "name": "List Lectures",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/lectures/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lectures",
+                ""
+              ]
+            },
+            "description": "List all lecture sessions. Available to any authenticated user — students see lectures scoped to their department with an active code, staff see all lectures."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Lecture Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/lectures/1/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lectures",
+                "1",
+                ""
+              ]
+            },
+            "description": "Retrieve a single lecture by ID. Available to any authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "List Lectures by Classroom",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant_slug}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/classrooms/1/lectures/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "classrooms",
+                "1",
+                "lectures",
+                ""
+              ]
+            },
+            "description": "List all lectures scheduled in a specific classroom. Available to any authenticated user."
+          },
+          "response": []
+        },
+        {
           "name": "Generate Random Code for Lecture",
           "request": {
             "method": "POST",

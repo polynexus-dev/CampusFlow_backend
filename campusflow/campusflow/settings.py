@@ -18,16 +18,28 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-=ixi*^lb0h(3^%d=xg6xustfjolujglwpi7fu^#shkmt^@@wz@"
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = ['*']
+# SECURITY WARNING: keep the secret key used in production secret!
+# Must be set via the SECRET_KEY env var (see .env). No insecure hardcoded
+# fallback is used outside of local DEBUG runs, since this key also signs
+# JWTs (SIMPLE_JWT['SIGNING_KEY'] below) — a leaked/known key lets anyone
+# forge access tokens for any tenant.
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "django-insecure-local-dev-only-do-not-use-in-production"
+    else:
+        raise Exception("SECRET_KEY environment variable must be set when DEBUG=False.")
+
+_default_hosts = "campusflow.backend.polynexus.in,.campusflow.polynexus.in,campusnexus.api.polynexus,campusnexus.polynexus,.campusnexus.polynexus,campusnexus.api.polynexus.in,campusnexus.polynexus.in,.campusnexus.polynexus.in"
+ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", _default_hosts).split(",") if h]
+if DEBUG:
+    ALLOWED_HOSTS += ["localhost", "127.0.0.1"]
+
 CSRF_TRUSTED_ORIGINS = [
     'https://campusflow.backend.polynexus.in',
     'https://campusflow.polynexus.in',
@@ -40,7 +52,37 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.campusnexus.polynexus.in',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+# Explicit origin allowlist instead of CORS_ALLOW_ALL_ORIGINS — mirrors
+# CSRF_TRUSTED_ORIGINS above. Override/extend via the CORS_ALLOWED_ORIGINS
+# env var (comma-separated) for local frontend dev servers, e.g.
+# "http://localhost:5173,http://localhost:3000".
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://([a-z0-9-]+\.)?campusflow\.polynexus\.in$",
+    r"^https://campusflow\.backend\.polynexus\.in$",
+    r"^https://([a-z0-9-]+\.)?campusnexus\.polynexus(\.in)?$",
+    r"^https://campusnexus\.api\.polynexus(\.in)?$",
+]
+_extra_cors_origins = [o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o]
+if _extra_cors_origins:
+    CORS_ALLOWED_ORIGINS = _extra_cors_origins
+if DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES.append(r"^http://localhost:\d+$")
+
+# ============================================================
+# TRANSPORT / COOKIE SECURITY
+# ============================================================
+# Off in DEBUG so local http:// dev isn't broken; the deployed CSRF_TRUSTED_ORIGINS
+# above are all https, so these are safe to enforce whenever DEBUG=False.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False  # the frontend JS must be able to read this to set the CSRF header
+SECURE_SSL_REDIRECT = not DEBUG
+SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
 # ============================================================
@@ -110,9 +152,9 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
     ),
-    # 'DEFAULT_PERMISSION_CLASSES': (
-    #     'rest_framework.permissions.IsAuthenticated',
-    # ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
     # ...
 }
 
@@ -234,12 +276,13 @@ STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': datetime.timedelta(days=30),  # Adjust as needed
-    'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=7),   # Adjust as needed
+    'ACCESS_TOKEN_LIFETIME': datetime.timedelta(hours=8),
+    'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=7),
 
-    'ROTATE_REFRESH_TOKENS': False,
-    # Set to True if you want to blacklist old refresh tokens on refresh
-    'BLACKLIST_AFTER_ROTATION': False,
+    'ROTATE_REFRESH_TOKENS': True,
+    # Blacklist old refresh tokens on refresh, so a stolen refresh token
+    # can't be replayed after the legitimate user has rotated past it.
+    'BLACKLIST_AFTER_ROTATION': True,
     # Keep this False, as we manage session invalidation with our salt
     'UPDATE_LAST_LOGIN': False,
     'ALGORITHM': 'HS256',
@@ -283,7 +326,7 @@ EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "mail.polynexus.in")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "noreply@polynexus.in")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "_1U5-UWkJqq8l8MdDTORQ2erpvANHUWT")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
 
 DEFAULT_FROM_EMAIL = f"CampusNexus <{EMAIL_HOST_USER}>"

@@ -18,6 +18,7 @@ import json
 
 from django.db import connection
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import AuthenticationFailed
 
 
 def _switch_schema_from_token(raw_token: bytes | str):
@@ -74,5 +75,15 @@ class TenantAwareJWTAuthentication(JWTAuthentication):
         # 3. Full JWT validation (signature, expiry, etc.) via parent class
         validated_token = self.get_validated_token(raw_token)
 
-        # 4. Fetch user object (now in the correct schema)
+        # 4. SECURITY: the token's own (signed, verified) tenant_schema claim
+        # must match the schema the connection is actually on. Without this,
+        # a valid token from one tenant could be replayed against another
+        # tenant's schema via a spoofed X-Tenant header, since step 2 above
+        # only switches schema when still on 'public' and never re-checks
+        # against the token once a schema has already been selected.
+        token_schema = validated_token.get('tenant_schema')
+        if token_schema != connection.schema_name:
+            raise AuthenticationFailed('Token tenant does not match the active tenant schema.')
+
+        # 5. Fetch user object (now in the correct, verified schema)
         return self.get_user(validated_token), validated_token

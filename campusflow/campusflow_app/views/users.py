@@ -36,6 +36,8 @@ class MyObtainTokenPairView(TokenObtainPairView):
 
 
 class VerifyTokenView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request, *args, **kwargs):
         token = request.data.get('token')
         if token:
@@ -1179,26 +1181,24 @@ class ActiveTenantSettingsView(APIView):
     """
     GET  /api/tenant/settings/       — Get active tenant details (College Admin / Management)
     PATCH /api/tenant/settings/      — Update active tenant details (logo, name, email, SMTP, ERP, etc.)
+
+    Restricted to College Admins: this payload includes SMTP and ERP credentials
+    (email_smtp_password, erp_auth_token), which must not be exposed to Faculty/Students.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsCollegeAdmin]
 
     def get(self, request):
         from django.db import connection
         tenant = getattr(connection, 'tenant', None)
         if not tenant or not getattr(tenant, 'pk', None) or tenant.schema_name == 'public':
             return Response({"error": "No tenant context found."}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         from tenants.serializers import TenantListSerializer
         serializer = TenantListSerializer(tenant)
         return Response(serializer.data)
 
     def patch(self, request):
         from django.db import connection
-        user = request.user
-        usergroup = get_user_group(user)
-        if usergroup not in ['Management', 'Administrator']:
-            return Response({"error": "Only college administrators can update settings."}, status=status.HTTP_403_FORBIDDEN)
-
         tenant = getattr(connection, 'tenant', None)
         if not tenant or not getattr(tenant, 'pk', None) or tenant.schema_name == 'public':
             return Response({"error": "No tenant context found."}, status=status.HTTP_400_BAD_REQUEST)

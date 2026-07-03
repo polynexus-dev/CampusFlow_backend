@@ -18,6 +18,7 @@ class ClassroomCreateView(generics.CreateAPIView):
 
 
 class CheckAttendanceView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         latitude = request.data.get('latitude')
@@ -45,6 +46,8 @@ class CheckAttendanceView(APIView):
 
 
 class ClassroomListView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, *args, **kwargs):
         classrooms = Classroom.objects.all()
         classroomData = []
@@ -58,6 +61,8 @@ class ClassroomListView(APIView):
         return Response(classroomData)
     
 class ClassroomLocationValidationView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, *args, **kwargs):
         serializer = LocationValidationSerializer(data=request.data)
         if serializer.is_valid():
