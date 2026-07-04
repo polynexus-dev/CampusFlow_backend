@@ -684,13 +684,15 @@ class StudentUserProfileView(APIView):
         if not is_saas_admin(user) and group not in ('Management', 'Administrator', 'Department Head'):
             return Response({"detail": "You do not have permission to edit student profiles."}, status=status.HTTP_403_FORBIDDEN)
             
-        student_id = request.data.get('id')
+        student_id = request.data.get('id') or request.data.get('student_id')
         if not student_id:
             return Response({"error": "Student profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
             
         try:
-            profile = StudentProfile.objects.get(id=student_id)
-        except StudentProfile.DoesNotExist:
+            profile = StudentProfile.objects.filter(student_id=student_id).first()
+            if not profile:
+                profile = StudentProfile.objects.get(id=student_id)
+        except (StudentProfile.DoesNotExist, ValueError, TypeError):
             return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
             
         if group == 'Department Head' and not is_saas_admin(user):
@@ -756,13 +758,15 @@ class StudentUserProfileView(APIView):
         if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
             return Response({"detail": "You do not have permission to delete student profiles."}, status=status.HTTP_403_FORBIDDEN)
             
-        student_id = request.query_params.get('id')
+        student_id = request.query_params.get('id') or request.query_params.get('student_id')
         if not student_id:
             return Response({"error": "Student profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
             
         try:
-            profile = StudentProfile.objects.get(id=student_id)
-        except StudentProfile.DoesNotExist:
+            profile = StudentProfile.objects.filter(student_id=student_id).first()
+            if not profile:
+                profile = StudentProfile.objects.get(id=student_id)
+        except (StudentProfile.DoesNotExist, ValueError, TypeError):
             return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
             
         django_user = profile.user
