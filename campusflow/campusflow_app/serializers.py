@@ -216,7 +216,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 # so the redirect URL points to the correct frontend subdomain.
                 #
                 # Dev:        Origin = "http://localhost:5173"         → "mit.localhost"
-                # Production: Origin = "https://campusflow.polynexus.in" → "mit.campusflow.polynexus.in"
+                # Production: Origin = "https://campusnexus.in" → "mit.campusnexus.in"
                 from urllib.parse import urlparse
                 origin = request.headers.get('Origin') or request.headers.get('Referer', '')
                 parsed_origin = urlparse(origin)

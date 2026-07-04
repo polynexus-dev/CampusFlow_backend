@@ -35,23 +35,14 @@ if not SECRET_KEY:
     else:
         raise Exception("SECRET_KEY environment variable must be set when DEBUG=False.")
 
-_default_hosts = "campusflow.backend.polynexus.in,.campusflow.polynexus.in,campusnexus.api.polynexus,.campusnexus.api.polynexus,campusnexus.polynexus,.campusnexus.polynexus,campusnexus.api.polynexus.in,.campusnexus.api.polynexus.in,campusnexus.polynexus.in,.campusnexus.polynexus.in"
+_default_hosts = "campusnexus.in,.campusnexus.in"
 ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", _default_hosts).split(",") if h]
 if DEBUG:
     ALLOWED_HOSTS += ["localhost", "127.0.0.1"]
 
 CSRF_TRUSTED_ORIGINS = [
-    'https://campusflow.backend.polynexus.in',
-    'https://campusflow.polynexus.in',
-    'https://*.campusflow.polynexus.in',
-    'https://campusnexus.api.polynexus',
-    'https://*.campusnexus.api.polynexus',
-    'https://campusnexus.polynexus',
-    'https://*.campusnexus.polynexus',
-    'https://campusnexus.api.polynexus.in',
-    'https://*.campusnexus.api.polynexus.in',
-    'https://campusnexus.polynexus.in',
-    'https://*.campusnexus.polynexus.in',
+    'https://campusnexus.in',
+    'https://*.campusnexus.in',
 ]
 
 # Explicit origin allowlist instead of CORS_ALLOW_ALL_ORIGINS — mirrors
@@ -60,10 +51,7 @@ CSRF_TRUSTED_ORIGINS = [
 # "http://localhost:5173,http://localhost:3000".
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https://([a-z0-9-]+\.)?campusflow\.polynexus\.in$",
-    r"^https://campusflow\.backend\.polynexus\.in$",
-    r"^https://([a-z0-9-]+\.)?campusnexus\.polynexus(\.in)?$",
-    r"^https://campusnexus\.api\.polynexus(\.in)?$",
+    r"^https://([a-z0-9-]+\.)?campusnexus\.in$",
 ]
 _extra_cors_origins = [o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o]
 if _extra_cors_origins:

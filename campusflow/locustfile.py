@@ -6,7 +6,7 @@ import requests
 
 # Load usernames dynamically from target server API
 db_usernames = []
-TARGET_HOST = os.getenv("LOCUST_HOST", "https://campusnexus.api.polynexus.in")
+TARGET_HOST = os.getenv("LOCUST_HOST", "https://api.campusnexus.in")
 ADMIN_USER = os.getenv("LOCUST_ADMIN", "demo_admin")
 ADMIN_PASS = os.getenv("LOCUST_PASSWORD", "Password123")
 

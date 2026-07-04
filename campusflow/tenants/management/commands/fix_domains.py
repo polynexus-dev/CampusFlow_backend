@@ -5,10 +5,10 @@ Updates stale/development tenant domain records (e.g. *.localhost) to their
 correct production equivalents based on the tenant's schema_name.
 
 Usage:
-    python manage.py fix_domains --base-domain campusflow.polynexus.in
+    python manage.py fix_domains --base-domain campusnexus.in
 
 Options:
-    --base-domain   The production root domain (e.g. campusflow.polynexus.in).
+    --base-domain   The production root domain (e.g. campusnexus.in).
                     Each tenant will be assigned: {schema_name}.{base-domain}
     --dry-run       Print what would change without writing to the database.
 """
@@ -25,7 +25,7 @@ class Command(BaseCommand):
             '--base-domain',
             type=str,
             required=True,
-            help='The production root domain, e.g. campusflow.polynexus.in',
+            help='The production root domain, e.g. campusnexus.in',
         )
         parser.add_argument(
             '--dry-run',
