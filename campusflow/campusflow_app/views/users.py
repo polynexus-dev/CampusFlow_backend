@@ -739,7 +739,20 @@ class StudentUserProfileView(APIView):
         
         for field in profile_field_names:
             if field in request.data:
-                setattr(profile, field, request.data[field])
+                val = request.data[field]
+                # Parse frontend string values for boolean and nullable fields
+                if field == 'disability_status' and isinstance(val, str):
+                    if val.lower() == 'true':
+                        val = True
+                    elif val.lower() == 'false':
+                        val = False
+                    elif val.lower() in ('none', 'null', ''):
+                        val = None
+                elif field in ('date_of_birth', 'admission_date') and val in ('', 'null', 'None'):
+                    val = None
+                elif field in ('tenth_marksheet_percentage', 'twelfth_marksheet_percentage') and val in ('', 'null', 'None'):
+                    val = None
+                setattr(profile, field, val)
                 
         dept_id = request.data.get('department_id')
         if dept_id:
