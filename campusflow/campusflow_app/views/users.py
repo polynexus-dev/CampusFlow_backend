@@ -592,6 +592,19 @@ class StudentUserProfileView(APIView):
 
         student_profiles = StudentProfile.objects.all().select_related('user', 'department')
 
+        search_query = request.query_params.get('search')
+        if search_query:
+            from django.db.models import Q
+            student_profiles = student_profiles.filter(
+                Q(student_id__icontains=search_query) |
+                Q(user__username__icontains=search_query) |
+                Q(user__first_name__icontains=search_query) |
+                Q(user__last_name__icontains=search_query) |
+                Q(user__email__icontains=search_query) |
+                Q(department__name__icontains=search_query) |
+                Q(contact_number__icontains=search_query)
+            )
+
         result = []
         for stud in student_profiles:
             result.append({
