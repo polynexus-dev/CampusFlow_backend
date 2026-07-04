@@ -16,14 +16,28 @@ class AuditMiddleware(MiddlewareMixin):
 
     def process_response(self, request, response):
         if hasattr(request, '_audit_token') and not getattr(request, '_audit_token_used', False):
-            _current_request.reset(request._audit_token)
+            self._reset_token(request._audit_token)
             request._audit_token_used = True
         return response
 
     def process_exception(self, request, exception):
         if hasattr(request, '_audit_token') and not getattr(request, '_audit_token_used', False):
-            _current_request.reset(request._audit_token)
+            self._reset_token(request._audit_token)
             request._audit_token_used = True
+
+    @staticmethod
+    def _reset_token(token):
+        # Under ASGI (uvicorn), process_request/process_response for this
+        # middleware can run in different contextvars Contexts (Django bridges
+        # sync MiddlewareMixin hooks across sync/async boundaries via separate
+        # thread-executor calls), so the Token from .set() may not belong to
+        # the Context calling .reset() here. Resetting is just best-effort
+        # cleanup — each request gets its own fresh Context regardless, so a
+        # skipped reset can't leak the request into another request's Context.
+        try:
+            _current_request.reset(token)
+        except ValueError:
+            pass
 
 
 def get_current_request():

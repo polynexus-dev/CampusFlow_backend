@@ -8,6 +8,13 @@ while ! pg_isready -h db -U postgres > /dev/null 2>&1; do
 done
 echo "✅ PostgreSQL is ready!"
 
+# -1. docker-compose.yml mounts the repo as a live volume, so requirements.txt
+#     changes show up immediately on restart, but the installed packages
+#     baked into the image at build time don't — reinstall here so a plain
+#     restart (not a rebuild) can't end up running against stale deps.
+echo "📦 Syncing installed packages with requirements.txt..."
+pip install -r requirements.txt
+
 # 0. Sync migrations to clear any drifted files
 python migrate_sync.py
 
