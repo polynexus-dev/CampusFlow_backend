@@ -60,3 +60,22 @@ class ScheduleListView(APIView):
             pass
 
         return Response(serialized_data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        # Ensure we're on the correct tenant schema (JWT fallback for IP-based requests)
+        ensure_tenant_schema(request)
+
+        user = request.user
+        user_group = get_user_group(user)
+
+        if not (is_saas_admin(user) or user_group in ('Management', 'Administrator')):
+            return Response(
+                {"error": "Only College Admins can create schedules."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = ScheduleSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
