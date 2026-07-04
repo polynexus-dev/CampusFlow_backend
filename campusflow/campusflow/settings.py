@@ -38,7 +38,7 @@ if not SECRET_KEY:
 _default_hosts = "campusnexus.in,.campusnexus.in"
 ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", _default_hosts).split(",") if h]
 if DEBUG:
-    ALLOWED_HOSTS += ["localhost", "127.0.0.1"]
+    ALLOWED_HOSTS += ["*"]
 
 CSRF_TRUSTED_ORIGINS = [
     'https://campusnexus.in',
@@ -58,6 +58,13 @@ if _extra_cors_origins:
     CORS_ALLOWED_ORIGINS = _extra_cors_origins
 if DEBUG:
     CORS_ALLOWED_ORIGIN_REGEXES.append(r"^http://localhost:\d+$")
+
+# django-cors-headers only allows its own default header set unless told
+# otherwise — X-Tenant (set by the frontend so CampusFlowTenantMiddleware
+# can route to the right schema) isn't in that default list, so it must be
+# added explicitly or the browser's CORS preflight rejects it.
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + ["x-tenant"]
 
 # ============================================================
 # TRANSPORT / COOKIE SECURITY
