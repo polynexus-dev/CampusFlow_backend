@@ -719,6 +719,17 @@ class StudentUserProfileView(APIView):
             django_user.first_name = user_data['first_name']
         if 'last_name' in user_data:
             django_user.last_name = user_data['last_name']
+
+        # Synchronize Django User is_active status with frontend edits
+        if 'is_active' in user_data:
+            is_act = user_data['is_active']
+            django_user.is_active = (is_act.lower() == 'true') if isinstance(is_act, str) else bool(is_act)
+        elif 'is_active' in request.data:
+            is_act = request.data['is_active']
+            django_user.is_active = (is_act.lower() == 'true') if isinstance(is_act, str) else bool(is_act)
+        elif 'status' in request.data:
+            django_user.is_active = (request.data['status'].lower() == 'active')
+
         django_user.save()
 
         profile_field_names = [
