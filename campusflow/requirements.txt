@@ -28,7 +28,7 @@ redis==5.0.1
 # ── WebSockets (Django Channels) ───────────────────────────────
 channels==4.2.2
 channels_redis==4.2.1
-daphne==4.1.2
+uvicorn[standard]==0.50.0
 
 # ── Email ────────────────────────────────────────────────────────────────────
 django-anymail[brevo]

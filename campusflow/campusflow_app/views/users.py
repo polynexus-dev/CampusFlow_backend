@@ -1123,10 +1123,12 @@ class CollegeEmployeesListView(APIView):
     def get(self, request):
         from django.contrib.auth.models import User
         # Exclude students and superusers
-        employees = User.objects.exclude(groups__name='student').exclude(is_superuser=True)
+        # prefetch_related avoids one extra groups query per employee (N+1)
+        employees = User.objects.exclude(groups__name='student').exclude(is_superuser=True).prefetch_related('groups')
         data = []
         for e in employees:
-            group_name = e.groups.first().name if e.groups.exists() else "No Role"
+            employee_groups = e.groups.all()
+            group_name = employee_groups[0].name if employee_groups else "No Role"
             data.append({
                 "id": e.id,
                 "username": e.username,

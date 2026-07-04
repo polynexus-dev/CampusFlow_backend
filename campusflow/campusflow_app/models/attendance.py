@@ -16,7 +16,7 @@ class Attendance(models.Model):
                                  help_text="For lecture attendance, refers to the specific scheduled class.")
     lecture = models.ForeignKey(Lecture, on_delete=models.SET_NULL, null=True, blank=True,
                                 help_text="For specific lecture sessions.")
-    check_in_time = models.DateTimeField(auto_now_add=True)
+    check_in_time = models.DateTimeField(auto_now_add=True, db_index=True)
     check_out_time = models.DateTimeField(null=True, blank=True, help_text="Time of checkout (mainly for teaching staff).")
     is_geofence_valid = models.BooleanField(default=False)
     device_id = models.CharField(max_length=255, null=True, blank=True, help_text="ID of the device used for this check-in")

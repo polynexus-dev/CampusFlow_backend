@@ -55,5 +55,10 @@ echo "🔄 Collecting static files..."
 python manage.py collectstatic --noinput
 
 # 6. Start the server
+# uvicorn (ASGI) instead of `runserver` — runserver is single-process/dev-only
+# and can't handle concurrent requests properly. uvicorn[standard] handles
+# both HTTP and the Django Channels websocket (bus tracking) through the same
+# ASGI app. --workers gives multiple processes for real concurrency; override
+# via WEB_CONCURRENCY if the host has more/fewer CPU cores.
 echo "🚀 Starting CampusFlow server..."
-exec python manage.py runserver 0.0.0.0:8000
+exec uvicorn campusflow.asgi:application --host 0.0.0.0 --port 8000 --workers "${WEB_CONCURRENCY:-4}"

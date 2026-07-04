@@ -100,7 +100,13 @@ class AllAttendanceView(APIView):
         if date:
             qs = qs.filter(check_in_time__date=date)
 
-        serializer = AttendanceSerializer(qs.order_by('-check_in_time'), many=True)
+        # Cap unbounded growth by default (mirrors AuditLogListView) — this
+        # table grows fastest (a row per student per lecture, every day), so
+        # returning it in full on every call gets linearly slower over time.
+        limit = int(request.query_params.get('limit', 200))
+        qs = qs.order_by('-check_in_time')[:limit]
+
+        serializer = AttendanceSerializer(qs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 

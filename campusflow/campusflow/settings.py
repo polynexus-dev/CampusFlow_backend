@@ -189,6 +189,12 @@ DATABASES = {
         'PORT': os.environ.get('DB_PORT', '5432'),
         'USER': os.environ.get('POSTGRES_USER', 'postgres'),
         'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'admin'),
+        # Reuse connections across requests instead of opening a fresh TCP+auth
+        # handshake every time (default is 0 = no reuse). django-tenants'
+        # set_tenant() just issues `SET search_path` on the existing
+        # connection when switching schemas, so this is safe to combine with
+        # multi-tenancy — the schema switch itself stays cheap.
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60)),
     }
 }
 
