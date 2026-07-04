@@ -53,6 +53,7 @@ ua-parser==1.0.2
 ua-parser-builtins==202605
 
 # ── Utilities ────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1
 python-dateutil==2.9.0.post0
 pytz==2026.1.post1
 tzdata==2026.2
@@ -62,3 +63,4 @@ packaging==26.2
 typing_extensions==4.15.0
 PyYAML==6.0.3
 inflection==0.5.1
+

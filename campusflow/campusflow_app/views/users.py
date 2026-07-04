@@ -605,6 +605,23 @@ class StudentUserProfileView(APIView):
                 Q(contact_number__icontains=search_query)
             )
 
+        # Get pagination parameters
+        page = request.query_params.get('page')
+        page_size = request.query_params.get('page_size')
+
+        total_count = student_profiles.count()
+
+        try:
+            page = int(page) if page else 1
+            page_size = int(page_size) if page_size else 10
+        except ValueError:
+            page = 1
+            page_size = 10
+        
+        start = (page - 1) * page_size
+        end = start + page_size
+        student_profiles = student_profiles[start:end]
+
         result = []
         for stud in student_profiles:
             result.append({
@@ -615,6 +632,7 @@ class StudentUserProfileView(APIView):
                 "role": "Student",
                 "student_id": stud.student_id,
                 "department": stud.department.name if stud.department else None,
+                "department_id": stud.department.id if stud.department else None,
                 "middle_name": stud.middle_name, "date_of_birth": stud.date_of_birth,
                 "gender": stud.gender, "blood_group": stud.blood_group,
                 "aadhaar_number": stud.aadhaar_number, "nationality": stud.nationality,
@@ -653,7 +671,104 @@ class StudentUserProfileView(APIView):
                 "medical_conditions_allergies": stud.medical_conditions_allergies,
                 "extracurricular_interests": stud.extracurricular_interests,
             })
-        return Response(result, status=status.HTTP_200_OK)
+        return Response({
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "results": result
+        }, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator', 'Department Head'):
+            return Response({"detail": "You do not have permission to edit student profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        student_id = request.data.get('id')
+        if not student_id:
+            return Response({"error": "Student profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = StudentProfile.objects.get(id=student_id)
+        except StudentProfile.DoesNotExist:
+            return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        if group == 'Department Head' and not is_saas_admin(user):
+            hod_profile = getattr(user, 'departmenthead_profile', None)
+            if not hod_profile or hod_profile.department != profile.department:
+                return Response({"detail": "You can only edit student profiles from your own department."}, status=status.HTTP_403_FORBIDDEN)
+
+        user_data = request.data.get('user', {})
+        django_user = profile.user
+        
+        new_email = user_data.get('email')
+        if new_email and new_email != django_user.email:
+            if User.objects.filter(email=new_email).exclude(id=django_user.id).exists():
+                return Response({"error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+            django_user.email = new_email
+            
+        new_username = user_data.get('username')
+        if new_username and new_username != django_user.username:
+            if User.objects.filter(username=new_username).exclude(id=django_user.id).exists():
+                return Response({"error": "A user with this username already exists."}, status=status.HTTP_400_BAD_REQUEST)
+            django_user.username = new_username
+            
+        if 'first_name' in user_data:
+            django_user.first_name = user_data['first_name']
+        if 'last_name' in user_data:
+            django_user.last_name = user_data['last_name']
+        django_user.save()
+
+        profile_field_names = [
+            'middle_name', 'contact_number', 'date_of_birth', 'gender', 'blood_group',
+            'aadhaar_number', 'nationality', 'emergency_contact_name',
+            'emergency_contact_relationship', 'emergency_contact_phone', 'alternate_phone_number',
+            'current_address_line1', 'current_address_line2', 'current_city',
+            'current_district', 'current_state', 'current_pincode',
+            'permanent_address_line1', 'permanent_address_line2', 'permanent_city',
+            'permanent_district', 'permanent_state', 'permanent_pincode',
+            'religion', 'category', 'disability_status', 'disability_details',
+            'admission_date', 'admission_number', 'batch_academic_year', 'current_semester_year',
+            'section_division', 'previous_school_college', 'tenth_marksheet_percentage',
+            'twelfth_marksheet_percentage', 'biometric_id', 'hostel_transport_details',
+            'scholarship_fee_concession_details', 'medical_conditions_allergies',
+            'extracurricular_interests', 'status'
+        ]
+        
+        for field in profile_field_names:
+            if field in request.data:
+                setattr(profile, field, request.data[field])
+                
+        dept_id = request.data.get('department_id')
+        if dept_id:
+            from ..models.department import Department
+            try:
+                profile.department = Department.objects.get(id=dept_id)
+            except Department.DoesNotExist:
+                return Response({"error": "Department not found."}, status=status.HTTP_400_BAD_REQUEST)
+                
+        profile.save()
+        return Response({"message": "Student profile updated successfully."}, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to delete student profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        student_id = request.query_params.get('id')
+        if not student_id:
+            return Response({"error": "Student profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = StudentProfile.objects.get(id=student_id)
+        except StudentProfile.DoesNotExist:
+            return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        django_user = profile.user
+        django_user.delete()
+        
+        return Response({"message": "Student profile deleted successfully."}, status=status.HTTP_200_OK)
 
 
 class DepartmentHeadUserProfileView(APIView):

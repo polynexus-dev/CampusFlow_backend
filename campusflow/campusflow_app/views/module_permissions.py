@@ -15,6 +15,29 @@ ALL_ERP_MODULES = [
     "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation"
 ]
 
+ROLE_DEFAULT_MODULES = {
+    "SaaS Admin": ["dashboard", "settings"],
+    "Management": ALL_ERP_MODULES,
+    "Administrator": ALL_ERP_MODULES,
+    "Department Head": [
+        "dashboard", "department", "room", "staff", "student", "attendance",
+        "schedule", "settings", "leave", "exams", "analytics", "announcements",
+        "assignments", "bus-tracking", "tpo", "library", "valuation"
+    ],
+    "Faculty": [
+        "dashboard", "attendance", "schedule", "settings", "leave", "exams",
+        "announcements", "analytics", "assignments", "bus-tracking", "valuation"
+    ],
+    "Support Staff": [
+        "dashboard", "room", "settings", "leave", "announcements", "hostel",
+        "library", "inventory"
+    ],
+    "student": [
+        "dashboard", "attendance", "schedule", "settings", "exams", "announcements",
+        "assignments", "fees", "bus-tracking", "hostel", "tpo", "library"
+    ]
+}
+
 
 
 class TenantSubscriptionView(APIView):
@@ -104,10 +127,29 @@ class RoleModulePermissionView(APIView):
         roles = [g.name for g in Group.objects.all().order_by('name')]
         data = []
 
+        subscribed_lower_map = {m.lower().replace(" ", "-"): m for m in subscribed}
+        PREMIUM_MODULES = {
+            "attendance", "leave", "payroll", "exams", "assignments",
+            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements"
+        }
+
         for role in roles:
             perm, _ = TenantModulePermission.objects.get_or_create(group_name=role)
-            # Filter allowed to only what's currently subscribed by SaaS
-            filtered_allowed = [m for m in perm.allowed_modules if m in subscribed]
+            allowed = perm.allowed_modules
+            if allowed is None:
+                allowed = ROLE_DEFAULT_MODULES.get(role) or []
+                
+            # Filter allowed: 
+            # 1. Keep core modules (non-premium)
+            # 2. Keep premium modules ONLY if they are subscribed
+            filtered_allowed = []
+            for m in allowed:
+                m_norm = m.lower().replace(" ", "-")
+                if m_norm not in PREMIUM_MODULES:
+                    filtered_allowed.append(m)
+                elif m_norm in subscribed_lower_map:
+                    filtered_allowed.append(subscribed_lower_map[m_norm])
+                    
             data.append({
                 "group_name": role,
                 "allowed_modules": filtered_allowed
@@ -140,13 +182,36 @@ class RoleModulePermissionView(APIView):
         if not Group.objects.filter(name=group_name).exists():
             return Response({"error": f"Invalid group_name. Role '{group_name}' does not exist."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Intersect with currently subscribed modules to prevent bypass
+        # Intersect with currently subscribed modules to prevent bypass (case-insensitive)
         tenant = connection.tenant
         subscribed = getattr(tenant, 'subscribed_modules', None) or []
-        validated_allowed = [m for m in allowed_modules if m in subscribed]
-
+        subscribed_lower_map = {m.lower().replace(" ", "-"): m for m in subscribed}
+        
+        PREMIUM_MODULES = {
+            "attendance", "leave", "payroll", "exams", "assignments",
+            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements"
+        }
+        
+        # Get existing permission object
         perm, _ = TenantModulePermission.objects.get_or_create(group_name=group_name)
-        perm.allowed_modules = validated_allowed
+        existing_allowed = perm.allowed_modules
+        if existing_allowed is None:
+            existing_allowed = ROLE_DEFAULT_MODULES.get(group_name) or []
+            
+        # Retain any existing modules that are NOT part of the editable premium modules (e.g. core modules)
+        new_allowed = []
+        for m in existing_allowed:
+            m_norm = m.lower().replace(" ", "-")
+            if m_norm not in PREMIUM_MODULES:
+                new_allowed.append(m)
+                
+        # Add the validated premium modules sent from frontend
+        for m in allowed_modules:
+            m_norm = m.lower().replace(" ", "-")
+            if m_norm in subscribed_lower_map:
+                new_allowed.append(subscribed_lower_map[m_norm])
+
+        perm.allowed_modules = list(set(new_allowed))
         perm.save()
 
         return Response({
@@ -169,11 +234,12 @@ class MyAllowedModulesView(APIView):
 
         subscribed = getattr(tenant, 'subscribed_modules', None) or []
 
-        # If SaaS Admin (superuser), grant access to all subscribed modules
+        # If SaaS Admin (superuser), grant access to all subscribed modules (normalized)
         if user.is_superuser:
+            normalized_subscribed = [m.lower().replace(" ", "-") for m in subscribed]
             return Response({
                 "role": "SaaS Admin",
-                "allowed_modules": subscribed
+                "allowed_modules": normalized_subscribed
             })
 
         # Resolve role
@@ -184,18 +250,41 @@ class MyAllowedModulesView(APIView):
                 "allowed_modules": ["dashboard", "settings", "profile"]
             })
 
+        # Get role default modules
+        default_allowed = ROLE_DEFAULT_MODULES.get(group_name) or ["dashboard", "settings", "profile"]
+
         # Get role allowed modules from db, falling back to defaults
         try:
             perm = TenantModulePermission.objects.get(group_name=group_name)
-            allowed = perm.allowed_modules or []
+            allowed = perm.allowed_modules
+            if allowed is None:
+                allowed = default_allowed
         except TenantModulePermission.DoesNotExist:
-            if group_name in ('Management', 'Administrator'):
-                allowed = ALL_ERP_MODULES
-            else:
-                allowed = ["dashboard", "attendance", "schedule", "settings", "profile"]
+            allowed = default_allowed
 
-        # Intersect to find final list
-        final_modules = [m for m in allowed if m in subscribed]
+        # Intersect to find final list (case-insensitive, returning lowercase/dash-separated form)
+        subscribed_lower = {m.lower().replace(" ", "-") for m in subscribed}
+        
+        PREMIUM_MODULES = {
+            "attendance", "leave", "payroll", "exams", "assignments",
+            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements"
+        }
+        
+        final_modules = []
+        
+        # 1. Process database allowed list
+        for m in allowed:
+            m_norm = m.lower().replace(" ", "-")
+            if m_norm not in PREMIUM_MODULES:
+                final_modules.append(m_norm)
+            elif m_norm in subscribed_lower:
+                final_modules.append(m_norm)
+                
+        # 2. Always guarantee all default core modules for the role
+        for m in default_allowed:
+            m_norm = m.lower().replace(" ", "-")
+            if m_norm not in PREMIUM_MODULES and m_norm not in final_modules:
+                final_modules.append(m_norm)
 
         # Always guarantee core basic views
         for core in ["dashboard", "settings", "profile"]:

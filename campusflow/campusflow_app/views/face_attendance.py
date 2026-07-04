@@ -410,17 +410,30 @@ class AttendanceHistoryView(generics.ListAPIView):
     """
     GET /api/attendance-history/
 
-    Return the authenticated student's attendance verification history logs.
+    Return the student's attendance verification history logs.
     """
 
     serializer_class = FaceAttendanceLogSerializer
-    permission_classes = [IsStudent]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        student = self.request.user.student_profile
-        return FaceAttendanceLog.objects.filter(student=student).select_related(
-            "lecture", "student__user"
-        )
+        user = self.request.user
+        
+        # If student, restrict to own profile
+        if user.groups.filter(name="student").exists():
+            student = getattr(user, 'student_profile', None)
+            return FaceAttendanceLog.objects.filter(student=student).select_related(
+                "lecture", "student__user"
+            )
+            
+        # Admin or Faculty can pass student_id query param
+        student_id = self.request.query_params.get("student_id")
+        if student_id:
+            return FaceAttendanceLog.objects.filter(student_id=student_id).select_related(
+                "lecture", "student__user"
+            )
+            
+        return FaceAttendanceLog.objects.all().select_related("lecture", "student__user")
 
 
 class StudentRequestManualAttendanceView(APIView):

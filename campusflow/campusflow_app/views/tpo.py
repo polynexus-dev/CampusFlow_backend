@@ -11,6 +11,12 @@ class RecruitmentDriveViewSet(viewsets.ModelViewSet):
 
 
 class PlacementApplicationViewSet(viewsets.ModelViewSet):
-    queryset = PlacementApplication.objects.select_related('student__user', 'drive').all().order_by('-applied_date')
     serializer_class = PlacementApplicationSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = PlacementApplication.objects.select_related('student__user', 'drive').all().order_by('-applied_date')
+        student_id = self.request.query_params.get('student_id')
+        if student_id:
+            qs = qs.filter(student_id=student_id)
+        return qs

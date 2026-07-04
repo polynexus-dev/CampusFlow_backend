@@ -7,6 +7,9 @@ services:
       - .:/app
     env_file:
       - .env
+    environment:
+      - DB_HOST=db
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       - db
       - redis
@@ -14,6 +17,8 @@ services:
 
   db:
     image: postgres:17
+    ports:
+      - "5432:5432"
     env_file:
       - .env
     volumes:

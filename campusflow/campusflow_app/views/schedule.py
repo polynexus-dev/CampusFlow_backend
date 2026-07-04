@@ -46,6 +46,18 @@ class ScheduleListView(APIView):
         if day:
             qs = qs.filter(day_of_week=day)
 
+        dept_id = request.query_params.get('department_id')
+        if dept_id:
+            qs = qs.filter(course__department_id=dept_id)
+
+        semester = request.query_params.get('semester')
+        if semester:
+            qs = qs.filter(semester=semester)
+
+        academic_year = request.query_params.get('academic_year')
+        if academic_year:
+            qs = qs.filter(academic_year=academic_year)
+
         days_order = {
             'Monday': 1, 'Tuesday': 2, 'Wednesday': 3,
             'Thursday': 4, 'Friday': 5, 'Saturday': 6, 'Sunday': 7
