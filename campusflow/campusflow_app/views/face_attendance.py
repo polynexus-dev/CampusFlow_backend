@@ -63,6 +63,14 @@ class FaceRegistrationView(APIView):
 
     @transaction.atomic
     def post(self, request):
+        # ── Enforce Biometric Consent Check under DPDP Act ──
+        consent_given = request.data.get("biometric_consent_given")
+        if consent_given not in [True, "true", "True", 1, "1"]:
+            return Response(
+                {"error": "Biometric consent is required under the DPDP Act, 2023 to enroll and process face templates."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         serializer = FaceRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -116,15 +124,27 @@ class FaceRegistrationView(APIView):
         student.is_face_registered = True
         student.save(update_fields=["is_face_registered"])
 
+        # ── Log the explicit Biometric Consent event ──
+        from ..models.face_embedding import BiometricConsentLog
+        from ipware import get_client_ip
+        ip_addr, _ = get_client_ip(request)
+        BiometricConsentLog.objects.create(
+            student=student,
+            consent_given=True,
+            consent_version="v1.0",
+            ip_address=ip_addr,
+            user_agent=request.META.get('HTTP_USER_AGENT', '')[:500]
+        )
+
         logger.info(
-            "Face registration complete for student %s (user_id=%d)",
+            "Face registration complete and consent logged for student %s (user_id=%d)",
             student.student_id,
             request.user.id,
         )
 
         return Response(
             {
-                "message": "Face registration successful. All 3 angles stored.",
+                "message": "Face registration successful. All 3 angles stored and biometric consent logged.",
                 "angles": results,
             },
             status=status.HTTP_201_CREATED,

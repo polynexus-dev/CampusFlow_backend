@@ -1,33 +1,54 @@
+# ── Standard Library Imports ──────────────────────────────────────────────────
+import datetime
 import math
-# pyrefly: ignore [missing-import]
-from rest_framework import generics, status
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.views import APIView
-from django.db import transaction, connection
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
+import random
+import uuid
+
+# ── Django Core Imports ──────────────────────────────────────────────────────
 from django.contrib.auth.models import User
-from ..serializers import UserRegistrationSerializer, MyTokenObtainPairSerializer, LogoutSerializer
-from rest_framework_simplejwt.views import TokenObtainPairView
+from django.core.cache import cache
+from django.core.mail import send_mail
+from django.db import connection, transaction
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework import generics, permissions
+
+# ── Third-Party Framework Imports ─────────────────────────────────────────────
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
+from rest_framework import generics, permissions, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+# ── Local App-Specific Imports ────────────────────────────────────────────────
 from ..models.profile import (
-    StudentProfile, TeachingStaffProfile, NonTeachingStaffProfile,
-    ManagementProfile, AdministratorProfile, DepartmentHeadProfile
+    AdministratorProfile,
+    DepartmentHeadProfile,
+    ManagementProfile,
+    NonTeachingStaffProfile,
+    StudentProfile,
+    TeachingStaffProfile,
 )
 from ..permissions import (
-    IsSaaSAdmin, IsCollegeAdmin, IsSaaSOrCollegeAdmin, IsFacultyOrAbove,
-    IsNotStudent, DepartmentExistsForUserCreation, CanCreateCollegeAdmin,
-    is_saas_admin, is_college_admin, get_user_group
+    CanCreateCollegeAdmin,
+    DepartmentExistsForUserCreation,
+    IsCollegeAdmin,
+    IsFacultyOrAbove,
+    IsNotStudent,
+    IsSaaSAdmin,
+    IsSaaSOrCollegeAdmin,
+    get_user_group,
+    is_college_admin,
+    is_saas_admin,
 )
-import random
-import datetime
-from django.core.mail import send_mail
-from django.utils import timezone
-from django.core.cache import cache
-# from ..models.otp import EmailOTP  # Removed in favor of Cache
+from ..serializers import (
+    LogoutSerializer,
+    MyTokenObtainPairSerializer,
+    UserRegistrationSerializer,
+)
+from ..utils import mask_sensitive_field
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -302,6 +323,326 @@ class ResendOTPView(APIView):
             return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
         except Exception:
             return Response({"error": "Failed to send email."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class StudentOnboardRequestOTPView(APIView):
+    """
+    Onboarding: Request a 6-digit OTP for pre-created student accounts.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+        if not email:
+            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Auto-tenant routing by email domain ──
+        if connection.schema_name == 'public':
+            if '@' not in email:
+                return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
+            email_domain = email.split('@')[-1]
+            
+            from tenants.models import Tenant
+            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
+            if not target_tenant:
+                return Response(
+                    {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            connection.set_tenant(target_tenant)
+
+        # Verify that the user (with student role) exists in this tenant schema
+        user = User.objects.filter(email=email).first()
+        if not user or not hasattr(user, 'student_profile'):
+            return Response(
+                {"error": "This email is not pre-registered. Please contact your college administrator."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Generate 6-digit OTP
+        otp_code = str(random.randint(100000, 999999))
+        cache.set(f"onboard_otp_{email}", otp_code, timeout=600)
+
+        # Send Email with HTML template
+        try:
+            from django.core.mail import EmailMultiAlternatives
+            from django.template.loader import render_to_string
+
+            context = {'otp_code': otp_code}
+            html_content = render_to_string('emails/student_onboarding_otp.html', context)
+            text_content = f"Welcome to CampusNexus. Your verification code is: {otp_code}"
+
+            msg = EmailMultiAlternatives(
+                subject="Verify your CampusNexus Account",
+                body=text_content,
+                from_email=None,  # Uses DEFAULT_FROM_EMAIL from settings
+                to=[email]
+            )
+            msg.attach_alternative(html_content, "text/html")
+            msg.send()
+
+            return Response({"message": "OTP sent successfully to your college email."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            # Fallback to plain text if rendering/SMTP fails
+            try:
+                send_mail(
+                    "Verify your CampusNexus Account",
+                    f"Welcome to CampusNexus. Your verification code is: {otp_code}",
+                    None,
+                    [email]
+                )
+                return Response({"message": "OTP sent successfully to your college email (text fallback)."}, status=status.HTTP_200_OK)
+            except Exception as ex:
+                return Response(
+                    {"error": f"Failed to send email. Please check configuration. Detail: {str(ex)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+
+class StudentOnboardVerifyPasswordView(APIView):
+    """
+    Onboarding: Verify OTP, set new password, and log user in (returning JWT token).
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+        otp_provided = request.data.get('otp', '').strip()
+        password = request.data.get('password', '')
+        confirm_password = request.data.get('confirm_password', '')
+
+        if not email or not otp_provided:
+            return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not password or not confirm_password:
+            return Response({"error": "Password and confirmation are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if password != confirm_password:
+            return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Auto-tenant routing by email domain ──
+        if connection.schema_name == 'public':
+            if '@' not in email:
+                return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
+            email_domain = email.split('@')[-1]
+            
+            from tenants.models import Tenant
+            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
+            if not target_tenant:
+                return Response(
+                    {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            connection.set_tenant(target_tenant)
+
+        # Verify OTP
+        cached_otp = cache.get(f"onboard_otp_{email}")
+        if not cached_otp or cached_otp != otp_provided:
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch student user
+        user = User.objects.filter(email=email).first()
+        if not user or not hasattr(user, 'student_profile'):
+            return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        student_profile = user.student_profile
+
+        # Update Password and Activate User
+        user.set_password(password)
+        user.is_active = True
+        user.save()
+
+        # Under DPDP Act: Update General Consent Flags during onboarding
+        from django.utils import timezone
+        student_profile.consent_given = True
+        student_profile.consent_timestamp = timezone.now()
+        student_profile.consent_version = 'v1.0'
+        student_profile.save(update_fields=['consent_given', 'consent_timestamp', 'consent_version'])
+
+        # Cleanup OTP cache
+        cache.delete(f"onboard_otp_{email}")
+
+        # Automatically log the student in and return JWT tokens for seamless access
+        from rest_framework_simplejwt.tokens import RefreshToken
+        refresh = RefreshToken.for_user(user)
+        refresh['tenant_schema'] = connection.schema_name
+
+        return Response({
+            "message": "Onboarding completed successfully! Welcome to CampusNexus.",
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "email": user.email,
+            "username": user.username,
+            "role": "student"
+        }, status=status.HTTP_200_OK)
+
+
+class ForgotPasswordRequestOTPView(APIView):
+    """
+    Password Recovery: Step 1: Send a password reset OTP over college email.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+        if not email:
+            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Auto-tenant routing by email domain ──
+        if connection.schema_name == 'public':
+            if '@' not in email:
+                return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
+            email_domain = email.split('@')[-1]
+            
+            from tenants.models import Tenant
+            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
+            if not target_tenant:
+                return Response(
+                    {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            connection.set_tenant(target_tenant)
+
+        # Check if the user exists
+        user = User.objects.filter(email=email).first()
+        if not user:
+            return Response(
+                {"error": "No user account exists with this email address."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Generate 6-digit OTP
+        otp_code = str(random.randint(100000, 999999))
+        cache.set(f"forgot_otp_{email}", otp_code, timeout=600)
+
+        # Send Email
+        try:
+            from django.core.mail import EmailMultiAlternatives
+            from django.template.loader import render_to_string
+
+            context = {'otp_code': otp_code}
+            html_content = render_to_string('emails/forgot_password_otp.html', context)
+            text_content = f"CampusNexus Password Reset verification code: {otp_code}"
+
+            msg = EmailMultiAlternatives(
+                subject="Reset your CampusNexus Password",
+                body=text_content,
+                from_email=None,
+                to=[email]
+            )
+            msg.attach_alternative(html_content, "text/html")
+            msg.send()
+
+            return Response({"message": "Password reset OTP sent to your email."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            try:
+                send_mail(
+                    "Reset your CampusNexus Password",
+                    f"CampusNexus Password Reset verification code: {otp_code}",
+                    None,
+                    [email]
+                )
+                return Response({"message": "Password reset OTP sent to your email (fallback)."}, status=status.HTTP_200_OK)
+            except Exception as ex:
+                return Response(
+                    {"error": f"Failed to send email. Detail: {str(ex)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+
+class ForgotPasswordVerifyOTPView(APIView):
+    """
+    Password Recovery: Step 2: Verify OTP and return a temporary single-use Reset Token.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+        otp_provided = request.data.get('otp', '').strip()
+
+        if not email or not otp_provided:
+            return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Auto-tenant routing by email domain ──
+        if connection.schema_name == 'public':
+            if '@' not in email:
+                return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
+            email_domain = email.split('@')[-1]
+            
+            from tenants.models import Tenant
+            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
+            if not target_tenant:
+                return Response(
+                    {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            connection.set_tenant(target_tenant)
+
+        # Check OTP
+        cached_otp = cache.get(f"forgot_otp_{email}")
+        if not cached_otp or cached_otp != otp_provided:
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate a secure single-use reset token
+        reset_token = uuid.uuid4().hex
+        cache.set(f"reset_token_{email}", reset_token, timeout=600)
+        cache.delete(f"forgot_otp_{email}")
+
+        return Response({
+            "message": "OTP verified successfully. You can now set your new password.",
+            "reset_token": reset_token
+        }, status=status.HTTP_200_OK)
+
+
+class ForgotPasswordResetView(APIView):
+    """
+    Password Recovery: Step 3: Complete password reset using the token.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+        reset_token = request.data.get('reset_token', '').strip()
+        password = request.data.get('password', '')
+        confirm_password = request.data.get('confirm_password', '')
+
+        if not email or not reset_token or not password or not confirm_password:
+            return Response({"error": "All parameters (email, reset_token, password, confirm_password) are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if password != confirm_password:
+            return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Auto-tenant routing by email domain ──
+        if connection.schema_name == 'public':
+            if '@' not in email:
+                return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
+            email_domain = email.split('@')[-1]
+            
+            from tenants.models import Tenant
+            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
+            if not target_tenant:
+                return Response(
+                    {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            connection.set_tenant(target_tenant)
+
+        # Verify the reset token
+        cached_token = cache.get(f"reset_token_{email}")
+        if not cached_token or cached_token != reset_token:
+            return Response({"error": "Invalid, expired, or compromised reset token."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get User
+        user = User.objects.filter(email=email).first()
+        if not user:
+            return Response({"error": "User account not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update Password
+        user.set_password(password)
+        user.save()
+
+        # Cleanup token cache
+        cache.delete(f"reset_token_{email}")
+
+        return Response({"message": "Password reset completed successfully. You can now log in with your new password."}, status=status.HTTP_200_OK)
+
 
 
 class ResetDeviceLockView(APIView):
@@ -591,6 +932,9 @@ class StudentUserProfileView(APIView):
             return Response({"count": StudentProfile.objects.count()}, status=status.HTTP_200_OK)
 
         student_profiles = StudentProfile.objects.all().select_related('user', 'department')
+        
+        user = request.user
+        is_admin = is_saas_admin(user) or get_user_group(user) in ('Management', 'Administrator')
 
         search_query = request.query_params.get('search')
         if search_query:
@@ -635,7 +979,7 @@ class StudentUserProfileView(APIView):
                 "department_id": stud.department.id if stud.department else None,
                 "middle_name": stud.middle_name, "date_of_birth": stud.date_of_birth,
                 "gender": stud.gender, "blood_group": stud.blood_group,
-                "aadhaar_number": stud.aadhaar_number, "nationality": stud.nationality,
+                "aadhaar_number": stud.aadhaar_number if is_admin else mask_sensitive_field(stud.aadhaar_number), "nationality": stud.nationality,
                 "religion": stud.religion, "category": stud.category,
                 "disability_status": stud.disability_status,
                 "disability_details": stud.disability_details,
@@ -929,7 +1273,7 @@ class UserProfileView(APIView):
                 "department": profile.department.name if profile.department else None,
                 "middle_name": profile.middle_name, "date_of_birth": profile.date_of_birth,
                 "gender": profile.gender, "blood_group": profile.blood_group,
-                "aadhaar_number": profile.aadhaar_number, "nationality": profile.nationality,
+                "aadhaar_number": mask_sensitive_field(profile.aadhaar_number), "nationality": profile.nationality,
                 "religion": profile.religion, "category": profile.category,
                 "disability_status": profile.disability_status, "disability_details": profile.disability_details,
                 "emergency_contact_name": profile.emergency_contact_name,
@@ -981,13 +1325,15 @@ class UserProfileView(APIView):
                 "date_of_joining": profile.date_of_joining, "designation": profile.designation,
                 "qualifications": profile.qualifications, "specializations": profile.specializations,
                 "experience_years": profile.experience_years, "employee_type": profile.employee_type,
-                "bank_account_number": profile.bank_account_number, "pan_number": profile.pan_number,
+                "bank_account_number": mask_sensitive_field(profile.bank_account_number), "pan_number": mask_sensitive_field(profile.pan_number),
                 "epf_esi_details": profile.epf_esi_details, "staff_role": profile.staff_role, "status": profile.status,
                 "profile_picture": profile.profile_picture.url if profile.profile_picture else None,
                 "office_room_number": profile.office_room_number, "research_interests": profile.research_interests,
                 "publications_link": profile.publications_link,
                 "replacement_availability_preferences": profile.replacement_availability_preferences,
             }
+            # Mask Aadhaar on profile_data
+            profile_data["aadhaar_number"] = mask_sensitive_field(profile.aadhaar_number)
 
         elif usergroup == 'Support Staff':
             profile = NonTeachingStaffProfile.objects.filter(user=user).first()
@@ -1011,11 +1357,13 @@ class UserProfileView(APIView):
                 "permanent_city": profile.permanent_city, "permanent_district": profile.permanent_district,
                 "permanent_state": profile.permanent_state, "permanent_pincode": profile.permanent_pincode,
                 "date_of_joining": profile.date_of_joining, "designation": profile.designation,
-                "employee_type": profile.employee_type, "bank_account_number": profile.bank_account_number,
-                "pan_number": profile.pan_number, "staff_role": profile.staff_role, "status": profile.status,
+                "employee_type": profile.employee_type, "bank_account_number": mask_sensitive_field(profile.bank_account_number),
+                "pan_number": mask_sensitive_field(profile.pan_number), "staff_role": profile.staff_role, "status": profile.status,
                 "profile_picture": profile.profile_picture.url if profile.profile_picture else None,
                 "assigned_responsibilities": profile.assigned_responsibilities,
             }
+            # Mask Aadhaar
+            profile_data["aadhaar_number"] = mask_sensitive_field(profile.aadhaar_number)
 
         elif usergroup == 'Management':
             profile = ManagementProfile.objects.filter(user=user).first()
@@ -1068,11 +1416,13 @@ class UserProfileView(APIView):
                 "permanent_city": profile.permanent_city, "permanent_district": profile.permanent_district,
                 "permanent_state": profile.permanent_state, "permanent_pincode": profile.permanent_pincode,
                 "date_of_joining": profile.date_of_joining, "designation": profile.designation,
-                "employee_type": profile.employee_type, "bank_account_number": profile.bank_account_number,
-                "pan_number": profile.pan_number, "staff_role": profile.staff_role, "status": profile.status,
+                "employee_type": profile.employee_type, "bank_account_number": mask_sensitive_field(profile.bank_account_number),
+                "pan_number": mask_sensitive_field(profile.pan_number), "staff_role": profile.staff_role, "status": profile.status,
                 "profile_picture": profile.profile_picture.url if profile.profile_picture else None,
                 "assigned_responsibilities": profile.assigned_responsibilities,
             }
+            # Mask Aadhaar
+            profile_data["aadhaar_number"] = mask_sensitive_field(profile.aadhaar_number)
 
         elif usergroup == 'Department Head':
             profile = DepartmentHeadProfile.objects.filter(user=user).first()
@@ -1096,10 +1446,12 @@ class UserProfileView(APIView):
                 "permanent_city": profile.permanent_city, "permanent_district": profile.permanent_district,
                 "permanent_state": profile.permanent_state, "permanent_pincode": profile.permanent_pincode,
                 "date_of_joining": profile.date_of_joining, "designation": profile.designation,
-                "employee_type": profile.employee_type, "bank_account_number": profile.bank_account_number,
-                "pan_number": profile.pan_number, "staff_role": profile.staff_role, "status": profile.status,
+                "employee_type": profile.employee_type, "bank_account_number": mask_sensitive_field(profile.bank_account_number),
+                "pan_number": mask_sensitive_field(profile.pan_number), "staff_role": profile.staff_role, "status": profile.status,
                 "profile_picture": profile.profile_picture.url if profile.profile_picture else None,
             }
+            # Mask Aadhaar
+            profile_data["aadhaar_number"] = mask_sensitive_field(profile.aadhaar_number)
 
         elif is_saas_admin(user):
             # SaaS Admin has no profile record in tenant — return basic user info
@@ -1367,3 +1719,187 @@ class ActiveTenantSettingsView(APIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class GuardianConsentApprovalView(APIView):
+    """
+    Public endpoint for parent/guardian consent approval of minor registrations.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+        student_id = request.data.get('student_id', '').strip()
+        guardian_email = request.data.get('guardian_email', '').strip().lower()
+        action = request.data.get('action', 'approve').strip().lower()
+
+        if not email or not student_id or not guardian_email:
+            return Response({"error": "email, student_id, and guardian_email are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Auto-tenant routing by student email domain ──
+        if connection.schema_name == 'public':
+            email_domain = email.split('@')[-1]
+            from tenants.models import Tenant
+            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
+            if target_tenant:
+                connection.set_tenant(target_tenant)
+
+        profile = StudentProfile.objects.filter(
+            user__email=email,
+            student_id=student_id,
+            parent_guardian_email=guardian_email
+        ).first()
+
+        if not profile:
+            return Response({"error": "No student profile found with the provided details."}, status=status.HTTP_404_NOT_FOUND)
+
+        if profile.status != 'pending_guardian':
+            return Response({"error": f"Student registration status is '{profile.status}', not pending guardian consent."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if action == 'approve':
+            profile.guardian_consent_given = True
+            profile.status = 'active'
+            profile.save()
+            
+            # Record in AuditLog
+            from ..models.audit import AuditLog
+            AuditLog.objects.create(
+                user=None,
+                action='UPDATE',
+                model_name='StudentProfile',
+                object_id=str(profile.pk),
+                object_repr=f"Guardian approved consent for {profile.user.username}",
+                changes={"status": {"old": "pending_guardian", "new": "active"}, "guardian_consent_given": {"old": False, "new": True}},
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
+                endpoint=request.path[:500]
+            )
+            return Response({"message": "Guardian consent successfully verified. Student account is now active."}, status=status.HTTP_200_OK)
+        else:
+            profile.status = 'rejected'
+            profile.save()
+            return Response({"message": "Student registration rejected by guardian."}, status=status.HTTP_200_OK)
+
+
+class UserDataErasureView(APIView):
+    """
+    Scrubs all user PII data, deletes biometric face templates, and deactivates the user account
+    in compliance with Section 12 (Right to Erasure) of the DPDP Act, 2023.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        group = get_user_group(user)
+        profile = get_user_profile_by_user(user)
+
+        if not profile:
+            return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # 1. Delete biometric face templates (if student)
+        if group == 'student':
+            from ..models.face_embedding import FaceEmbedding
+            embeddings = FaceEmbedding.objects.filter(student=profile)
+            for emb in embeddings:
+                if emb.image:
+                    try:
+                        emb.image.delete(save=False)
+                    except Exception:
+                        pass
+                emb.delete()
+            
+            # Nullify student PII
+            profile.aadhaar_number = None
+            profile.middle_name = None
+            profile.contact_number = None
+            profile.alternate_phone_number = None
+            profile.current_address_line1 = None
+            profile.current_address_line2 = None
+            profile.permanent_address_line1 = None
+            profile.permanent_address_line2 = None
+            profile.parent_guardian_name = None
+            profile.parent_guardian_email = None
+            profile.medical_conditions_allergies = None
+            profile.status = 'deleted'
+            profile.save()
+
+        elif group == 'Faculty':
+            profile.aadhaar_number = None
+            profile.pan_number = None
+            profile.bank_account_number = None
+            profile.contact_number = None
+            profile.alternate_phone_number = None
+            profile.current_address_line1 = None
+            profile.current_address_line2 = None
+            profile.permanent_address_line1 = None
+            profile.permanent_address_line2 = None
+            profile.status = 'deleted'
+            profile.save()
+
+        elif group in ('Support Staff', 'Management', 'Administrator', 'Department Head'):
+            profile.aadhaar_number = None
+            profile.pan_number = None
+            profile.bank_account_number = None
+            profile.contact_number = None
+            profile.current_address_line1 = None
+            profile.permanent_address_line1 = None
+            profile.status = 'deleted'
+            profile.save()
+
+        # 2. Deactivate Django auth user
+        user.email = f"deleted_{user.id}@campusflow.invalid"
+        user.first_name = "Deleted"
+        user.last_name = "User"
+        user.is_active = False
+        user.save()
+
+        # Record in AuditLog
+        from ..models.audit import AuditLog
+        AuditLog.objects.create(
+            user=None,
+            action='DELETE',
+            model_name='User',
+            object_id=str(user.id),
+            object_repr=f"User requested data erasure (DPDP Compliance)",
+            changes={"is_active": {"old": True, "new": False}, "status": {"old": "active", "new": "deleted"}},
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
+            endpoint=request.path[:500]
+        )
+
+        return Response({"message": "Your personal data has been successfully erased, and your account has been deactivated in compliance with DPDP Act, 2023."}, status=status.HTTP_200_OK)
+
+
+class UserWithdrawConsentView(APIView):
+    """
+    Allows a user to withdraw consent under Section 6 of the DPDP Act.
+    This locks the account and sets status to pending until consent is re-granted.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        profile = get_user_profile_by_user(user)
+
+        if not profile:
+            return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        profile.consent_given = False
+        profile.consent_timestamp = None
+        profile.status = 'pending'
+        profile.save()
+
+        from ..models.audit import AuditLog
+        AuditLog.objects.create(
+            user=user,
+            action='UPDATE',
+            model_name=profile.__class__.__name__,
+            object_id=str(profile.pk),
+            object_repr=f"User withdrew privacy consent",
+            changes={"consent_given": {"old": True, "new": False}, "status": {"old": "active", "new": "pending"}},
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
+            endpoint=request.path[:500]
+        )
+
+        return Response({"message": "Consent successfully withdrawn. Your account has been locked."}, status=status.HTTP_200_OK)

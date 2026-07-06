@@ -1,4 +1,5 @@
 from django.urls import path
+from tenants.views import InvoiceListAPIView, InvoiceUploadReceiptAPIView
 from .views.department import DepartmentView, DepartmentDetailView
 from .views.users import (
     StudentUserProfileView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView,
@@ -7,7 +8,10 @@ from .views.users import (
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
     ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
     DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
-    CollegeEmployeesListView, UserPermissionsDetailView, ActiveTenantSettingsView
+    CollegeEmployeesListView, UserPermissionsDetailView, ActiveTenantSettingsView,
+    GuardianConsentApprovalView, UserDataErasureView, UserWithdrawConsentView,
+    StudentOnboardRequestOTPView, StudentOnboardVerifyPasswordView,
+    ForgotPasswordRequestOTPView, ForgotPasswordVerifyOTPView, ForgotPasswordResetView
 )
 from .views.location import LocationDetailView
 from .views.attendance import (
@@ -87,11 +91,23 @@ urlpatterns = [
     path('register/staff/', StaffRegistrationView.as_view(), name='staff_registration'),
     path('verify-account/', VerifyAccountView.as_view(), name='verify-account'),
     path('resend-otp/', ResendOTPView.as_view(), name='resend-otp'),
+    path('student/onboard/request-otp/', StudentOnboardRequestOTPView.as_view(), name='student_onboard_request_otp'),
+    path('student/onboard/verify-password/', StudentOnboardVerifyPasswordView.as_view(), name='student_onboard_verify_password'),
+    path('user/forgot-password/request-otp/', ForgotPasswordRequestOTPView.as_view(), name='forgot_password_request_otp'),
+    path('user/forgot-password/verify-otp/', ForgotPasswordVerifyOTPView.as_view(), name='forgot_password_verify_otp'),
+    path('user/forgot-password/reset/', ForgotPasswordResetView.as_view(), name='forgot_password_reset'),
     path('login/', MyObtainTokenPairView.as_view(), name='token_obtain_pair'),
     path('logout/', LogoutAPIView.as_view(), name='logout'),
     path('token/verify/', VerifyTokenView.as_view(), name='verify-token'),
     path('student/reset-device-lock/', ResetDeviceLockView.as_view(), name='reset_device_lock'),
     path('student/request-biometric-reset/', RequestBiometricResetView.as_view(), name='request_biometric_reset'),
+    
+    # DPDP Consent/Compliance routes
+    path('register/guardian-consent/', GuardianConsentApprovalView.as_view(), name='guardian_consent'),
+    path('user/request-erasure/', UserDataErasureView.as_view(), name='user_data_erasure'),
+    path('user/withdraw-consent/', UserWithdrawConsentView.as_view(), name='user_withdraw_consent'),
+    path('billing/invoices/', InvoiceListAPIView.as_view(), name='invoice_list'),
+    path('billing/invoices/<int:pk>/upload-receipt/', InvoiceUploadReceiptAPIView.as_view(), name='invoice_upload_receipt'),
 
     # ── Approvals ──
     path('approvals/pending/', PendingApprovalsView.as_view(), name='pending_approvals'),

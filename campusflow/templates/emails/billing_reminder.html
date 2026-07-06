@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Payment Reminder - CampusNexus</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #f4f5f8;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrapper {
+      width: 100%;
+      background-color: #f4f5f8;
+      padding: 40px 0;
+    }
+    .container {
+      max-width: 580px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+      border: 1px solid #eef0f5;
+    }
+    .header {
+      background: linear-gradient(135deg, #4A154B 0%, #2E0854 100%);
+      padding: 35px 30px;
+      text-align: center;
+    }
+    .header h1 {
+      color: #ffffff;
+      margin: 0;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+    .content {
+      padding: 40px;
+    }
+    .content p {
+      color: #4a5568;
+      font-size: 15px;
+      line-height: 24px;
+      margin-top: 0;
+      margin-bottom: 20px;
+    }
+    .amount-card {
+      background-color: #fffaf0;
+      border: 1px solid #feebc8;
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      margin: 30px 0;
+    }
+    .amount-val {
+      font-size: 32px;
+      font-weight: 800;
+      color: #dd6b20;
+      margin: 8px 0;
+    }
+    .bank-card {
+      background-color: #f7fafc;
+      border: 1px solid #edf2f7;
+      border-radius: 12px;
+      padding: 24px;
+      margin: 30px 0;
+    }
+    .bank-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #4A154B;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #edf2f7;
+      padding-bottom: 6px;
+    }
+    .bank-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .bank-label {
+      color: #718096;
+      font-weight: 500;
+    }
+    .bank-value {
+      color: #2d3748;
+      font-weight: 700;
+    }
+    .footer {
+      background-color: #f7fafc;
+      padding: 24px;
+      text-align: center;
+      border-top: 1px solid #edf2f7;
+    }
+    .footer p {
+      color: #a0aec0;
+      font-size: 12px;
+      margin: 0;
+      line-height: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      <div class="header">
+        <h1>CampusNexus Invoicing</h1>
+      </div>
+      <div class="content">
+        <p>Dear Principal / College Administrator,</p>
+        <p>This is a friendly reminder that a payment is due for your CampusNexus subscription.</p>
+        
+        <div class="amount-card">
+          <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; color: #718096; font-weight: 700;">Invoice #{{ invoice_number }} Due</div>
+          <div class="amount-val">Rs. {{ amount }}</div>
+          <div style="font-size: 13px; color: #4a5568; font-weight: 600;">Due Date: {{ due_date }}</div>
+        </div>
+
+        <p>Please initiate an <strong>RTGS / NEFT</strong> transfer to our bank account listed below:</p>
+
+        <div class="bank-card">
+          <div class="bank-title">SBI BANK DETAILS (OFFLINE PAYMENT)</div>
+          <div class="bank-row">
+            <span class="bank-label">Account Name:</span>
+            <span class="bank-value">Polynexus Technologies Private Limited</span>
+          </div>
+          <div class="bank-row">
+            <span class="bank-label">Bank Name:</span>
+            <span class="bank-value">State Bank of India</span>
+          </div>
+          <div class="bank-row">
+            <span class="bank-label">Account Number:</span>
+            <span class="bank-value">41234567890</span>
+          </div>
+          <div class="bank-row">
+            <span class="bank-label">IFSC Code:</span>
+            <span class="bank-value">SBIN0001234</span>
+          </div>
+          <div class="bank-row">
+            <span class="bank-label">Branch:</span>
+            <span class="bank-value">Nagpur Main Branch</span>
+          </div>
+        </div>
+
+        <p>Once you complete the bank transfer, please log in to your **CampusNexus Portal**, navigate to your **Billing Settings**, and upload the payment receipt screenshot along with the UTR Reference Number so we can verify and activate your subscription.</p>
+        <p>Thank you for choosing CampusNexus.</p>
+      </div>
+      <div class="footer">
+        <p>&copy; 2026 CampusNexus. All rights reserved.</p>
+        <p>Polynexus Technologies Private Limited (polynexus.in)</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

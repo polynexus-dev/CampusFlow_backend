@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 try:
     from dotenv import load_dotenv
     load_dotenv(BASE_DIR / ".env")
-except ImportError:
+except Exception:
     pass
 
 
@@ -331,16 +331,23 @@ SIMPLE_JWT = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ============================================================
-# EMAIL CONFIGURATION (PolyMX SMTP Server)
+# EMAIL CONFIGURATION (SMTP or Brevo API Backend)
 # ============================================================
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "mail.polynexus.in")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "noreply@polynexus.in")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 
-DEFAULT_FROM_EMAIL = f"CampusNexus <{EMAIL_HOST_USER}>"
+if EMAIL_HOST:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
+    EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+    EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+    EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
+else:
+    EMAIL_BACKEND = "anymail.backends.brevo.EmailBackend"
+    ANYMAIL = {
+        "BREVO_API_KEY": os.environ.get("BREVO_API_KEY", ""),
+    }
+
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "CampusNexus <noreply@campusnexus.in>")
 
 # Recipient list configuration for landing page enquiries
 CONTACT_RECIPIENT_EMAIL = os.environ.get("CONTACT_RECIPIENT_EMAIL", "hello@campusnexus.in")

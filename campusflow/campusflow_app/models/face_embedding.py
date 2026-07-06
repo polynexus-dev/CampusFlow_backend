@@ -43,3 +43,30 @@ class FaceEmbedding(models.Model):
 
     def __str__(self):
         return f"{self.student} — {self.get_angle_display()}"
+
+
+class BiometricConsentLog(models.Model):
+    """
+    Explicitly logs the consent details of students agreeing to register
+    and process biometric data (face templates) for attendance tracking.
+    """
+    student = models.ForeignKey(
+        StudentProfile,
+        on_delete=models.CASCADE,
+        related_name="biometric_consents"
+    )
+    consent_given = models.BooleanField(default=True)
+    consent_timestamp = models.DateTimeField(auto_now_add=True)
+    consent_version = models.CharField(max_length=10, default="v1.0")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=500, null=True, blank=True)
+
+    class Meta:
+        db_table = "biometric_consent_logs"
+        verbose_name = "Biometric Consent Log"
+        verbose_name_plural = "Biometric Consent Logs"
+        ordering = ["-consent_timestamp"]
+
+    def __str__(self):
+        return f"Biometric Consent for {self.student} at {self.consent_timestamp}"
+
