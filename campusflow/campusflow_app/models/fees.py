@@ -190,11 +190,13 @@ class FeePayment(models.Model):
     METHOD_UPI = "upi"
     METHOD_CARD = "card"
     METHOD_NET_BANKING = "net_banking"
+    METHOD_ONLINE = "online"
     METHOD_CHOICES = [
         (METHOD_CASH, "Cash"),
         (METHOD_UPI, "UPI"),
         (METHOD_CARD, "Card"),
         (METHOD_NET_BANKING, "Net Banking"),
+        (METHOD_ONLINE, "Online (Payment Gateway)"),
     ]
 
     invoice = models.ForeignKey(
@@ -220,6 +222,14 @@ class FeePayment(models.Model):
         blank=True,
         related_name="collected_payments",
         help_text="Admin/Staff user who collected this fee.",
+    )
+    gateway_transaction = models.OneToOneField(
+        "campusflow_app.PaymentGatewayTransaction",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fee_payment",
+        help_text="Set when payment_method=online — links back to the gateway transaction that produced this receipt.",
     )
 
     class Meta:

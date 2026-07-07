@@ -257,10 +257,11 @@ class MyAllowedModulesView(APIView):
         try:
             perm = TenantModulePermission.objects.get(group_name=group_name)
             allowed = perm.allowed_modules
-            if allowed is None:
+            if not allowed:
                 allowed = default_allowed
         except TenantModulePermission.DoesNotExist:
             allowed = default_allowed
+
 
         # Intersect to find final list (case-insensitive, returning lowercase/dash-separated form)
         subscribed_lower = {m.lower().replace(" ", "-") for m in subscribed}

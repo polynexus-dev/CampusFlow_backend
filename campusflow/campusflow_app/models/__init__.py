@@ -36,6 +36,7 @@ from .fees import (
     FeeCategory, FeeStructure, FeeStructureItem,
     StudentFeeInvoice, StudentFeeInvoiceItem, FeePayment
 )
+from .payments import PaymentGatewayTransaction
 
 # ── Module Subscriptions & Permissions ──
 from .module_permissions import TenantModulePermission

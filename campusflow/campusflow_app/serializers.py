@@ -733,9 +733,21 @@ class BookIssueSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
     student_id = serializers.CharField(source='student.student_id', read_only=True)
     staff_name = serializers.CharField(source='staff_user.get_full_name', read_only=True)
+
     class Meta:
         model = BookIssue
         fields = '__all__'
+
+    def validate(self, attrs):
+        book_copy = attrs.get('book_copy')
+        # Only validate on creation (new issue)
+        if not self.instance:
+            if book_copy.status != 'Available':
+                raise serializers.ValidationError(
+                    {"book_copy": f"Book copy with barcode '{book_copy.barcode}' is currently '{book_copy.status}' and cannot be issued."}
+                )
+        return attrs
+
 
 
 # ── Inventory & Store Serializers ──
@@ -768,18 +780,78 @@ class InventoryTransactionSerializer(serializers.ModelSerializer):
 # ── Digital Valuation Serializers ──
 class ValuationSessionSerializer(serializers.ModelSerializer):
     exam_name = serializers.CharField(source='exam.name', read_only=True)
-    evaluator_name = serializers.CharField(source='evaluator.user.get_full_name', read_only=True)
+    evaluator_name = serializers.SerializerMethodField()
+    academic_year = serializers.CharField(source='exam.academic_year', read_only=True)
+    semester = serializers.CharField(source='exam.semester', read_only=True)
+    course_name = serializers.CharField(source='exam.course.course_name', read_only=True)
+    total_papers = serializers.SerializerMethodField()
+    graded_papers = serializers.SerializerMethodField()
+
     class Meta:
         model = ValuationSession
         fields = '__all__'
 
+    def get_evaluator_name(self, obj):
+        if not obj.evaluator or not obj.evaluator.user:
+            return "Unknown Evaluator"
+        full_name = obj.evaluator.user.get_full_name()
+        if not full_name:
+            full_name = obj.evaluator.user.username
+        return f"{full_name} ({obj.evaluator.employee_id})"
+
+    def get_total_papers(self, obj):
+        return obj.papers.count()
+
+    def get_graded_papers(self, obj):
+        return obj.papers.filter(status='Evaluated').count()
+
 class ScannedPaperSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
-    student_id = serializers.CharField(source='student.student_id', read_only=True)
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.SerializerMethodField()
     exam_name = serializers.CharField(source='session.exam.name', read_only=True)
+    session_status = serializers.CharField(source='session.status', read_only=True)
+    question_paper_url = serializers.CharField(source='session.exam.question_paper_url', read_only=True)
+    question_structure = serializers.JSONField(source='session.exam.question_structure', read_only=True)
+    academic_year = serializers.CharField(source='session.exam.academic_year', read_only=True)
+    semester = serializers.CharField(source='session.exam.semester', read_only=True)
+    course_name = serializers.CharField(source='session.exam.course.course_name', read_only=True)
+
     class Meta:
         model = ScannedPaper
         fields = '__all__'
+
+
+
+    def get_student_name(self, obj):
+        request = self.context.get('request')
+        if request and request.user:
+            group = request.user.groups.first().name if request.user.groups.exists() else None
+            # Mask student name for Faculty (evaluators)
+            if group == 'Faculty':
+                return "Anonymous Student"
+        if not obj.student or not obj.student.user:
+            return "Unknown Student"
+        full_name = obj.student.user.get_full_name()
+        if not full_name:
+            return obj.student.user.username
+        return full_name
+
+    def get_student_id(self, obj):
+        request = self.context.get('request')
+        if request and request.user:
+            group = request.user.groups.first().name if request.user.groups.exists() else None
+            # Mask student ID for Faculty (evaluators)
+            if group == 'Faculty':
+                return "VAL-MASKED"
+        return obj.student.student_id
+
+    def validate(self, attrs):
+        if self.instance:
+            # Enforce lock on completed runs
+            if self.instance.session.status == 'Completed':
+                raise serializers.ValidationError("Cannot modify paper evaluation. The valuation session is completed/locked.")
+        return attrs
+
 
 
 

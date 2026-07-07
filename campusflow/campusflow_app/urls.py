@@ -66,6 +66,9 @@ from .views.fees import (
     BulkGenerateInvoicesView, RecordFeePaymentView, FeePaymentListView,
     FeeDashboardView
 )
+from .views.payments import (
+    CreatePaymentOrderView, VerifyPaymentView, RazorpayWebhookView
+)
 from .views.module_permissions import (
     TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView, CustomRolesView
 )
@@ -250,6 +253,11 @@ urlpatterns = [
     path('fees/invoices/<int:invoice_id>/pay/', RecordFeePaymentView.as_view(), name='fee-invoice-pay'),
     path('fees/payments/', FeePaymentListView.as_view(), name='fee-payment-list'),
     path('fees/dashboard/', FeeDashboardView.as_view(), name='fee-dashboard'),
+
+    # ── Online Payments (Gateway) ───────────────────────────────────
+    path('payments/orders/', CreatePaymentOrderView.as_view(), name='payment-create-order'),
+    path('payments/verify/', VerifyPaymentView.as_view(), name='payment-verify'),
+    path('payments/webhook/razorpay/', RazorpayWebhookView.as_view(), name='payment-webhook-razorpay'),
     # Conductor/Driver dashboard
     path('bus/driver/dashboard/', BusDriverDashboardView.as_view(), name='bus-driver-dashboard'),
 

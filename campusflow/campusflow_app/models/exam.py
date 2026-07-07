@@ -59,6 +59,8 @@ class Exam(models.Model):
     passing_marks = models.PositiveIntegerField(default=35)
     semester = models.CharField(max_length=50, blank=True, null=True)
     academic_year = models.CharField(max_length=9, blank=True, null=True, help_text="e.g. 2025-2026")
+    question_paper_url = models.CharField(max_length=500, blank=True, null=True, help_text="S3 / storage URL of the question paper PDF")
+    question_structure = models.JSONField(default=dict, blank=True, help_text="Predefined structure of questions and max marks, e.g. {'Q1': 10, 'Q2': 10}")
     invigilator = models.ForeignKey(
         User, on_delete=models.SET_NULL,
         null=True, blank=True,

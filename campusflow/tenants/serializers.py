@@ -87,8 +87,34 @@ class TenantListSerializer(serializers.ModelSerializer):
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
             'student_count', 'faculty_count', 'management_count', 'support_staff_count', 'hod_count',
             'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount',
-            'subscribed_modules'
+            'subscribed_modules',
+            'payment_gateway_active', 'fee_surcharge_mode', 'negotiated_education_rates', 'convenience_fee_percent',
+            'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret',
+            'cashfree_app_id', 'cashfree_secret_key',
+            'payu_merchant_key', 'payu_merchant_salt',
+            'phonepe_merchant_id', 'phonepe_salt_key', 'phonepe_salt_index',
+            'paytm_merchant_id', 'paytm_merchant_key',
+            'mobikwik_merchant_id', 'mobikwik_secret_key'
         ]
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        # Mask sensitive keys if they exist in the DB
+        if ret.get('razorpay_key_secret'):
+            ret['razorpay_key_secret'] = '********'
+        if ret.get('razorpay_webhook_secret'):
+            ret['razorpay_webhook_secret'] = '********'
+        if ret.get('cashfree_secret_key'):
+            ret['cashfree_secret_key'] = '********'
+        if ret.get('payu_merchant_salt'):
+            ret['payu_merchant_salt'] = '********'
+        if ret.get('phonepe_salt_key'):
+            ret['phonepe_salt_key'] = '********'
+        if ret.get('paytm_merchant_key'):
+            ret['paytm_merchant_key'] = '********'
+        if ret.get('mobikwik_secret_key'):
+            ret['mobikwik_secret_key'] = '********'
+        return ret
 
     def get_domain_name(self, obj):
         try:
@@ -155,5 +181,22 @@ class TenantUpdateSerializer(serializers.ModelSerializer):
             'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
             'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount',
-            'subscribed_modules'
+            'subscribed_modules',
+            'payment_gateway_active', 'fee_surcharge_mode', 'negotiated_education_rates', 'convenience_fee_percent',
+            'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret',
+            'cashfree_app_id', 'cashfree_secret_key',
+            'payu_merchant_key', 'payu_merchant_salt',
+            'phonepe_merchant_id', 'phonepe_salt_key', 'phonepe_salt_index',
+            'paytm_merchant_id', 'paytm_merchant_key',
+            'mobikwik_merchant_id', 'mobikwik_secret_key'
         ]
+
+    def update(self, instance, validated_data):
+        # Prevent overwriting secrets if they were passed as masked values
+        for field in [
+            'razorpay_key_secret', 'razorpay_webhook_secret', 'cashfree_secret_key', 'payu_merchant_salt',
+            'phonepe_salt_key', 'paytm_merchant_key', 'mobikwik_secret_key'
+        ]:
+            if validated_data.get(field) == '********':
+                validated_data.pop(field)
+        return super().update(instance, validated_data)

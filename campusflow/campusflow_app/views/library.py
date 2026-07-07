@@ -17,6 +17,16 @@ class BookCopyViewSet(viewsets.ModelViewSet):
 
 
 class BookIssueViewSet(viewsets.ModelViewSet):
-    queryset = BookIssue.objects.select_related('book_copy__book', 'student__user', 'staff_user').all().order_by('-issued_date')
     serializer_class = BookIssueSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = BookIssue.objects.select_related('book_copy__book', 'student__user', 'staff_user').all().order_by('-issued_date')
+        
+        # If student logs in, filter results to their own profile
+        if hasattr(user, 'student_profile'):
+            return queryset.filter(student=user.student_profile)
+            
+        return queryset
+

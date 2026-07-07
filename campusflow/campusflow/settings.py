@@ -43,6 +43,16 @@ if not SECRET_KEY:
     else:
         raise Exception("SECRET_KEY environment variable must be set when DEBUG=False.")
 
+# Symmetric key (Fernet) used to encrypt payment-gateway secrets at rest
+# (see campusflow_app/fields.py::EncryptedCharField). Generate one with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY")
+if not FIELD_ENCRYPTION_KEY:
+    if DEBUG:
+        FIELD_ENCRYPTION_KEY = "BuSMjas03NUbsVS4WDffyQ6JZ3ZZY5h1BGNmX1krWGg="
+    else:
+        raise Exception("FIELD_ENCRYPTION_KEY environment variable must be set when DEBUG=False.")
+
 _default_hosts = "campusnexus.in,.campusnexus.in"
 ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", _default_hosts).split(",") if h]
 if DEBUG:

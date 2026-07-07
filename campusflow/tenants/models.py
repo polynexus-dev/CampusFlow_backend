@@ -1,5 +1,6 @@
 from django.db import models
 from django_tenants.models import TenantMixin, DomainMixin
+from campusflow_app.fields import EncryptedCharField
 
 
 class Tenant(TenantMixin):
@@ -39,6 +40,76 @@ class Tenant(TenantMixin):
     billing_student_discount = models.DecimalField(max_digits=10, decimal_places=2, default=10.00)
     billing_employee_rate = models.DecimalField(max_digits=10, decimal_places=2, default=100.00)
     billing_employee_discount = models.DecimalField(max_digits=10, decimal_places=2, default=100.00)
+
+    # Payment Gateway Configuration
+    GATEWAY_MANUAL = 'manual'
+    GATEWAY_RAZORPAY = 'razorpay'
+    GATEWAY_CASHFREE = 'cashfree'
+    GATEWAY_PAYU = 'payu'
+    GATEWAY_PHONEPE = 'phonepe'
+    GATEWAY_PAYTM = 'paytm'
+    GATEWAY_MOBIKWIK = 'mobikwik'
+    GATEWAY_CHOICES = [
+        (GATEWAY_MANUAL, 'Manual (Offline / Cash)'),
+        (GATEWAY_RAZORPAY, 'Razorpay'),
+        (GATEWAY_CASHFREE, 'Cashfree'),
+        (GATEWAY_PAYU, 'PayU'),
+        (GATEWAY_PHONEPE, 'PhonePe'),
+        (GATEWAY_PAYTM, 'Paytm'),
+        (GATEWAY_MOBIKWIK, 'MobiKwik (Zaakpay)'),
+    ]
+
+    SURCHARGE_ABSORB = 'absorb'
+    SURCHARGE_PASS = 'pass_to_student'
+    SURCHARGE_CHOICES = [
+        (SURCHARGE_ABSORB, 'Absorb fees (College pays transaction cost)'),
+        (SURCHARGE_PASS, 'Pass surcharge to student (Student pays convenience fee)'),
+    ]
+
+    payment_gateway_active = models.CharField(
+        max_length=20,
+        choices=GATEWAY_CHOICES,
+        default=GATEWAY_MANUAL
+    )
+    fee_surcharge_mode = models.CharField(
+        max_length=20,
+        choices=SURCHARGE_CHOICES,
+        default=SURCHARGE_ABSORB
+    )
+    negotiated_education_rates = models.BooleanField(
+        default=False,
+        help_text="Enable negotiated education rates (e.g. ~0% UPI MDR/platform fees for colleges)"
+    )
+    convenience_fee_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        help_text="Percentage charged to the payer on top of the fee amount when fee_surcharge_mode=pass_to_student."
+    )
+
+    # Razorpay credentials
+    razorpay_key_id = models.CharField(max_length=255, blank=True, null=True)
+    razorpay_key_secret = EncryptedCharField(blank=True, null=True)
+    razorpay_webhook_secret = EncryptedCharField(blank=True, null=True, help_text="Secret configured in the Razorpay dashboard's Webhooks section, used to verify webhook signatures.")
+
+    # Cashfree credentials
+    cashfree_app_id = models.CharField(max_length=255, blank=True, null=True)
+    cashfree_secret_key = EncryptedCharField(blank=True, null=True)
+
+    # PayU credentials
+    payu_merchant_key = models.CharField(max_length=255, blank=True, null=True)
+    payu_merchant_salt = EncryptedCharField(blank=True, null=True)
+
+    # PhonePe credentials
+    phonepe_merchant_id = models.CharField(max_length=255, blank=True, null=True)
+    phonepe_salt_key = EncryptedCharField(blank=True, null=True)
+    phonepe_salt_index = models.CharField(max_length=50, blank=True, null=True)
+
+    # Paytm credentials
+    paytm_merchant_id = models.CharField(max_length=255, blank=True, null=True)
+    paytm_merchant_key = EncryptedCharField(blank=True, null=True)
+
+    # MobiKwik (Zaakpay) credentials
+    mobikwik_merchant_id = models.CharField(max_length=255, blank=True, null=True)
+    mobikwik_secret_key = EncryptedCharField(blank=True, null=True)
 
     # Subscribed Modules
     subscribed_modules = models.JSONField(

@@ -1,6 +1,8 @@
 from django.db import models
 from .exam import Exam
 from .profile import TeachingStaffProfile, StudentProfile
+import random
+import string
 
 
 class ValuationSession(models.Model):
@@ -31,6 +33,19 @@ class ScannedPaper(models.Model):
     evaluated_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     remarks = models.TextField(blank=True, null=True)
+
+    # New fields for college valuation requirements
+    mask_code = models.CharField(max_length=50, unique=True, blank=True, null=True, help_text="Anonymous code for blind evaluation")
+    question_scores = models.JSONField(default=dict, blank=True, help_text="Breakdown of marks by question (e.g. {'Q1': 10, 'Q2': 8})")
+
+    def save(self, *args, **kwargs):
+        if not self.mask_code:
+            while True:
+                code = "VAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+                if not ScannedPaper.objects.filter(mask_code=code).exists():
+                    self.mask_code = code
+                    break
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Paper for {self.student.student_id} - {self.status}"

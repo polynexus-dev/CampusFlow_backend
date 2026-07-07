@@ -271,6 +271,15 @@ class VerifyAccountView(APIView):
 
         user.is_active = True
         user.save()
+
+        # Only auto-activate student profiles on verification; staff/faculty profiles
+        # must remain 'pending' until explicitly approved by an Admin or HOD.
+        user_group = get_user_group(user)
+        if user_group == 'student':
+            profile = get_user_profile_by_user(user)
+            if profile:
+                profile.status = 'active'
+                profile.save()
         cache.delete(f"otp_{email}")
 
         return Response({"message": "Account activated successfully! You can now log in."}, status=status.HTTP_200_OK)
@@ -460,6 +469,55 @@ class ManagementUserProfileView(APIView):
             })
         return Response(result, status=status.HTTP_200_OK)
 
+    def put(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group != 'Management':
+            return Response({"detail": "You do not have permission to edit management profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.data.get('id') or request.data.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = ManagementProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = ManagementProfile.objects.get(id=employee_id)
+        except (ManagementProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Management profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        profile_field_names = [
+            'middle_name', 'date_of_birth', 'gender', 'aadhaar_number',
+            'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
+            'contact_number', 'current_address_line1', 'current_address_line2',
+            'current_city', 'current_district', 'current_state', 'current_pincode',
+            'permanent_address_line1', 'permanent_address_line2', 'permanent_city',
+            'permanent_district', 'permanent_state', 'permanent_pincode',
+            'date_of_joining', 'designation', 'employee_type',
+            'bank_account_number', 'pan_number', 'staff_role', 'status',
+            'assigned_responsibilities', 'office_location_details'
+        ]
+        return helper_update_employee_profile(profile, request, profile_field_names)
+
+    def delete(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group != 'Management':
+            return Response({"detail": "You do not have permission to delete management profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.query_params.get('id') or request.query_params.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = ManagementProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = ManagementProfile.objects.get(id=employee_id)
+        except (ManagementProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Management profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        return helper_delete_employee_profile(profile)
+
 
 class AdministratorUserProfileView(APIView):
     """View all Administrator profiles. Only Management or SaaS Admin can access."""
@@ -515,6 +573,55 @@ class AdministratorUserProfileView(APIView):
                 "assigned_responsibilities": prof.assigned_responsibilities,
             })
         return Response(result, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to edit administrator profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.data.get('id') or request.data.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = AdministratorProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = AdministratorProfile.objects.get(id=employee_id)
+        except (AdministratorProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Administrator profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        profile_field_names = [
+            'middle_name', 'date_of_birth', 'gender', 'aadhaar_number',
+            'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
+            'contact_number', 'current_address_line1', 'current_address_line2',
+            'current_city', 'current_district', 'current_state', 'current_pincode',
+            'permanent_address_line1', 'permanent_address_line2', 'permanent_city',
+            'permanent_district', 'permanent_state', 'permanent_pincode',
+            'date_of_joining', 'designation', 'employee_type',
+            'bank_account_number', 'pan_number', 'staff_role', 'status',
+            'assigned_responsibilities'
+        ]
+        return helper_update_employee_profile(profile, request, profile_field_names)
+
+    def delete(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to delete administrator profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.query_params.get('id') or request.query_params.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = AdministratorProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = AdministratorProfile.objects.get(id=employee_id)
+        except (AdministratorProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Administrator profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        return helper_delete_employee_profile(profile)
 
 
 class TeachingStaffUserProfileView(APIView):
@@ -578,6 +685,56 @@ class TeachingStaffUserProfileView(APIView):
             })
         return Response(result, status=status.HTTP_200_OK)
 
+    def put(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to edit teaching staff profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.data.get('id') or request.data.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = TeachingStaffProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = TeachingStaffProfile.objects.get(id=employee_id)
+        except (TeachingStaffProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Faculty profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        profile_field_names = [
+            'middle_name', 'date_of_birth', 'gender', 'blood_group', 'aadhaar_number', 'nationality',
+            'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
+            'contact_number', 'alternate_phone_number', 'current_address_line1', 'current_address_line2',
+            'current_city', 'current_district', 'current_state', 'current_pincode',
+            'permanent_address_line1', 'permanent_address_line2', 'permanent_city',
+            'permanent_district', 'permanent_state', 'permanent_pincode',
+            'date_of_joining', 'designation', 'qualifications', 'specializations',
+            'experience_years', 'employee_type', 'bank_account_number', 'pan_number',
+            'epf_esi_details', 'staff_role', 'status', 'office_room_number',
+            'research_interests', 'publications_link', 'replacement_availability_preferences'
+        ]
+        return helper_update_employee_profile(profile, request, profile_field_names)
+
+    def delete(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to delete teaching staff profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.query_params.get('id') or request.query_params.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = TeachingStaffProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = TeachingStaffProfile.objects.get(id=employee_id)
+        except (TeachingStaffProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Faculty profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        return helper_delete_employee_profile(profile)
+
 
 class StudentUserProfileView(APIView):
     """
@@ -625,6 +782,7 @@ class StudentUserProfileView(APIView):
         result = []
         for stud in student_profiles:
             result.append({
+                "id": stud.id,
                 "user": {
                     "username": stud.user.username, "email": stud.user.email,
                     "first_name": stud.user.first_name, "last_name": stud.user.last_name
@@ -847,6 +1005,54 @@ class DepartmentHeadUserProfileView(APIView):
             })
         return Response(result, status=status.HTTP_200_OK)
 
+    def put(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to edit department head profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.data.get('id') or request.data.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = DepartmentHeadProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = DepartmentHeadProfile.objects.get(id=employee_id)
+        except (DepartmentHeadProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Department Head profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        profile_field_names = [
+            'middle_name', 'date_of_birth', 'gender', 'aadhaar_number',
+            'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
+            'contact_number', 'current_address_line1', 'current_address_line2',
+            'current_city', 'current_district', 'current_state', 'current_pincode',
+            'permanent_address_line1', 'permanent_address_line2', 'permanent_city',
+            'permanent_district', 'permanent_state', 'permanent_pincode',
+            'date_of_joining', 'designation', 'employee_type',
+            'bank_account_number', 'pan_number', 'staff_role', 'status'
+        ]
+        return helper_update_employee_profile(profile, request, profile_field_names)
+
+    def delete(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to delete department head profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.query_params.get('id') or request.query_params.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = DepartmentHeadProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = DepartmentHeadProfile.objects.get(id=employee_id)
+        except (DepartmentHeadProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Department Head profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        return helper_delete_employee_profile(profile)
+
 
 class NonTeachingStaffUserProfileView(APIView):
     """View all Support Staff profiles. College Admins and above only."""
@@ -896,6 +1102,55 @@ class NonTeachingStaffUserProfileView(APIView):
                 "assigned_responsibilities": prof.assigned_responsibilities,
             })
         return Response(result, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to edit support staff profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.data.get('id') or request.data.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = NonTeachingStaffProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = NonTeachingStaffProfile.objects.get(id=employee_id)
+        except (NonTeachingStaffProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Support Staff profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        profile_field_names = [
+            'middle_name', 'date_of_birth', 'gender', 'aadhaar_number',
+            'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
+            'contact_number', 'current_address_line1', 'current_address_line2',
+            'current_city', 'current_district', 'current_state', 'current_pincode',
+            'permanent_address_line1', 'permanent_address_line2', 'permanent_city',
+            'permanent_district', 'permanent_state', 'permanent_pincode',
+            'date_of_joining', 'designation', 'employee_type',
+            'bank_account_number', 'pan_number', 'staff_role', 'status',
+            'assigned_responsibilities'
+        ]
+        return helper_update_employee_profile(profile, request, profile_field_names)
+
+    def delete(self, request):
+        user = request.user
+        group = get_user_group(user)
+        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+            return Response({"detail": "You do not have permission to delete support staff profiles."}, status=status.HTTP_403_FORBIDDEN)
+            
+        employee_id = request.query_params.get('id') or request.query_params.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            profile = NonTeachingStaffProfile.objects.filter(employee_id=employee_id).first()
+            if not profile:
+                profile = NonTeachingStaffProfile.objects.get(id=employee_id)
+        except (NonTeachingStaffProfile.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Support Staff profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        return helper_delete_employee_profile(profile)
 
 
 class UserProfileView(APIView):
@@ -1132,6 +1387,64 @@ def get_user_profile_by_user(user):
     if group == 'Department Head': return getattr(user, 'department_head_profile', None)
     return None
 
+def helper_update_employee_profile(profile, request, profile_field_names):
+    user_data = request.data.get('user', {})
+    django_user = profile.user
+    
+    new_email = user_data.get('email')
+    if new_email and new_email != django_user.email:
+        if User.objects.filter(email=new_email).exclude(id=django_user.id).exists():
+            return Response({"error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+        django_user.email = new_email
+        
+    new_username = user_data.get('username')
+    if new_username and new_username != django_user.username:
+        if User.objects.filter(username=new_username).exclude(id=django_user.id).exists():
+            return Response({"error": "A user with this username already exists."}, status=status.HTTP_400_BAD_REQUEST)
+        django_user.username = new_username
+        
+    if 'first_name' in user_data:
+        django_user.first_name = user_data['first_name']
+    if 'last_name' in user_data:
+        django_user.last_name = user_data['last_name']
+
+    if 'is_active' in user_data:
+        is_act = user_data['is_active']
+        django_user.is_active = (is_act.lower() == 'true') if isinstance(is_act, str) else bool(is_act)
+    elif 'is_active' in request.data:
+        is_act = request.data['is_active']
+        django_user.is_active = (is_act.lower() == 'true') if isinstance(is_act, str) else bool(is_act)
+    elif 'status' in request.data:
+        django_user.is_active = (request.data['status'].lower() == 'active')
+
+    django_user.save()
+
+    for field in profile_field_names:
+        if field in request.data:
+            val = request.data[field]
+            if field in ('date_of_birth', 'date_of_joining') and val in ('', 'null', 'None'):
+                val = None
+            elif field == 'experience_years' and val in ('', 'null', 'None'):
+                val = None
+            setattr(profile, field, val)
+
+    dept_id = request.data.get('department_id')
+    if dept_id and hasattr(profile, 'department'):
+        from ..models.department import Department
+        try:
+            profile.department = Department.objects.get(id=dept_id)
+        except Department.DoesNotExist:
+            return Response({"error": "Department not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+    profile.save()
+    return Response({"message": f"{profile.__class__.__name__} updated successfully."}, status=status.HTTP_200_OK)
+
+def helper_delete_employee_profile(profile):
+    django_user = profile.user
+    django_user.delete()
+    return Response({"message": f"{profile.__class__.__name__} deleted successfully."}, status=status.HTTP_200_OK)
+
+
 class PendingApprovalsView(APIView):
     """
     List all users pending approval based on the requester's permissions.
@@ -1260,11 +1573,14 @@ class ApproveUserView(APIView):
         # Perform Action
         if action == 'approve':
             target_profile.status = 'active'
+            target_user.is_active = True
             msg = f"User {target_user.username} has been approved."
         else:
             target_profile.status = 'rejected'
+            target_user.is_active = False
             msg = f"User {target_user.username} has been rejected."
         
+        target_user.save()
         target_profile.save()
         return Response({"message": msg, "status": target_profile.status}, status=status.HTTP_200_OK)
 
