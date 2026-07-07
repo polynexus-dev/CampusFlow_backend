@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Tenant, Domain
+from .models import Tenant, Domain, Invoice
 from django.utils.text import slugify
 from django.contrib.auth.models import User, Group
 from django_tenants.utils import schema_context
@@ -87,7 +87,8 @@ class TenantListSerializer(serializers.ModelSerializer):
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
             'student_count', 'faculty_count', 'management_count', 'support_staff_count', 'hod_count',
             'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount',
-            'subscribed_modules',
+            'subscribed_modules', 'subscription_status', 'billing_cycle', 
+            'trial_start_date', 'trial_end_date', 'subscription_end_date',
             'payment_gateway_active', 'fee_surcharge_mode', 'negotiated_education_rates', 'convenience_fee_percent',
             'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret',
             'cashfree_app_id', 'cashfree_secret_key',
@@ -96,6 +97,7 @@ class TenantListSerializer(serializers.ModelSerializer):
             'paytm_merchant_id', 'paytm_merchant_key',
             'mobikwik_merchant_id', 'mobikwik_secret_key'
         ]
+
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -181,7 +183,8 @@ class TenantUpdateSerializer(serializers.ModelSerializer):
             'email_smtp_host', 'email_smtp_port', 'email_smtp_username', 'email_smtp_password',
             'erp_system_name', 'erp_api_url', 'erp_auth_token',
             'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount',
-            'subscribed_modules',
+            'subscribed_modules', 'subscription_status', 'billing_cycle',
+            'trial_start_date', 'trial_end_date', 'subscription_end_date',
             'payment_gateway_active', 'fee_surcharge_mode', 'negotiated_education_rates', 'convenience_fee_percent',
             'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret',
             'cashfree_app_id', 'cashfree_secret_key',
@@ -200,3 +203,31 @@ class TenantUpdateSerializer(serializers.ModelSerializer):
             if validated_data.get(field) == '********':
                 validated_data.pop(field)
         return super().update(instance, validated_data)
+
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    tenant_name = serializers.ReadOnlyField(source='tenant.name')
+
+    class Meta:
+        model = Invoice
+        fields = [
+            'id', 'tenant', 'tenant_name', 'invoice_number', 'amount', 
+            'billing_period_start', 'billing_period_end', 'due_date', 
+            'status', 'bank_receipt', 'utr_number', 'uploaded_at', 
+            'marked_paid_at', 'created_at'
+        ]
+        read_only_fields = ['id', 'invoice_number', 'tenant', 'tenant_name', 'amount', 'billing_period_start', 'billing_period_end', 'due_date', 'status', 'uploaded_at', 'marked_paid_at', 'created_at']
+
+
+class InvoiceUploadReceiptSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Invoice
+        fields = ['bank_receipt', 'utr_number']
+        extra_kwargs = {
+            'bank_receipt': {'required': True},
+            'utr_number': {'required': True}
+        }
+
+
+
+

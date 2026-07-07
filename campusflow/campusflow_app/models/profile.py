@@ -67,6 +67,13 @@ class StudentProfile(models.Model):
     medical_conditions_allergies = models.TextField(blank=True, null=True) # NEW
     extracurricular_interests = models.TextField(blank=True, null=True) # NEW
 
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
+    parent_guardian_name = models.CharField(max_length=255, blank=True, null=True)
+    parent_guardian_email = models.EmailField(blank=True, null=True)
+    guardian_consent_given = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Student Profile"
@@ -130,6 +137,10 @@ class TeachingStaffProfile(models.Model):
     publications_link = models.URLField(max_length=500, blank=True, null=True)
     replacement_availability_preferences = models.TextField(blank=True, null=True, help_text="e.g., Available for substitutes on Tuesdays after 2 PM")
 
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
 
     class Meta:
         verbose_name = "Teaching Staff Profile"
@@ -184,6 +195,10 @@ class NonTeachingStaffProfile(models.Model):
     profile_picture = models.ImageField(upload_to='profile_pics/non_teaching_staff/', blank=True, null=True)
     assigned_responsibilities = models.TextField(blank=True, null=True)
 
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
 
     class Meta:
         verbose_name = "Non-Teaching Staff Profile"
@@ -237,6 +252,10 @@ class ManagementProfile(models.Model):
     assigned_responsibilities = models.TextField(blank=True, null=True) # General field for any management tasks
     office_location_details = models.CharField(max_length=255, blank=True, null=True) # Specific office location info
 
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
 
     class Meta:
         verbose_name = "Management Profile"
@@ -290,6 +309,10 @@ class AdministratorProfile(models.Model):
     # For example:
     # security_clearance_level = models.CharField(max_length=50, blank=True, null=True)
 
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
 
     class Meta:
         verbose_name = "Administrator Profile"
@@ -342,6 +365,10 @@ class DepartmentHeadProfile(models.Model):
     # e.g., A list of courses they oversee or policy documents
     # managed_courses = models.ManyToManyField(Course, blank=True)
 
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
 
     class Meta:
         verbose_name = "Department Head Profile"

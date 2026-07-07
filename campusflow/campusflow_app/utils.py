@@ -46,3 +46,16 @@ def get_user_role_string(user):
     elif user.is_superuser:
         return 'admin'
     return 'unknown'
+
+
+def mask_sensitive_field(value, unmasked_len=4):
+    """
+    Mask a sensitive string (like Aadhaar, PAN, Bank Account) returning 
+    only the last `unmasked_len` characters, e.g., '********1234'.
+    """
+    if not value:
+        return value
+    val_str = str(value).strip()
+    if len(val_str) <= unmasked_len:
+        return "*" * len(val_str)
+    return "*" * (len(val_str) - unmasked_len) + val_str[-unmasked_len:]

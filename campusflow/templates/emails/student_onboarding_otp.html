@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Verify your CampusNexus Account</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #f4f5f8;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrapper {
+      width: 100%;
+      background-color: #f4f5f8;
+      padding: 40px 0;
+    }
+    .container {
+      max-width: 580px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+      border: 1px solid #eef0f5;
+    }
+    .header {
+      background: linear-gradient(135deg, #4A154B 0%, #2E0854 100%);
+      padding: 35px 30px;
+      text-align: center;
+    }
+    .header h1 {
+      color: #ffffff;
+      margin: 0;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+    .content {
+      padding: 40px;
+    }
+    .content p {
+      color: #4a5568;
+      font-size: 15px;
+      line-height: 24px;
+      margin-top: 0;
+      margin-bottom: 20px;
+    }
+    .otp-card {
+      background-color: #f7fafc;
+      border: 1px dashed #cbd5e0;
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      margin: 30px 0;
+    }
+    .otp-code {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 36px;
+      font-weight: 800;
+      color: #4A154B;
+      letter-spacing: 6px;
+      margin: 0;
+    }
+    .footer {
+      background-color: #f7fafc;
+      padding: 24px;
+      text-align: center;
+      border-top: 1px solid #edf2f7;
+    }
+    .footer p {
+      color: #a0aec0;
+      font-size: 12px;
+      margin: 0;
+      line-height: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      <div class="header">
+        <h1>CampusNexus</h1>
+      </div>
+      <div class="content">
+        <p>Hello,</p>
+        <p>Welcome to CampusNexus. Your college administrator has registered your email. To complete your mobile app onboarding and set your account password, please verify your email using the verification code below:</p>
+        <div class="otp-card">
+          <p style="font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; color: #a0aec0; margin-bottom: 8px; font-weight: 700;">Verification Code</p>
+          <div class="otp-code">{{ otp_code }}</div>
+        </div>
+        <p style="font-size: 13px; color: #718096; margin-bottom: 0;">This code is valid for 10 minutes. If you did not request this code, please ignore this email or contact your administrator.</p>
+      </div>
+      <div class="footer">
+        <p>&copy; 2026 CampusNexus. All rights reserved.</p>
+        <p>Polynexus Technologies Private Limited (polynexus.in)</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

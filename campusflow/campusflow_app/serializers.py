@@ -1,29 +1,48 @@
-from rest_framework import serializers
-from .models.department import Department
-from django.contrib.auth.models import User, Group, Permission
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-import uuid
+# ── Standard Library Imports ──────────────────────────────────────────────────
 import datetime
-from user_agents import parse
-from django.utils.translation import gettext_lazy as _
-from django.http import HttpRequest
-from ipware import get_client_ip
-from .models.profile import StudentProfile, TeachingStaffProfile, NonTeachingStaffProfile, ManagementProfile, AdministratorProfile, DepartmentHeadProfile
-from .models.attendance import Attendance
-from .models.location import Location
-from django.db import transaction, connection
+import uuid
+
+# ── Django Core Imports ──────────────────────────────────────────────────────
+from django.contrib.auth.models import Group, Permission, User
+from django.db import connection, transaction
 from django.db.models import Q
+from django.http import HttpRequest
+from django.utils.translation import gettext_lazy as _
+
+# ── Third-Party Framework Imports ─────────────────────────────────────────────
+from ipware import get_client_ip
+from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
-from .models.classroom import Classroom
-from .models.lecture import Lecture
+from user_agents import parse
+
+# ── Local App-Specific Imports ────────────────────────────────────────────────
+from .models.attendance import Attendance
 from .models.attendance_log import FaceAttendanceLog
-from .models.schedule import Schedule
-from .models.hostel import Hostel, HostelRoom, HostelAllocation
-from .models.tpo import RecruitmentDrive, PlacementApplication
+from .models.classroom import Classroom
+from .models.department import Department
+from .models.hostel import Hostel, HostelAllocation, HostelRoom
+from .models.inventory import (
+    InventoryCategory,
+    InventoryItem,
+    InventoryTransaction,
+    Supplier,
+)
+from .models.lecture import Lecture
 from .models.library import Book, BookCopy, BookIssue
-from .models.inventory import InventoryCategory, InventoryItem, Supplier, InventoryTransaction
-from .models.valuation import ValuationSession, ScannedPaper
+from .models.location import Location
+from .models.profile import (
+    AdministratorProfile,
+    DepartmentHeadProfile,
+    ManagementProfile,
+    NonTeachingStaffProfile,
+    StudentProfile,
+    TeachingStaffProfile,
+)
+from .models.schedule import Schedule
+from .models.tpo import PlacementApplication, RecruitmentDrive
+from .models.valuation import ScannedPaper, ValuationSession
 
 
 
@@ -386,6 +405,12 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     replacement_availability_preferences = serializers.CharField(required=False, allow_blank=True)
     assigned_responsibilities = serializers.CharField(required=False, allow_blank=True)
     office_location_details = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    
+    # DPDP Compliance fields
+    consent_given = serializers.BooleanField(required=False, default=False)
+    consent_version = serializers.CharField(max_length=10, required=False, allow_blank=True, default='v1.0')
+    parent_guardian_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    parent_guardian_email = serializers.EmailField(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -409,7 +434,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             'qualifications', 'specializations', 'experience_years', 'epf_esi_details',
             'office_room_number', 'research_interests', 'publications_link',
             'replacement_availability_preferences', 'assigned_responsibilities',
-            'office_location_details',
+            'office_location_details', 'consent_given', 'consent_version',
+            'parent_guardian_name', 'parent_guardian_email',
         ]
         extra_kwargs = {
             'first_name': {'required': False},
@@ -426,6 +452,11 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         valid_roles = ['student', 'Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']
         if role not in valid_roles:
             raise serializers.ValidationError({"role": f"Invalid role. Must be one of: {', '.join(valid_roles)}."})
+        
+        # --- DPDP CONSENT VALIDATION ---
+        if not data.get('consent_given', False):
+            raise serializers.ValidationError({"consent_given": "You must accept the privacy notice to register."})
+
         if role == 'student':
             if not student_id:
                 raise serializers.ValidationError({"student_id": "Student ID is required for students."})
@@ -435,6 +466,18 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"employee_id": "Employee ID should not be provided for students."})
             if not data.get('program_enrolled_in_id'):
                 raise serializers.ValidationError({"program_enrolled_in_id": "Program enrolled in is required for students."})
+            
+            # --- DPDP MINOR CHECK ---
+            dob = data.get('date_of_birth')
+            if not dob:
+                raise serializers.ValidationError({"date_of_birth": "Date of birth is required for students to determine age group."})
+            today = datetime.date.today()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            if age < 18:
+                if not data.get('parent_guardian_name') or not data.get('parent_guardian_email'):
+                    raise serializers.ValidationError({
+                        "parent_guardian_name": "Parent or guardian details (name and email) are required for students under 18 years of age."
+                    })
         elif role in ['Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']:
             if not employee_id:
                 raise serializers.ValidationError({"employee_id": "Employee ID is required for staff/admin/HOD members."})
@@ -446,6 +489,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"employee_id": "An employee with this ID already exists."})
             if student_id:
                 raise serializers.ValidationError({"student_id": "Student ID should not be provided for staff."})
+        
         # Department validation for specific roles
         department = data.get('department_id')
         roles_requiring_dept = ['student', 'Faculty', 'Department Head']
@@ -481,7 +525,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             'qualifications', 'specializations', 'experience_years', 'epf_esi_details',
             'office_room_number', 'research_interests', 'publications_link',
             'replacement_availability_preferences', 'assigned_responsibilities',
-            'office_location_details',
+            'office_location_details', 'consent_given', 'consent_version',
+            'parent_guardian_name', 'parent_guardian_email',
         ]
         for field_name in profile_field_names:
             if field_name in validated_data:
@@ -491,6 +536,21 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                     profile_data['program_enrolled_in'] = validated_data.pop(field_name)
                 else:
                     profile_data[field_name] = validated_data.pop(field_name)
+
+        # Set consent timestamp if consent was given
+        if profile_data.get('consent_given'):
+            from django.utils import timezone
+            profile_data['consent_timestamp'] = timezone.now()
+
+        # Handle student status and parental consent checks
+        if role == 'student':
+            dob = profile_data.get('date_of_birth')
+            if dob:
+                today = datetime.date.today()
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                if age < 18:
+                    profile_data['status'] = 'pending_guardian'
+                    profile_data['guardian_consent_given'] = False
 
         user = User.objects.create_user(
             username=validated_data['username'],
@@ -523,18 +583,17 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             fields = {k: v for k, v in profile_data.items() if hasattr(ManagementProfile, k)}
             if 'staff_role' not in fields or not fields['staff_role']:
                 fields['staff_role'] = 'director'
-            # Management is usually created by SaaS Admin, so we might keep it active or pending
-            fields['status'] = 'active' 
+            fields['status'] = 'active'
             ManagementProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'Management')
         elif role == 'Administrator':
             fields = {k: v for k, v in profile_data.items() if hasattr(AdministratorProfile, k)}
-            fields['status'] = 'active' # Admin created by SaaS/Mgmt is auto-active
+            fields['status'] = 'active'
             AdministratorProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'Administrator')
         elif role == 'Department Head':
             fields = {k: v for k, v in profile_data.items() if hasattr(DepartmentHeadProfile, k)}
-            fields['status'] = 'pending' # HOD needs Admin approval
+            fields['status'] = 'pending'
             DepartmentHeadProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'Department Head')
         else:

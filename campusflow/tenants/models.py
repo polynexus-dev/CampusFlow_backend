@@ -118,6 +118,20 @@ class Tenant(TenantMixin):
         help_text="Modules subscribed by this tenant (e.g. ['Hostel', 'TPO', 'Library', 'Inventory', 'Valuation', 'Leave', 'Payroll', 'Exams', 'Assignments', 'Attendance', 'Announcements'])"
     )
 
+    # Subscription status and cycle
+    subscription_status = models.CharField(
+        max_length=20,
+        choices=[('trial', 'Trial'), ('active', 'Active'), ('suspended', 'Suspended')],
+        default='trial'
+    )
+    billing_cycle = models.CharField(
+        max_length=20,
+        choices=[('monthly', 'Monthly'), ('annual', 'Annual')],
+        default='monthly'
+    )
+    trial_start_date = models.DateField(null=True, blank=True)
+    trial_end_date = models.DateField(null=True, blank=True)
+    subscription_end_date = models.DateField(null=True, blank=True)
 
     # Default: auto-create schema on save
     auto_create_schema = True
@@ -128,6 +142,44 @@ class Tenant(TenantMixin):
 
     def __str__(self):
         return self.name
+
+
+class Invoice(models.Model):
+    """
+    Manages offline bank-transfer B2B invoicing and validation.
+    """
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='invoices')
+    invoice_number = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    billing_period_start = models.DateField()
+    billing_period_end = models.DateField()
+    due_date = models.DateField()
+    
+    status = models.CharField(
+        max_length=30,
+        choices=[
+            ('pending_payment', 'Pending Payment'),
+            ('under_review', 'Under Review'),
+            ('paid', 'Paid'),
+            ('overdue', 'Overdue')
+        ],
+        default='pending_payment'
+    )
+    
+    # RTGS/NEFT transaction verification
+    bank_receipt = models.FileField(upload_to='billing_receipts/', blank=True, null=True)
+    utr_number = models.CharField(max_length=100, blank=True, null=True, help_text="Transaction Ref ID (UTR/NEFT)")
+    
+    uploaded_at = models.DateTimeField(null=True, blank=True)
+    marked_paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Invoice"
+        verbose_name_plural = "Invoices"
+
+    def __str__(self):
+        return f"{self.invoice_number} ({self.tenant.name}) - {self.status}"
 
 
 class Domain(DomainMixin):
