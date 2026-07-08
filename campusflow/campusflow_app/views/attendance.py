@@ -23,6 +23,7 @@ from ..models.attendance import Attendance
 from ..models.location import Location
 from ..utils import calculate_distance
 from ..models.classroom import Classroom
+from ..demo_guard import is_demo_tenant
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from ..models.lecture import Lecture
@@ -141,12 +142,12 @@ class LectureCheckinByCodeView(APIView):
             return Response({"detail": "device_id is required to mark attendance."}, status=status.HTTP_400_BAD_REQUEST)
 
         profile = getattr(request.user, 'student_profile', None)
-        if profile:
+        if profile and not is_demo_tenant():
             # 2b. Auto-bind device on first attendance if not already bound at login
             if not profile.locked_device_id:
                 profile.locked_device_id = device_id
                 profile.save()
-            
+
             # 2c. Enforce Device Locking
             if profile.locked_device_id != device_id:
                 return Response(

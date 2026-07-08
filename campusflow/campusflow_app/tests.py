@@ -267,4 +267,47 @@ class DPDPComplianceTests(TenantTestCase):
             db_user = User.objects.get(email='forgot@test.com')
             self.assertTrue(db_user.check_password('NewPassword123!'))
 
+    def test_user_profile_put_update(self):
+        with schema_context(self.tenant.schema_name):
+            student_user = User.objects.create_user(
+                username='stu_update_test', email='updatetest@test.com', password='Password123'
+            )
+            student_user.groups.add(Group.objects.get(name='student'))
+            profile = StudentProfile.objects.create(
+                user=student_user,
+                student_id='STU992',
+                department=self.dept,
+                contact_number='1234567890',
+                status='active'
+            )
+            token = RefreshToken.for_user(student_user)
+            token['tenant_schema'] = self.tenant.schema_name
+
+        url = reverse('user_profile')
+        
+        # Test PUT updating contact_number
+        data = {
+            'contact_number': '0987654321',
+            'user': {
+                'first_name': 'UpdatedFirst',
+                'last_name': 'UpdatedLast'
+            }
+        }
+        import json
+        response = self.client.put(
+            url,
+            json.dumps(data),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        with schema_context(self.tenant.schema_name):
+            profile.refresh_from_db()
+            self.assertEqual(profile.contact_number, '0987654321')
+            student_user.refresh_from_db()
+            self.assertEqual(student_user.first_name, 'UpdatedFirst')
+            self.assertEqual(student_user.last_name, 'UpdatedLast')
+
+
 

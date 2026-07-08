@@ -75,7 +75,7 @@ _extra_cors_origins = [o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").spl
 if _extra_cors_origins:
     CORS_ALLOWED_ORIGINS = _extra_cors_origins
 if DEBUG:
-    CORS_ALLOWED_ORIGIN_REGEXES.append(r"^http://localhost:\d+$")
+    CORS_ALLOWED_ORIGIN_REGEXES.append(r"^http://([a-z0-9-]+\.)?localhost:\d+$")
 
 # django-cors-headers only allows its own default header set unless told
 # otherwise — X-Tenant (set by the frontend so CampusFlowTenantMiddleware
@@ -279,7 +279,7 @@ else:
 # ============================================================
 ASGI_APPLICATION = "campusflow.asgi.application"
 
-_redis_url = REDIS_URL or "redis://redis:6379/0"
+_redis_url = REDIS_URL or "redis://127.0.0.1:6379/0"
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -346,16 +346,21 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 
 if EMAIL_HOST:
-    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    DEMO_REAL_EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
     EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
     EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
     EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
     EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
 else:
-    EMAIL_BACKEND = "anymail.backends.brevo.EmailBackend"
+    DEMO_REAL_EMAIL_BACKEND = "anymail.backends.brevo.EmailBackend"
     ANYMAIL = {
         "BREVO_API_KEY": os.environ.get("BREVO_API_KEY", ""),
     }
+
+# Wraps DEMO_REAL_EMAIL_BACKEND above and silently drops outgoing mail for
+# the public demo tenant (see campusflow_app/email_backend.py) — every other
+# tenant is unaffected, this just adds one hop before the real backend.
+EMAIL_BACKEND = "campusflow_app.email_backend.DemoAwareEmailBackend"
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "CampusNexus <noreply@campusnexus.in>")
 

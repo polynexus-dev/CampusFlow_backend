@@ -31,6 +31,7 @@ from ..models.profile import (
     StudentProfile,
     TeachingStaffProfile,
 )
+from ..demo_guard import IsNotDemoTenant, demo_block_response, is_demo_tenant
 from ..permissions import (
     CanCreateCollegeAdmin,
     DepartmentExistsForUserCreation,
@@ -442,6 +443,9 @@ class StudentOnboardVerifyPasswordView(APIView):
                 )
             connection.set_tenant(target_tenant)
 
+        if is_demo_tenant():
+            return demo_block_response()
+
         # Verify OTP
         cached_otp = cache.get(f"onboard_otp_{email}")
         if not cached_otp or cached_otp != otp_provided:
@@ -509,6 +513,9 @@ class ForgotPasswordRequestOTPView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             connection.set_tenant(target_tenant)
+
+        if is_demo_tenant():
+            return demo_block_response()
 
         # Check if the user exists
         user = User.objects.filter(email=email).first()
@@ -585,6 +592,9 @@ class ForgotPasswordVerifyOTPView(APIView):
                 )
             connection.set_tenant(target_tenant)
 
+        if is_demo_tenant():
+            return demo_block_response()
+
         # Check OTP
         cached_otp = cache.get(f"forgot_otp_{email}")
         if not cached_otp or cached_otp != otp_provided:
@@ -632,6 +642,9 @@ class ForgotPasswordResetView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             connection.set_tenant(target_tenant)
+
+        if is_demo_tenant():
+            return demo_block_response()
 
         # Verify the reset token
         cached_token = cache.get(f"reset_token_{email}")
@@ -1204,14 +1217,19 @@ class StudentUserProfileView(APIView):
 
         user_data = request.data.get('user', {})
         django_user = profile.user
-        
+
         new_email = user_data.get('email')
+        new_username = user_data.get('username')
+        identity_changing = (new_email and new_email != django_user.email) or \
+            (new_username and new_username != django_user.username)
+        if identity_changing and is_demo_tenant():
+            return demo_block_response()
+
         if new_email and new_email != django_user.email:
             if User.objects.filter(email=new_email).exclude(id=django_user.id).exists():
                 return Response({"error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
             django_user.email = new_email
-            
-        new_username = user_data.get('username')
+
         if new_username and new_username != django_user.username:
             if User.objects.filter(username=new_username).exclude(id=django_user.id).exists():
                 return Response({"error": "A user with this username already exists."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1720,8 +1738,49 @@ class UserProfileView(APIView):
         else:
             return Response({"detail": "User group not recognized."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Retrieve consent status from local profile variables safely
+        try:
+            profile_obj = locals().get('profile', None)
+            if profile_obj and hasattr(profile_obj, 'consent_given'):
+                profile_data["consent_given"] = profile_obj.consent_given
+            else:
+                profile_data["consent_given"] = True
+        except Exception:
+            profile_data["consent_given"] = True
+
         profile_data["tenant_logo"] = tenant_logo
         return Response(profile_data, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        user = request.user
+        profile = get_user_profile_by_user(user)
+        
+        if not profile and not is_saas_admin(user):
+            return Response({"detail": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if profile:
+            contact_number = request.data.get('contact_number')
+            if contact_number is not None:
+                profile.contact_number = contact_number
+                
+            alternate_phone_number = request.data.get('alternate_phone_number')
+            if alternate_phone_number is not None and hasattr(profile, 'alternate_phone_number'):
+                profile.alternate_phone_number = alternate_phone_number
+                
+            profile.save()
+
+        user_data = request.data.get('user', {})
+        if isinstance(user_data, dict):
+            first_name = user_data.get('first_name')
+            if first_name is not None:
+                user.first_name = first_name
+            last_name = user_data.get('last_name')
+            if last_name is not None:
+                user.last_name = last_name
+            user.save()
+
+        return Response({"message": "Profile updated successfully."}, status=status.HTTP_200_OK)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1742,14 +1801,19 @@ def get_user_profile_by_user(user):
 def helper_update_employee_profile(profile, request, profile_field_names):
     user_data = request.data.get('user', {})
     django_user = profile.user
-    
+
     new_email = user_data.get('email')
+    new_username = user_data.get('username')
+    identity_changing = (new_email and new_email != django_user.email) or \
+        (new_username and new_username != django_user.username)
+    if identity_changing and is_demo_tenant():
+        return demo_block_response()
+
     if new_email and new_email != django_user.email:
         if User.objects.filter(email=new_email).exclude(id=django_user.id).exists():
             return Response({"error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
         django_user.email = new_email
-        
-    new_username = user_data.get('username')
+
     if new_username and new_username != django_user.username:
         if User.objects.filter(username=new_username).exclude(id=django_user.id).exists():
             return Response({"error": "A user with this username already exists."}, status=status.HTTP_400_BAD_REQUEST)
@@ -2011,7 +2075,7 @@ class ActiveTenantSettingsView(APIView):
     Restricted to College Admins: this payload includes SMTP and ERP credentials
     (email_smtp_password, erp_auth_token), which must not be exposed to Faculty/Students.
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsCollegeAdmin, IsNotDemoTenant]
 
     def get(self, request):
         from django.db import connection
@@ -2219,3 +2283,47 @@ class UserWithdrawConsentView(APIView):
         )
 
         return Response({"message": "Consent successfully withdrawn. Your account has been locked."}, status=status.HTTP_200_OK)
+
+
+class UserGrantConsentView(APIView):
+    """
+    Allows a user to grant data privacy consent under the DPDP Act.
+    If the account was locked (pending status) due to consent withdrawal,
+    this re-activates it.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        profile = get_user_profile_by_user(user)
+
+        if not profile:
+            return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not getattr(profile, 'consent_given', False):
+            profile.consent_given = True
+            from django.utils import timezone
+            profile.consent_timestamp = timezone.now()
+            profile.consent_version = 'v1.0'
+            
+            # Re-activate user status if pending
+            if getattr(profile, 'status', None) == 'pending':
+                profile.status = 'active'
+                
+            profile.save()
+
+            from ..models.audit import AuditLog
+            AuditLog.objects.create(
+                user=user,
+                action='UPDATE',
+                model_name=profile.__class__.__name__,
+                object_id=str(profile.pk),
+                object_repr="User granted privacy consent",
+                changes={"consent_given": {"old": False, "new": True}, "status": {"old": "pending", "new": "active"}},
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
+                endpoint=request.path[:500]
+            )
+            return Response({"message": "Consent successfully registered and account activated."}, status=status.HTTP_200_OK)
+        
+        return Response({"message": "Consent already given."}, status=status.HTTP_200_OK)

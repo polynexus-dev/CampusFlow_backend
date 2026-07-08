@@ -48,21 +48,27 @@ class OverviewKPIView(APIView):
             check_in_time__date=today
         ).values('user').distinct().count()
 
-        # This month's payroll total
-        current_month = today.month
-        current_year = today.year
-        payroll_total = Payslip.objects.filter(
-            month=current_month, year=current_year
-        ).aggregate(total=Sum('net_payable'))['total'] or Decimal(0)
-
-        return Response({
+        data = {
             "total_students": total_students,
             "total_staff": total_staff,
             "total_departments": total_departments,
             "pending_leaves": pending_leaves,
             "todays_attendance": todays_attendance,
-            "monthly_payroll_total": str(payroll_total),
-        }, status=status.HTTP_200_OK)
+        }
+
+        # Payroll spend is financial/HR data — only college admins get it here,
+        # even though Faculty/Department Head can otherwise reach this KPI
+        # endpoint. Matches the payroll-specific analytics endpoint below,
+        # which is already IsCollegeAdmin-only.
+        if is_college_admin(request.user):
+            current_month = today.month
+            current_year = today.year
+            payroll_total = Payslip.objects.filter(
+                month=current_month, year=current_year
+            ).aggregate(total=Sum('net_payable'))['total'] or Decimal(0)
+            data["monthly_payroll_total"] = str(payroll_total)
+
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class AttendanceTrendsView(APIView):

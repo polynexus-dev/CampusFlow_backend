@@ -17,6 +17,7 @@ import base64
 import json
 
 from django.db import connection
+from rest_framework.exceptions import PermissionDenied
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 
@@ -84,6 +85,21 @@ class TenantAwareJWTAuthentication(JWTAuthentication):
         token_schema = validated_token.get('tenant_schema')
         if token_schema != connection.schema_name:
             raise AuthenticationFailed('Token tenant does not match the active tenant schema.')
+
+        # 4.5 Demo-tenant guardrail: block DELETE tenant-wide here, not in
+        # CampusFlowTenantMiddleware — that middleware runs BEFORE this
+        # authenticate() call, and for requests hitting the base/public
+        # domain (the normal case per the "login via base URL" pattern)
+        # django-tenants' own domain resolution already succeeds against
+        # the public tenant there, so the middleware never reaches its JWT
+        # fallback and never sees the real (demo) tenant. This is the one
+        # point guaranteed to run, for every view, AFTER the schema switch
+        # above has resolved the actual tenant.
+        if request.method == 'DELETE':
+            tenant = getattr(connection, 'tenant', None)
+            if tenant and getattr(tenant, 'is_demo', False):
+                from campusflow_app.demo_guard import DEMO_BLOCK_MESSAGE
+                raise PermissionDenied(DEMO_BLOCK_MESSAGE)
 
         # 5. Fetch user object (now in the correct, verified schema)
         return self.get_user(validated_token), validated_token

@@ -105,6 +105,26 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         username = attrs.get('username')
         password = attrs.get('password')
 
+        # --- BLOCK LOGIN FROM A TENANT SUBDOMAIN ---
+        # Login must always happen via the base/public URL (the frontend doesn't
+        # know which college a user belongs to ahead of time). If this request
+        # was routed here via a tenant subdomain (CampusFlowTenantMiddleware
+        # already resolved connection.schema_name to that tenant), reject it
+        # and tell the frontend where the base portal actually lives.
+        if connection.schema_name != 'public':
+            from urllib.parse import urlparse
+            origin = request.headers.get('Origin') or request.headers.get('Referer', '')
+            frontend_host = urlparse(origin).hostname or request.get_host().split(':')[0]
+            parts = frontend_host.split('.')
+            base_domain = '.'.join(parts[1:]) if len(parts) > 1 else frontend_host
+            raise serializers.ValidationError(
+                {
+                    'error': "Please login from the main portal, not your college's page.",
+                    'redirect_domain': base_domain,
+                },
+                code='wrong_login_domain',
+            )
+
         # --- Device Info Extraction ---
         client_ip, is_routable = get_client_ip(request)
         user_agent_string = request.headers.get('User-Agent', '')
@@ -142,7 +162,6 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             raise serializers.ValidationError("Password cannot contain spaces.", code='invalid_password')
 
         from tenants.models import Tenant
-        from django.db import connection
 
         user = None
         target_tenant = None
@@ -290,6 +309,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'name': getattr(tenant, 'name', None) or getattr(tenant, 'schema_name', 'Public'),
                 'schema': getattr(tenant, 'schema_name', 'public'),
                 'code': getattr(tenant, 'code', None),
+                'logo': request.build_absolute_uri(tenant.logo.url) if getattr(tenant, 'logo', None) else None,
             }
 
         if profile_data:
@@ -306,6 +326,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 data['profile']['employee_id'] = profile_data.employee_id
 
         data['device_info'] = self.device_info
+        data['consent_given'] = getattr(profile_data, 'consent_given', True)
         return data
  
 

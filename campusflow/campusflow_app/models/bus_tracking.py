@@ -179,6 +179,36 @@ class BusLocation(models.Model):
         return f"Bus Live: {self.user.get_full_name()} @ ({self.lat}, {self.lng})"
 
 
+class BusTrip(models.Model):
+    """
+    A single discrete trip, delineated by the driver tapping
+    "Start Active Trip" / "End Trip" in the Conductor Panel.
+    Powers the driver's weekly/monthly trip-count and distance stats.
+    """
+    driver = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="bus_trips",
+    )
+    route = models.ForeignKey(
+        BusRoute,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="trips",
+    )
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    distance_km = models.FloatField(default=0.0)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        status = "in progress" if not self.ended_at else f"{self.distance_km} km"
+        return f"Trip by {self.driver.username} @ {self.started_at} ({status})"
+
+
 class BusTrail(models.Model):
     """
     Breadcrumb history for bus route replay.

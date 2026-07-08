@@ -9,7 +9,7 @@ from .views.users import (
     ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
     DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
     CollegeEmployeesListView, UserPermissionsDetailView, ActiveTenantSettingsView,
-    GuardianConsentApprovalView, UserDataErasureView, UserWithdrawConsentView,
+    GuardianConsentApprovalView, UserDataErasureView, UserWithdrawConsentView, UserGrantConsentView,
     StudentOnboardRequestOTPView, StudentOnboardVerifyPasswordView,
     ForgotPasswordRequestOTPView, ForgotPasswordVerifyOTPView, ForgotPasswordResetView
 )
@@ -64,6 +64,7 @@ from .views.bus_tracking import (
     BusSubscriptionListCreateView, BusSubscriptionDetailView,
     BusBoardingScanView, BusAttendanceListView,
     BusDriverDashboardView, BusSummaryStatsView,
+    BusTripStartView, BusTripEndView, BusDriverTripStatsView,
 )
 from .views.fees import (
     FeeCategoryViewSet, FeeStructureViewSet, StudentFeeInvoiceViewSet,
@@ -109,6 +110,7 @@ urlpatterns = [
     path('register/guardian-consent/', GuardianConsentApprovalView.as_view(), name='guardian_consent'),
     path('user/request-erasure/', UserDataErasureView.as_view(), name='user_data_erasure'),
     path('user/withdraw-consent/', UserWithdrawConsentView.as_view(), name='user_withdraw_consent'),
+    path('user/grant-consent/', UserGrantConsentView.as_view(), name='user_grant_consent'),
     path('billing/invoices/', InvoiceListAPIView.as_view(), name='invoice_list'),
     path('billing/invoices/<int:pk>/upload-receipt/', InvoiceUploadReceiptAPIView.as_view(), name='invoice_upload_receipt'),
 
@@ -276,6 +278,9 @@ urlpatterns = [
     path('payments/webhook/razorpay/', RazorpayWebhookView.as_view(), name='payment-webhook-razorpay'),
     # Conductor/Driver dashboard
     path('bus/driver/dashboard/', BusDriverDashboardView.as_view(), name='bus-driver-dashboard'),
+    path('bus/driver/trip/start/', BusTripStartView.as_view(), name='bus-trip-start'),
+    path('bus/driver/trip/end/', BusTripEndView.as_view(), name='bus-trip-end'),
+    path('bus/driver/trip-stats/', BusDriverTripStatsView.as_view(), name='bus-trip-stats'),
 
     # ── Module Subscriptions & Permissions ───────────────────────────
     path('tenant/subscriptions/<int:tenant_id>/', TenantSubscriptionView.as_view(), name='tenant-subscription'),

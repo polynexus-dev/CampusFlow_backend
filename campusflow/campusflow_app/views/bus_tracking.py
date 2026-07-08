@@ -33,10 +33,10 @@ from django.utils import timezone
 from datetime import timedelta
 
 from campusflow_app.models import (
-    BusRoute, BusLocation, BusTrail,
+    BusRoute, BusLocation, BusTrail, BusTrip,
     BusSubscription, BusAttendance,
 )
-from campusflow_app.permissions import IsSaaSOrCollegeAdmin, is_saas_or_college_admin
+from campusflow_app.permissions import IsSaaSOrCollegeAdmin, is_saas_or_college_admin, get_user_group
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -176,19 +176,22 @@ class BusAttendanceSerializer(drf_serializers.ModelSerializer):
 
 class BusLiveLocationSerializer(drf_serializers.ModelSerializer):
     driver_name = drf_serializers.SerializerMethodField()
-    route_name  = drf_serializers.SerializerMethodField()
+    route       = drf_serializers.SerializerMethodField()
     trail       = drf_serializers.SerializerMethodField()
     distance_km = drf_serializers.SerializerMethodField()
+    last_seen   = drf_serializers.DateTimeField(source="updated_at")
 
     class Meta:
         model = BusLocation
-        fields = ["id", "driver_name", "lat", "lng", "route_name", "trail", "distance_km", "updated_at"]
+        fields = ["id", "driver_name", "lat", "lng", "route", "trail", "distance_km", "last_seen"]
 
     def get_driver_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
 
-    def get_route_name(self, obj):
-        return obj.route.name if obj.route else None
+    def get_route(self, obj):
+        if not obj.route:
+            return None
+        return {"id": obj.route.id, "name": obj.route.name, "stops": obj.route.stops}
 
     def get_trail(self, obj):
         if obj.route:
@@ -381,13 +384,21 @@ class BusRouteRegenQRView(APIView):
 class BusSubscriptionListCreateView(generics.ListCreateAPIView):
     """
     GET  /api/bus/subscriptions/?route_id=&user_id=&status=
-    POST /api/bus/subscriptions/   — Assign a student to a route
+    POST /api/bus/subscriptions/   — Assign a student to a route (Admin only)
+    Students can view their own subscriptions.
     """
     serializer_class   = BusSubscriptionSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        user = self.request.user
         qs = BusSubscription.objects.select_related("user", "route").order_by("-created_at")
+
+        # Students can only see their own subscriptions
+        if not is_saas_or_college_admin(user):
+            return qs.filter(user=user)
+
+        # Admin filters
         route_id = self.request.query_params.get("route_id")
         user_id  = self.request.query_params.get("user_id")
         sub_status = self.request.query_params.get("status")
@@ -398,6 +409,15 @@ class BusSubscriptionListCreateView(generics.ListCreateAPIView):
         if sub_status:
             qs = qs.filter(status=sub_status)
         return qs
+
+    def create(self, request, *args, **kwargs):
+        # Only admins can create subscriptions
+        if not is_saas_or_college_admin(request.user):
+            return Response(
+                {"error": "Only admins can assign bus subscriptions."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
 
 
 class BusSubscriptionDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -546,13 +566,71 @@ class BusAttendanceListView(generics.ListAPIView):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BusLiveLocationsView(generics.ListAPIView):
-    """GET /api/bus/live/ — All active buses seen in last 12 hours."""
+    """
+    GET /api/bus/live/
+    Admins see every active route. Everyone else (students/faculty riders)
+    only sees routes they hold a currently-valid subscription for.
+    If a route has no active tracking log, return a stationary placeholder
+    at the first stop so stops and maps load on the client.
+    """
     serializer_class   = BusLiveLocationSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        return BusLocation.objects.none()
+
+    def list(self, request, *args, **kwargs):
+        from campusflow_app.models import BusRoute, BusLocation, BusSubscription
+        from django.db.models import Q
+        from django.utils import timezone
+        from datetime import timedelta
+
+        routes = BusRoute.objects.filter(is_active=True).select_related("driver")
+
+        if not is_saas_or_college_admin(request.user):
+            today = timezone.localdate()
+            subscribed_route_ids = BusSubscription.objects.filter(
+                user=request.user,
+                status=BusSubscription.STATUS_ACTIVE,
+                valid_from__lte=today,
+            ).filter(
+                Q(valid_until__isnull=True) | Q(valid_until__gte=today)
+            ).values_list("route_id", flat=True)
+            routes = routes.filter(id__in=subscribed_route_ids)
+
         cutoff = timezone.now() - timedelta(hours=12)
-        return BusLocation.objects.select_related("user", "route").filter(updated_at__gte=cutoff)
+
+        buses = []
+        for r in routes:
+            # Check if there is a live location update in the last 12 hours
+            loc = BusLocation.objects.filter(route=r, updated_at__gte=cutoff).first()
+            if loc:
+                serializer = self.get_serializer(loc)
+                buses.append(serializer.data)
+            else:
+                # Build a placeholder location at the first stop of the route
+                first_stop = r.stops[0] if r.stops else {"name": "Terminus", "lat": 21.1458, "lng": 79.0882}
+                try:
+                    lat = float(first_stop.get("lat", 21.1458))
+                    lng = float(first_stop.get("lng", 79.0882))
+                except (ValueError, TypeError):
+                    lat, lng = 21.1458, 79.0882
+                    
+                buses.append({
+                    "driver_id": str(r.driver.id) if r.driver else "none",
+                    "driver_name": r.driver.get_full_name() or r.driver.username if r.driver else "Unassigned",
+                    "lat": lat,
+                    "lng": lng,
+                    "trail": [[lat, lng]],
+                    "distance_km": 0.0,
+                    "route": {
+                        "id": r.id,
+                        "name": r.name,
+                        "stops": r.stops
+                    },
+                    "last_seen": timezone.now().isoformat()
+                })
+        return Response(buses)
 
 
 class BusTrailView(APIView):
@@ -612,56 +690,6 @@ class BusRouteSerializer(drf_serializers.ModelSerializer):
         return None
 
 
-class BusLiveLocationSerializer(drf_serializers.ModelSerializer):
-    driver_name = drf_serializers.SerializerMethodField()
-    route_name = drf_serializers.SerializerMethodField()
-    trail = drf_serializers.SerializerMethodField()
-    distance_km = drf_serializers.SerializerMethodField()
-
-    class Meta:
-        model = BusLocation
-        fields = ["id", "driver_name", "lat", "lng", "route_name", "trail", "distance_km", "updated_at"]
-
-    def get_driver_name(self, obj):
-        return obj.user.get_full_name() or obj.user.username
-
-    def get_route_name(self, obj):
-        return obj.route.name if obj.route else None
-
-    def get_trail(self, obj):
-        if obj.route:
-            trails = BusTrail.objects.filter(user=obj.user, route=obj.route).order_by("timestamp")
-        else:
-            cutoff = timezone.now() - timedelta(hours=12)
-            trails = BusTrail.objects.filter(
-                user=obj.user, route__isnull=True, timestamp__gte=cutoff
-            ).order_by("timestamp")
-
-        coords = [[t.lat, t.lng] for t in trails]
-        # Deduplicate consecutive
-        unique = []
-        for c in coords:
-            if not unique or unique[-1] != c:
-                unique.append(c)
-        return unique
-
-    def get_distance_km(self, obj):
-        import math
-        trail = self.get_trail(obj)
-        if len(trail) < 2:
-            return 0.0
-
-        def haversine(lat1, lng1, lat2, lng2):
-            lat1, lng1, lat2, lng2 = map(math.radians, [lat1, lng1, lat2, lng2])
-            dlat, dlng = lat2 - lat1, lng2 - lng1
-            a = math.sin(dlat/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin(dlng/2)**2
-            return 2 * math.asin(math.sqrt(a)) * 6_371_000
-
-        total = sum(haversine(trail[i][0], trail[i][1], trail[i+1][0], trail[i+1][1])
-                    for i in range(len(trail)-1))
-        return round(total / 1000.0, 2)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Views
 # ─────────────────────────────────────────────────────────────────────────────
@@ -689,18 +717,6 @@ class BusRouteDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return BusRoute.objects.select_related("driver", "conductor")
-
-
-class BusLiveLocationsView(generics.ListAPIView):
-    """
-    GET /api/bus/live/   — All active buses seen in last 12 hours (Admin)
-    """
-    serializer_class = BusLiveLocationSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        cutoff = timezone.now() - timedelta(hours=12)
-        return BusLocation.objects.select_related("user", "route").filter(updated_at__gte=cutoff)
 
 
 class BusTrailView(generics.ListAPIView):
@@ -771,18 +787,45 @@ class BusDriverDashboardView(APIView):
             )
 
         # Get list of all active subscriptions for this route
-        active_subs = BusSubscription.objects.filter(route=route, status=BusSubscription.STATUS_ACTIVE)
+        active_subs = BusSubscription.objects.filter(route=route, status=BusSubscription.STATUS_ACTIVE).select_related("user")
         expected_user_ids = active_subs.values_list("user_id", flat=True)
 
         # Boarded today
         today = timezone.localdate()
         boarded_attendance = BusAttendance.objects.filter(route=route, scanned_at__date=today)
-        boarded_user_ids = boarded_attendance.values_list("user_id", flat=True)
+        boarded_user_ids = set(boarded_attendance.values_list("user_id", flat=True))
 
         # Calculate totals
         expected_total = len(expected_user_ids)
         boarded_total = len(boarded_user_ids)
         absent_total = max(0, expected_total - boarded_total)
+
+        # Passenger roster with fee status. Only students pay an additional bus
+        # fee (tracked via StudentFeeInvoice); everyone else's bus charge is
+        # deducted from payroll, so there's no "pending" balance to chase.
+        fee_serializer = BusSubscriptionSerializer()
+        passengers = []
+        for sub in active_subs:
+            role = get_user_group(sub.user) or "Unknown"
+            entry = {
+                "user_id": sub.user.id,
+                "name": sub.user.get_full_name() or sub.user.username,
+                "role": role,
+                "boarding_stop": sub.boarding_stop,
+                "boarded_today": sub.user_id in boarded_user_ids,
+            }
+            if role.lower() == "student":
+                metrics = fee_serializer._get_bus_fee_metrics(sub)
+                entry["balance_fee"] = metrics["balance"]
+                entry["fee_status"] = "pending" if metrics["balance"] > 0 else "paid"
+            else:
+                entry["balance_fee"] = None
+                entry["fee_status"] = "payroll_deduction"
+            passengers.append(entry)
+
+        total_pending_bus_dues = round(
+            sum(p["balance_fee"] for p in passengers if p["fee_status"] == "pending"), 2
+        )
 
         # Breakdown per stop
         stops_breakdown = []
@@ -817,7 +860,9 @@ class BusDriverDashboardView(APIView):
             "expected_total": expected_total,
             "boarded_total": boarded_total,
             "absent_total": absent_total,
-            "stops": stops_breakdown
+            "stops": stops_breakdown,
+            "passengers": passengers,
+            "total_pending_bus_dues": total_pending_bus_dues,
         })
 
 
@@ -849,6 +894,100 @@ class BusSummaryStatsView(APIView):
             "employee_subscribers": employee_subscribers,
             "total_drivers": total_drivers,
             "active_buses_live": active_buses_live
+        })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Driver Trip Logging & Stats
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BusTripStartView(APIView):
+    """
+    POST /api/bus/driver/trip/start/
+    Driver taps "Start Active Trip". Closes any dangling open trip first
+    (e.g. the app was killed mid-trip last time) so stats never double-count.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        BusTrip.objects.filter(driver=request.user, ended_at__isnull=True).update(ended_at=timezone.now())
+
+        route = BusRoute.objects.filter(driver=request.user, is_active=True).first()
+        trip = BusTrip.objects.create(driver=request.user, route=route)
+        return Response(
+            {"trip_id": trip.id, "started_at": trip.started_at.isoformat()},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class BusTripEndView(APIView):
+    """
+    POST /api/bus/driver/trip/end/
+    Driver taps "End Trip & Stop GPS". Closes the most recent open trip and
+    computes its distance from the BusTrail breadcrumbs logged during it.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        trip = BusTrip.objects.filter(driver=request.user, ended_at__isnull=True).order_by("-started_at").first()
+        if not trip:
+            return Response({"error": "No active trip to end."}, status=status.HTTP_400_BAD_REQUEST)
+
+        trail_qs = BusTrail.objects.filter(user=request.user, timestamp__gte=trip.started_at).order_by("timestamp")
+        if trip.route:
+            trail_qs = trail_qs.filter(route=trip.route)
+        coords = [[t.lat, t.lng] for t in trail_qs]
+
+        import math
+
+        def haversine(la1, ln1, la2, ln2):
+            la1, ln1, la2, ln2 = map(math.radians, [la1, ln1, la2, ln2])
+            a = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((ln2 - ln1) / 2) ** 2
+            return 2 * math.asin(math.sqrt(a)) * 6_371_000
+
+        distance_km = 0.0
+        if len(coords) >= 2:
+            total_m = sum(
+                haversine(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1])
+                for i in range(len(coords) - 1)
+            )
+            distance_km = round(total_m / 1000.0, 2)
+
+        trip.ended_at = timezone.now()
+        trip.distance_km = distance_km
+        trip.save(update_fields=["ended_at", "distance_km"])
+
+        return Response({
+            "trip_id": trip.id,
+            "ended_at": trip.ended_at.isoformat(),
+            "distance_km": trip.distance_km,
+        })
+
+
+class BusDriverTripStatsView(APIView):
+    """
+    GET /api/bus/driver/trip-stats/
+    Completed-trip counts and distance for this calendar week and month,
+    shown on the Conductor Panel's dashboard section.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Count, Sum
+
+        now = timezone.now()
+        week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        completed = BusTrip.objects.filter(driver=request.user, ended_at__isnull=False)
+        week_agg = completed.filter(started_at__gte=week_start).aggregate(count=Count("id"), distance=Sum("distance_km"))
+        month_agg = completed.filter(started_at__gte=month_start).aggregate(count=Count("id"), distance=Sum("distance_km"))
+
+        return Response({
+            "trips_this_week": week_agg["count"] or 0,
+            "distance_this_week_km": round(week_agg["distance"] or 0.0, 2),
+            "trips_this_month": month_agg["count"] or 0,
+            "distance_this_month_km": round(month_agg["distance"] or 0.0, 2),
         })
 
 

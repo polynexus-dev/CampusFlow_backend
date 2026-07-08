@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from django.db import connection, transaction
 from tenants.models import Tenant
+from campusflow_app.demo_guard import IsNotDemoTenant
 from campusflow_app.models import TenantModulePermission
 from campusflow_app.permissions import IsSaaSAdmin, IsCollegeAdmin, get_user_group
 
@@ -22,11 +23,11 @@ ROLE_DEFAULT_MODULES = {
     "Department Head": [
         "dashboard", "department", "room", "staff", "student", "attendance",
         "schedule", "settings", "leave", "exams", "analytics", "announcements",
-        "assignments", "bus-tracking", "tpo", "library", "valuation"
+        "assignments", "tpo", "library", "valuation"
     ],
     "Faculty": [
         "dashboard", "attendance", "schedule", "settings", "leave", "exams",
-        "announcements", "analytics", "assignments", "bus-tracking", "valuation"
+        "announcements", "analytics", "assignments", "valuation"
     ],
     "Support Staff": [
         "dashboard", "room", "settings", "leave", "announcements", "hostel",
@@ -116,7 +117,7 @@ class RoleModulePermissionView(APIView):
     GET /api/tenant/module-permissions/
     POST /api/tenant/module-permissions/
     """
-    permission_classes = [IsAuthenticated, CanManageModulePermissions]
+    permission_classes = [IsAuthenticated, CanManageModulePermissions, IsNotDemoTenant]
 
     def get(self, request):
         # Subscribed pool for current tenant
@@ -304,7 +305,7 @@ class CustomRolesView(APIView):
     GET /api/tenant/roles/  - List all roles
     POST /api/tenant/roles/ - Create a new custom role
     """
-    permission_classes = [IsAuthenticated, CanManageModulePermissions]
+    permission_classes = [IsAuthenticated, CanManageModulePermissions, IsNotDemoTenant]
 
     def get(self, request):
         from django.contrib.auth.models import Group

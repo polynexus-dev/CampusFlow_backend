@@ -16,6 +16,13 @@ class Tenant(TenantMixin):
     permitted_email_domain = models.CharField(max_length=100, blank=True, null=True, help_text="e.g. mit.edu.in. If set, students must register with this domain.")
     created_on = models.DateField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
+    is_demo = models.BooleanField(
+        default=False,
+        help_text="Public sandbox tenant — password changes, email changes, "
+                   "outgoing mail, and destructive/config actions are blocked "
+                   "for every user in this tenant so a shared public demo "
+                   "can't be broken or hijacked."
+    )
     timezone = models.CharField(max_length=100, default='Asia/Kolkata', help_text="e.g. Asia/Kolkata")
     subscribed_modules = models.JSONField(
         default=list,

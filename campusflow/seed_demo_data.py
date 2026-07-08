@@ -296,6 +296,9 @@ with schema_context(SCHEMA):
             'status': 'active',
             'department': dept_cs,
             'program_enrolled_in': 'B.Tech CS',
+            'batch_academic_year': '2024-2025',
+            'current_semester_year': '4th Semester',
+            'section_division': 'A',
             'is_face_registered': True,
             'locked_device_id': 'DEVICE_ALICE_123'
         }
@@ -323,6 +326,9 @@ with schema_context(SCHEMA):
             'status': 'active',
             'department': dept_cs,
             'program_enrolled_in': 'B.Tech CS',
+            'batch_academic_year': '2024-2025',
+            'current_semester_year': '4th Semester',
+            'section_division': 'B',
             'is_face_registered': True,
             'locked_device_id': 'DEVICE_BOB_456'
         }
@@ -350,6 +356,9 @@ with schema_context(SCHEMA):
             'status': 'active',
             'department': dept_it,
             'program_enrolled_in': 'B.Tech IT',
+            'batch_academic_year': '2024-2025',
+            'current_semester_year': '4th Semester',
+            'section_division': 'A',
             'is_face_registered': True,
             'locked_device_id': 'DEVICE_CHARLIE_789'
         }
