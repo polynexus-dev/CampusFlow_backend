@@ -43,35 +43,6 @@ from campusflow_app.permissions import IsSaaSOrCollegeAdmin, is_saas_or_college_
 # Serializers
 # ─────────────────────────────────────────────────────────────────────────────
 
-class BusRouteSerializer(drf_serializers.ModelSerializer):
-    driver_name = drf_serializers.SerializerMethodField()
-    conductor_name = drf_serializers.SerializerMethodField()
-    subscriber_count = drf_serializers.SerializerMethodField()
-
-    class Meta:
-        model = BusRoute
-        fields = [
-            "id", "name", "driver", "driver_name",
-            "conductor", "conductor_name",
-            "stops", "qr_token", "is_active",
-            "subscriber_count", "created_at",
-        ]
-        read_only_fields = ["qr_token", "created_at"]
-
-    def get_driver_name(self, obj):
-        if obj.driver:
-            return obj.driver.get_full_name() or obj.driver.username
-        return None
-
-    def get_conductor_name(self, obj):
-        if obj.conductor:
-            return obj.conductor.get_full_name() or obj.conductor.username
-        return None
-
-    def get_subscriber_count(self, obj):
-        return obj.subscriptions.filter(status="active").count()
-
-
 class BusSubscriptionSerializer(drf_serializers.ModelSerializer):
     student_name = drf_serializers.SerializerMethodField()
     route_name   = drf_serializers.SerializerMethodField()
@@ -227,24 +198,6 @@ class BusLiveLocationSerializer(drf_serializers.ModelSerializer):
 # ─────────────────────────────────────────────────────────────────────────────
 # Route management (Admin)
 # ─────────────────────────────────────────────────────────────────────────────
-
-class BusRouteListCreateView(generics.ListCreateAPIView):
-    """GET /api/bus/routes/ — POST /api/bus/routes/"""
-    serializer_class   = BusRouteSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
-
-    def get_queryset(self):
-        return BusRoute.objects.select_related("driver").prefetch_related("subscriptions").order_by("-created_at")
-
-
-class BusRouteDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """GET/PATCH/DELETE /api/bus/routes/<id>/"""
-    serializer_class   = BusRouteSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
-
-    def get_queryset(self):
-        return BusRoute.objects.select_related("driver")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # QR Code generation (Admin)
@@ -633,61 +586,35 @@ class BusLiveLocationsView(generics.ListAPIView):
         return Response(buses)
 
 
-class BusTrailView(APIView):
-    """GET /api/bus/trail/<driver_id>/?date=YYYY-MM-DD"""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, driver_id):
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-
-        try:
-            driver = User.objects.get(id=driver_id)
-        except User.DoesNotExist:
-            return Response({"error": "Driver not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        date_str = request.query_params.get("date")
-        if date_str:
-            from datetime import datetime
-            try:
-                date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except ValueError:
-                return Response({"error": "Invalid date. Use YYYY-MM-DD."}, status=400)
-            trails = BusTrail.objects.filter(user=driver, timestamp__date=date).order_by("timestamp")
-        else:
-            loc = BusLocation.objects.filter(user=driver).first()
-            active_route = loc.route if loc else None
-            if active_route:
-                trails = BusTrail.objects.filter(user=driver, route=active_route).order_by("timestamp")
-            else:
-                cutoff = timezone.now() - timedelta(hours=12)
-                trails = BusTrail.objects.filter(user=driver, timestamp__gte=cutoff).order_by("timestamp")
-
-        coords = [[t.lat, t.lng] for t in trails]
-        return Response({
-            "driver_id": driver_id,
-            "driver_name": driver.get_full_name() or driver.username,
-            "point_count": len(coords),
-            "trail": coords,
-        })
-
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Serializers
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BusRouteSerializer(drf_serializers.ModelSerializer):
     driver_name = drf_serializers.SerializerMethodField()
+    conductor_name = drf_serializers.SerializerMethodField()
+    subscriber_count = drf_serializers.SerializerMethodField()
 
     class Meta:
         model = BusRoute
-        fields = ["id", "name", "driver", "driver_name", "stops", "is_active", "created_at"]
+        fields = [
+            "id", "name", "driver", "driver_name",
+            "conductor", "conductor_name",
+            "stops", "is_active", "created_at",
+        ]
 
     def get_driver_name(self, obj):
         if obj.driver:
             return obj.driver.get_full_name() or obj.driver.username
         return None
+
+    def get_conductor_name(self, obj):
+        if obj.conductor:
+            return obj.conductor.get_full_name() or obj.conductor.username
+        return None
+
+    def get_subscriber_count(self, obj):
+        return obj.subscriptions.filter(status="active").count()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -777,12 +704,16 @@ class BusDriverDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from django.db.models import Q
+
         driver = request.user
-        route = BusRoute.objects.filter(driver=driver, is_active=True).first()
+        route = BusRoute.objects.filter(
+            Q(driver=driver) | Q(conductor=driver), is_active=True
+        ).first()
 
         if not route:
             return Response(
-                {"error": "No active route assigned to your driver account."},
+                {"error": "No active route assigned to your driver/conductor account."},
                 status=status.HTTP_404_NOT_FOUND
             )
 
@@ -910,9 +841,13 @@ class BusTripStartView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        from django.db.models import Q
+
         BusTrip.objects.filter(driver=request.user, ended_at__isnull=True).update(ended_at=timezone.now())
 
-        route = BusRoute.objects.filter(driver=request.user, is_active=True).first()
+        route = BusRoute.objects.filter(
+            Q(driver=request.user) | Q(conductor=request.user), is_active=True
+        ).first()
         trip = BusTrip.objects.create(driver=request.user, route=route)
         return Response(
             {"trip_id": trip.id, "started_at": trip.started_at.isoformat()},

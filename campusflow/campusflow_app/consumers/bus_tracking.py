@@ -302,8 +302,11 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _is_bus_driver(self, schema_name):
         from campusflow_app.models import BusRoute
+        from django.db.models import Q
         with schema_context(schema_name):
-            return BusRoute.objects.filter(driver=self.user, is_active=True).exists()
+            return BusRoute.objects.filter(
+                Q(driver=self.user) | Q(conductor=self.user), is_active=True
+            ).exists()
 
     @database_sync_to_async
     def _update_bus_location(self, lat, lng, schema_name):
@@ -313,8 +316,11 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
 
         try:
             with schema_context(schema_name):
-                # Find the driver's active route
-                route = BusRoute.objects.filter(driver=self.user, is_active=True).first()
+                # Find the active route this user drives or conducts on
+                from django.db.models import Q
+                route = BusRoute.objects.filter(
+                    Q(driver=self.user) | Q(conductor=self.user), is_active=True
+                ).first()
 
                 # ----- GPS Jitter / Speed filter -----
                 prev = BusTrail.objects.filter(user=self.user).order_by("-timestamp").first()

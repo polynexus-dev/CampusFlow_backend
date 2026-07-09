@@ -43,6 +43,7 @@ from .models.profile import (
 from .models.schedule import Schedule
 from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
+from .models.bus_tracking import BusRoute
 
 
 
@@ -324,6 +325,19 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 data['profile']['locked_device_id'] = getattr(profile_data, 'locked_device_id', None)
             elif user_group.name in ['Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']:
                 data['profile']['employee_id'] = profile_data.employee_id
+
+        # --- BUS DRIVER / CONDUCTOR ADDITIONAL CHARGE ---
+        # Support Staff (and any other employee) can be handed the extra charge of
+        # driving/conducting a bus route without changing their base role/group.
+        # Surface it on login so the mobile app can gate the Conductor Panel on the
+        # actual BusRoute assignment instead of guessing from the role name alone.
+        if user_group and user_group.name != 'student':
+            assigned_route = BusRoute.objects.filter(
+                Q(driver=user) | Q(conductor=user), is_active=True
+            ).first()
+            data['is_bus_driver'] = bool(assigned_route and assigned_route.driver_id == user.id)
+            data['is_bus_conductor'] = bool(assigned_route and assigned_route.conductor_id == user.id)
+            data['bus_route_id'] = assigned_route.id if assigned_route else None
 
         data['device_info'] = self.device_info
         data['consent_given'] = getattr(profile_data, 'consent_given', True)

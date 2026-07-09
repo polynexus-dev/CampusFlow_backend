@@ -1749,6 +1749,19 @@ class UserProfileView(APIView):
             profile_data["consent_given"] = True
 
         profile_data["tenant_logo"] = tenant_logo
+
+        # Surface any bus driver/conductor "additional charge" so the mobile app
+        # can gate the Conductor Panel on the actual BusRoute assignment.
+        if usergroup and usergroup != 'student':
+            from django.db.models import Q
+            from campusflow_app.models import BusRoute
+            assigned_route = BusRoute.objects.filter(
+                Q(driver=user) | Q(conductor=user), is_active=True
+            ).first()
+            profile_data["is_bus_driver"] = bool(assigned_route and assigned_route.driver_id == user.id)
+            profile_data["is_bus_conductor"] = bool(assigned_route and assigned_route.conductor_id == user.id)
+            profile_data["bus_route_id"] = assigned_route.id if assigned_route else None
+
         return Response(profile_data, status=status.HTTP_200_OK)
 
     def put(self, request):
