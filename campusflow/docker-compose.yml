@@ -8,10 +8,11 @@ services:
     env_file:
       - .env
     environment:
-      - DB_HOST=db
+      - DB_HOST=pgbouncer
+      - DB_PORT=5432
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - db
+      - pgbouncer
       - redis
     command: /bin/bash ./entrypoint.sh
 
@@ -19,8 +20,37 @@ services:
     image: postgres:17
     env_file:
       - .env
+    # Slow-query visibility: log any statement taking >200ms so we can see
+    # what's actually slow instead of guessing. Cheap, no extra service needed.
+    command: postgres -c log_min_duration_statement=200
     volumes:
       - CampusFlow_postgres_data:/var/lib/postgresql/data
+
+  # Connection pooler sitting between Django and Postgres. django-tenants
+  # switches schemas per-request via `SET search_path`, which only stays
+  # correct under PgBouncer's SESSION pooling mode — transaction-mode
+  # pooling can hand a connection (with another tenant's search_path still
+  # set) to a different tenant's request between transactions, which would
+  # leak data across colleges. Do NOT change POOL_MODE to "transaction"
+  # without also solving that problem (e.g. per-query SET via psycopg
+  # options), since this product stores biometric/DPDP-sensitive data.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_NAME=${POSTGRES_DB}
+      - POOL_MODE=session
+      - MAX_CLIENT_CONN=500
+      - DEFAULT_POOL_SIZE=25
+    ports:
+      - "6432:5432"
+    depends_on:
+      - db
 
   redis:
     image: redis:7-alpine
@@ -28,6 +58,25 @@ services:
       - "6379:6379"
     volumes:
       - CampusFlow_redis_data:/data
+
+  # Runs the CPU-bound half of the face-attendance pipeline (see
+  # campusflow_app/tasks.py) off the web workers, so an attendance-rush
+  # burst queues here instead of blocking uvicorn. Doesn't touch Postgres,
+  # so it only depends on Redis (broker/result backend) — DB_HOST is still
+  # set for consistency in case any Django startup code path expects it.
+  celery_worker:
+    build: .
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=pgbouncer
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    command: /bin/bash ./entrypoint_celery.sh
 
 volumes:
   CampusFlow_postgres_data:

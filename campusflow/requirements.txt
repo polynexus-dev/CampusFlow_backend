@@ -56,6 +56,12 @@ user-agents==2.2.0
 ua-parser==1.0.2
 ua-parser-builtins==202605
 
+# ── Task Queue (offloads face-recognition CPU inference off the request cycle) ─
+celery==5.4.0
+
+# ── Observability ────────────────────────────────────────────────────────────
+sentry-sdk==2.20.0
+
 # ── Utilities ────────────────────────────────────────────────────────────────
 python-dotenv==1.0.1
 python-dateutil==2.9.0.post0

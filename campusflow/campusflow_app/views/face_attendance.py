@@ -1,6 +1,8 @@
+import base64
 import logging
 import secrets
 import numpy as np
+from celery.exceptions import TimeoutError as CeleryTimeoutError
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
@@ -12,15 +14,15 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.conf import settings as django_settings
+
 from ..face_utils import (
-    basic_liveness_check,
-    check_frame_motion,
-    check_head_motion,
+    blend_embedding,
     compare_embeddings,
-    extract_embedding,
     extract_embedding_with_pose,
 )
-from ..models.face_embedding import FaceEmbedding
+from ..tasks import run_face_pipeline
+from ..models.face_embedding import FaceEmbedding, FaceEmbeddingSample
 from ..models.attendance_log import FaceAttendanceLog
 from ..models.lecture import Lecture
 from ..models.attendance import Attendance
@@ -255,26 +257,12 @@ class MarkAttendanceView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # ── Step 1: Liveness check ────────────────────────────────────────
-        liveness_passed, liveness_msg = basic_liveness_check(photo_bytes)
-
-        if not liveness_passed:
-            logger.warning(
-                "Liveness FAILED — student=%s, lecture=%d, reason=%s",
-                student.student_id, lecture.id, liveness_msg,
-            )
-            return Response(
-                {
-                    "success": False,
-                    "is_verified": False,
-                    "confidence_score": 0.0,
-                    "liveness_passed": False,
-                    "message": f"Liveness check failed: {liveness_msg}",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # ── Step 2: Validate challenge token (single-use) ────────────────
+        # ── Step 1: Validate challenge token (single-use) ─────────────────
+        # Consumed up front (before the CPU pipeline runs) so a single
+        # challenge can't be replayed across retries — this already matched
+        # the pre-existing behavior for motion-check failures, so client
+        # retry flows already fetch a fresh challenge after any failed
+        # attempt.
         challenge_type = cache.get(f"liveness:{challenge_id}")
         if not challenge_type:
             logger.warning(
@@ -293,11 +281,22 @@ class MarkAttendanceView(APIView):
             )
         cache.delete(f"liveness:{challenge_id}")
 
-        # ── Step 3: Motion liveness (two-frame comparison) ───────────────
-        if not photo_prev_bytes:
-            logger.warning(
-                "MOTION FAIL — no photo_prev received for student=%s.",
-                student.student_id,
+        # ── Step 2: Liveness + motion + embedding extraction ──────────────
+        # Runs as one Celery task on a separate worker pool instead of
+        # inline on this request thread — this is the CPU-bound (InsightFace
+        # inference) part of the pipeline, and the thing most likely to back
+        # up under a morning attendance-rush burst. The HTTP contract is
+        # unchanged: we still block for the result, just off-process.
+        photo_b64 = base64.b64encode(photo_bytes).decode("ascii")
+        photo_prev_b64 = base64.b64encode(photo_prev_bytes).decode("ascii") if photo_prev_bytes else None
+        try:
+            pipeline_result = run_face_pipeline.delay(
+                photo_b64, photo_prev_b64, challenge_type,
+            ).get(timeout=django_settings.FACE_PIPELINE_TASK_TIMEOUT)
+        except CeleryTimeoutError:
+            logger.error(
+                "Face pipeline task timed out — student=%s, lecture=%d",
+                student.student_id, lecture.id,
             )
             return Response(
                 {
@@ -305,27 +304,35 @@ class MarkAttendanceView(APIView):
                     "is_verified": False,
                     "confidence_score": 0.0,
                     "liveness_passed": False,
-                    "message": "Liveness check failed: Baseline photo is required for verification.",
+                    "message": (
+                        "Attendance verification is taking longer than usual due to "
+                        "high load. Please try again, or ask your lecturer to mark "
+                        "you manually."
+                    ),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        if not pipeline_result["liveness_passed"]:
+            logger.warning(
+                "Liveness FAILED — student=%s, lecture=%d, reason=%s",
+                student.student_id, lecture.id, pipeline_result["liveness_msg"],
+            )
+            return Response(
+                {
+                    "success": False,
+                    "is_verified": False,
+                    "confidence_score": 0.0,
+                    "liveness_passed": False,
+                    "message": f"Liveness check failed: {pipeline_result['liveness_msg']}",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            if challenge_type == "blink":
-                motion_ok, motion_score, motion_msg = check_frame_motion(
-                    photo_prev_bytes, photo_bytes
-                )
-            else:
-                motion_ok, motion_score, motion_msg = check_head_motion(
-                    photo_prev_bytes, photo_bytes, challenge_type,
-                )
-        except ValueError as e:
-            motion_ok, motion_score, motion_msg = False, 0.0, str(e)
-
-        if not motion_ok:
+        if not pipeline_result["motion_ok"]:
             logger.warning(
                 "Motion liveness FAILED — student=%s, lecture=%d, reason=%s",
-                student.student_id, lecture.id, motion_msg,
+                student.student_id, lecture.id, pipeline_result["motion_msg"],
             )
             return Response(
                 {
@@ -333,27 +340,27 @@ class MarkAttendanceView(APIView):
                     "is_verified": False,
                     "confidence_score": 0.0,
                     "liveness_passed": False,
-                    "message": f"Liveness check failed: {motion_msg}",
+                    "message": f"Liveness check failed: {pipeline_result['motion_msg']}",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        motion_score = pipeline_result.get("motion_score", 0.0)
         logger.info(
             "Motion liveness OK — student=%s, challenge=%s, score=%.3f",
             student.student_id, challenge_type, motion_score,
         )
 
-        # ── Step 4: Extract live embedding ────────────────────────────────
-        try:
-            live_embedding = extract_embedding(photo_bytes)
-        except ValueError as e:
+        if pipeline_result["embedding_error"]:
             return Response(
-                {"error": str(e)},
+                {"error": pipeline_result["embedding_error"]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        live_embedding = np.array(pipeline_result["embedding"], dtype=np.float32)
+
         # ── Step 5: Retrieve stored embeddings ────────────────────────────
-        stored_records = FaceEmbedding.objects.filter(student=student)
+        stored_records = list(FaceEmbedding.objects.filter(student=student))
         stored_embeddings = [
             np.array(record.embedding, dtype=np.float32)
             for record in stored_records
@@ -366,10 +373,19 @@ class MarkAttendanceView(APIView):
             )
 
         # ── Step 6: Compare embeddings ────────────────────────────────────
-        is_match, best_score = compare_embeddings(live_embedding, stored_embeddings)
+        is_match, best_score, best_index = compare_embeddings(live_embedding, stored_embeddings)
 
         # ── Step 7: Record result ─────────────────────────────────────────
-        is_verified = is_match and liveness_passed
+        is_verified = is_match  # liveness/motion already confirmed above (else we'd have returned)
+
+        # ── Step 7b: Adaptive template learning ───────────────────────────
+        # Only very confident, already-verified matches are allowed to nudge
+        # the stored template — this bounds how much any single capture can
+        # move it and keeps a spoofed/borderline match from poisoning it.
+        if is_verified and django_settings.FACE_ADAPTIVE_LEARNING_ENABLED:
+            self._adapt_template(
+                stored_records[best_index], live_embedding, best_score, student,
+            )
 
         with transaction.atomic():
             FaceAttendanceLog.objects.update_or_create(
@@ -378,7 +394,7 @@ class MarkAttendanceView(APIView):
                 defaults={
                     "confidence_score": best_score,
                     "is_verified": is_verified,
-                    "liveness_passed": liveness_passed,
+                    "liveness_passed": True,
                 },
             )
 
@@ -416,11 +432,66 @@ class MarkAttendanceView(APIView):
                 "success": is_verified,
                 "is_verified": is_verified,
                 "confidence_score": best_score,
-                "liveness_passed": liveness_passed,
+                "liveness_passed": True,
                 "message": message,
             }
         )
         return Response(result.data, status=resp_status)
+
+    @staticmethod
+    def _adapt_template(matched_record, live_embedding, confidence_score, student):
+        """
+        Real-time adaptive learning step, run after a verified, high-confidence
+        attendance match.
+
+        1. If confidence >= FACE_ADAPTIVE_LEARNING_THRESHOLD, nudge the matched
+           FaceEmbedding via a small, bounded EMA blend (alpha shrinks as
+           sample_count grows, so the template converges rather than drifting
+           indefinitely toward whatever was captured most recently).
+        2. Always persist a FaceEmbeddingSample for this capture so the monthly
+           fine_tune_face_embeddings command has raw material for a more
+           robust, outlier-rejecting consolidation later.
+        """
+        threshold = django_settings.FACE_ADAPTIVE_LEARNING_THRESHOLD
+        if confidence_score < threshold:
+            return
+
+        try:
+            max_alpha = django_settings.FACE_ADAPTIVE_LEARNING_MAX_ALPHA
+            alpha = min(max_alpha, 1.0 / (matched_record.sample_count + 1))
+
+            old_embedding = np.array(matched_record.embedding, dtype=np.float32)
+            new_embedding = blend_embedding(old_embedding, live_embedding, alpha)
+
+            matched_record.embedding = new_embedding.tolist()
+            matched_record.sample_count += 1
+            matched_record.save(update_fields=["embedding", "sample_count", "updated_at"])
+
+            logger.info(
+                "Adaptive template update — student=%s, angle=%s, alpha=%.3f, "
+                "sample_count=%d, confidence=%.4f",
+                student.student_id, matched_record.angle, alpha,
+                matched_record.sample_count, confidence_score,
+            )
+        except Exception:
+            # Adaptive learning is a best-effort enhancement — never fail
+            # attendance marking because of it.
+            logger.exception(
+                "Adaptive template update failed — student=%s, angle=%s",
+                student.student_id, matched_record.angle,
+            )
+
+        try:
+            FaceEmbeddingSample.objects.create(
+                student=student,
+                angle=matched_record.angle,
+                embedding=live_embedding.tolist(),
+                confidence_score=confidence_score,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist FaceEmbeddingSample — student=%s", student.student_id,
+            )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -438,22 +509,30 @@ class AttendanceHistoryView(generics.ListAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        
+
+        # Cap unbounded growth by default (mirrors AuditLogListView /
+        # AllAttendanceView) — this table grows a row per verification
+        # attempt per student per lecture, so returning it in full gets
+        # linearly slower as history accumulates over semesters.
+        limit = min(int(self.request.query_params.get('limit', 200)), 1000)
+
         # If student, restrict to own profile
         if user.groups.filter(name="student").exists():
             student = getattr(user, 'student_profile', None)
             return FaceAttendanceLog.objects.filter(student=student).select_related(
                 "lecture", "student__user"
-            )
-            
+            ).order_by('-timestamp')[:limit]
+
         # Admin or Faculty can pass student_id query param
         student_id = self.request.query_params.get("student_id")
         if student_id:
             return FaceAttendanceLog.objects.filter(student_id=student_id).select_related(
                 "lecture", "student__user"
-            )
-            
-        return FaceAttendanceLog.objects.all().select_related("lecture", "student__user")
+            ).order_by('-timestamp')[:limit]
+
+        return FaceAttendanceLog.objects.all().select_related(
+            "lecture", "student__user"
+        ).order_by('-timestamp')[:limit]
 
 
 class StudentRequestManualAttendanceView(APIView):

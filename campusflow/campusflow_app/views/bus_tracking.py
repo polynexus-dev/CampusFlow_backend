@@ -511,7 +511,12 @@ class BusAttendanceListView(generics.ListAPIView):
                 qs = qs.filter(scanned_at__date=date)
             except ValueError:
                 pass
-        return qs
+
+        # Cap unbounded growth by default (mirrors AuditLogListView /
+        # AllAttendanceView) — boarding scans accumulate per rider per
+        # route per day with no natural upper bound.
+        limit = min(int(self.request.query_params.get('limit', 200)), 1000)
+        return qs[:limit]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

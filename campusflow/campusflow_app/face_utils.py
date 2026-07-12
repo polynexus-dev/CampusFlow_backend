@@ -177,28 +177,63 @@ def compare_embeddings(
     live_embedding: np.ndarray,
     stored_embeddings: List[np.ndarray],
     threshold: Optional[float] = None,
-) -> Tuple[bool, float]:
+) -> Tuple[bool, float, int]:
     """
     Compare live embedding against stored embeddings using cosine similarity.
     InsightFace produces L2-normalised vectors → dot product == cosine sim.
+
+    Returns:
+        (is_match, best_score, best_index)
+        best_index is the position in stored_embeddings of the closest match
+        (-1 if stored_embeddings is empty), used by callers that want to
+        adaptively update the specific template that matched.
     """
     if threshold is None:
         threshold = getattr(settings, "FACE_SIMILARITY_THRESHOLD", 0.55)
 
     if not stored_embeddings:
-        return False, 0.0
+        return False, 0.0, -1
 
     stored_matrix = np.stack(stored_embeddings)          # (N, 512)
     similarities  = np.dot(stored_matrix, live_embedding) # (N,)
 
-    best_score = float(np.max(similarities))
+    best_index = int(np.argmax(similarities))
+    best_score = float(similarities[best_index])
     is_match   = best_score >= threshold
 
     logger.info(
         "Face comparison — best_score=%.4f, threshold=%.4f, match=%s",
         best_score, threshold, is_match,
     )
-    return is_match, best_score
+    return is_match, best_score, best_index
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Adaptive template learning
+# ──────────────────────────────────────────────────────────────────────────────
+def l2_normalize(vector: np.ndarray) -> np.ndarray:
+    """L2-normalise a vector; returns it unchanged if norm is ~0."""
+    norm = float(np.linalg.norm(vector))
+    if norm < 1e-8:
+        return vector.astype(np.float32)
+    return (vector / norm).astype(np.float32)
+
+
+def blend_embedding(
+    old_embedding: np.ndarray,
+    new_embedding: np.ndarray,
+    alpha: float,
+) -> np.ndarray:
+    """
+    Fold a new sample into an existing template via a weighted average,
+    re-normalised to unit length so cosine similarity keeps working.
+
+    alpha is the weight given to the new sample (0 < alpha <= 1). Both
+    inputs are assumed L2-normalised already (InsightFace embeddings are).
+    """
+    alpha = max(0.0, min(1.0, alpha))
+    blended = (1.0 - alpha) * old_embedding + alpha * new_embedding
+    return l2_normalize(blended)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

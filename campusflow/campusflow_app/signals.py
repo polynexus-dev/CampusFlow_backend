@@ -11,6 +11,9 @@ def is_audit_eligible(sender):
     Checks if a model is audit-log eligible. Includes campusflow_app models
     (except AuditLog itself) and the auth.User model.
     """
+    from django.db import connection
+    if getattr(connection, 'schema_name', 'public') == 'public':
+        return False
     return (
         (sender._meta.app_label == 'campusflow_app' and sender.__name__ != 'AuditLog') or
         (sender._meta.app_label == 'auth' and sender.__name__ == 'User')

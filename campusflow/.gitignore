@@ -160,6 +160,9 @@ local_settings.py
 models/insightface/
 ###############
 
+# Staged monthly face-template fine-tune candidates (raw biometric embeddings)
+fine_tuned_embeddings/
+
 # Django Migrations
 **/migrations/*.py
 !**/migrations/__init__.py

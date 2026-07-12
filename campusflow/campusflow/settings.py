@@ -53,6 +53,29 @@ if not FIELD_ENCRYPTION_KEY:
     else:
         raise Exception("FIELD_ENCRYPTION_KEY environment variable must be set when DEBUG=False.")
 
+# Error tracking — no-op unless SENTRY_DSN is set in .env, so this is safe
+# to leave in place for every environment (local dev just won't send
+# anything). Wrapped in try/except so a missing sentry-sdk package (not yet
+# installed) never breaks startup.
+SENTRY_DSN = os.environ.get("SENTRY_DSN")
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.django import DjangoIntegration
+
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[DjangoIntegration()],
+            environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+            # Fraction of requests to trace for performance monitoring — kept
+            # low by default since this is a cost-bearing SaaS feature, not
+            # free; raise via SENTRY_TRACES_SAMPLE_RATE once on a paid plan.
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.05")),
+            send_default_pii=False,
+        )
+    except ImportError:
+        pass
+
 _default_hosts = "campusnexus.in,.campusnexus.in"
 ALLOWED_HOSTS = [h for h in os.environ.get("ALLOWED_HOSTS", _default_hosts).split(",") if h]
 if DEBUG:
@@ -212,6 +235,9 @@ DATABASES = {
         # set_tenant() just issues `SET search_path` on the existing
         # connection when switching schemas, so this is safe to combine with
         # multi-tenancy — the schema switch itself stays cheap.
+        # DB_HOST/DB_PORT point at PgBouncer (SESSION pool mode) in
+        # docker-compose, not straight at Postgres — see the pgbouncer
+        # service comment in docker-compose.yml before changing pool mode.
         'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60)),
     }
 }
@@ -288,6 +314,25 @@ CHANNEL_LAYERS = {
         },
     },
 }
+
+
+# ============================================================
+# CELERY (offloads CPU-bound face-recognition inference off the
+# request/response cycle onto a separately-scalable worker pool —
+# see campusflow_app/tasks.py and MarkAttendanceView)
+# ============================================================
+CELERY_BROKER_URL = _redis_url
+CELERY_RESULT_BACKEND = _redis_url
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+# Hard ceiling on how long a single face-pipeline task may run — protects
+# against a stuck/misbehaving inference call pinning a worker forever.
+CELERY_TASK_TIME_LIMIT = int(os.environ.get("CELERY_TASK_TIME_LIMIT", 20))
+# How long MarkAttendanceView blocks waiting for a queued task's result
+# before giving up and telling the student to use manual attendance
+# instead. Keep below CELERY_TASK_TIME_LIMIT.
+FACE_PIPELINE_TASK_TIMEOUT = int(os.environ.get("FACE_PIPELINE_TASK_TIMEOUT", 15))
 
 
 # Static files (CSS, JavaScript, Images)
@@ -377,6 +422,26 @@ INSIGHTFACE_MODEL_NAME = "buffalo_l"
 INSIGHTFACE_MODEL_ROOT = os.environ.get("INSIGHTFACE_MODEL_ROOT", BASE_DIR / "models" / "insightface")
 
 LIVENESS_BLINK_THRESHOLD = 5.5
+
+# ── Adaptive face-template learning ──────────────────────────────────────────
+# The ArcFace backbone (buffalo_l) itself is frozen and NOT retrained — instead
+# the per-student stored templates are nudged/consolidated over time using
+# their own high-confidence verified attendance captures. Real-time EMA gives
+# quick, bounded adaptation; the monthly job (fine_tune_face_embeddings command)
+# does a robust, outlier-rejecting consolidation once enough samples exist.
+FACE_ADAPTIVE_LEARNING_ENABLED = True
+FACE_ADAPTIVE_LEARNING_THRESHOLD = 0.75      # only very confident matches may update a template
+FACE_ADAPTIVE_LEARNING_MAX_ALPHA = 0.15      # cap on how much a single capture can shift a template
+FACE_MONTHLY_FINE_TUNE_MIN_SAMPLES = 6       # min accumulated samples before monthly consolidation runs for a student/angle
+FACE_MONTHLY_FINE_TUNE_OUTLIER_FLOOR = 0.50  # samples less similar than this to the running centroid are rejected
+FACE_MONTHLY_FINE_TUNE_BLEND_WEIGHT = 0.4    # weight given to the new consolidated centroid vs. the existing template
+
+# The monthly job NEVER writes to the live FaceEmbedding table directly. It stages
+# candidate templates as JSON under <root>/<tenant_schema>/<YYYY-MM>/ for manual
+# review/testing; `promote_fine_tuned_embeddings` applies them once approved.
+FACE_FINE_TUNED_OUTPUT_ROOT = os.environ.get(
+    "FACE_FINE_TUNED_OUTPUT_ROOT", str(BASE_DIR / "fine_tuned_embeddings")
+)
 
 
 # try:

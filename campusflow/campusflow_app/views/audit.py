@@ -44,8 +44,9 @@ class AuditLogListView(APIView):
         if search:
             qs = qs.filter(object_repr__icontains=search)
 
-        # Pagination — return last 200 entries by default
-        limit = int(request.query_params.get('limit', 200))
+        # Pagination — return last 200 entries by default, capped so a
+        # caller can't request an unbounded dump via ?limit=
+        limit = min(int(request.query_params.get('limit', 200)), 1000)
         qs = qs[:limit]
 
         data = []

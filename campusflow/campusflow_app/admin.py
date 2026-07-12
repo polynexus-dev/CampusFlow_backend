@@ -7,7 +7,7 @@ from .models.classroom import Classroom
 from .models.lecture import Lecture
 from .models.attendance_session import AttendanceSession
 from .models.attendance import Attendance
-from .models.face_embedding import FaceEmbedding
+from .models.face_embedding import FaceEmbedding, FaceEmbeddingSample
 from .models.attendance_log import FaceAttendanceLog
 from .models.fraud_alert import FraudAlert
 from .models.device_reset import DeviceResetRequest
@@ -25,6 +25,7 @@ admin.site.register(Lecture)
 admin.site.register(AttendanceSession)
 admin.site.register(Attendance)
 admin.site.register(FaceEmbedding)
+admin.site.register(FaceEmbeddingSample)
 admin.site.register(FaceAttendanceLog)
 admin.site.register(FraudAlert)
 admin.site.register(DeviceResetRequest)

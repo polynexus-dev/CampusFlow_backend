@@ -12,7 +12,7 @@ from .profile import (
     DepartmentHeadProfile,
 )
 from .attendance import Attendance
-from .face_embedding import FaceEmbedding
+from .face_embedding import FaceEmbedding, FaceEmbeddingSample
 from .attendance_log import FaceAttendanceLog
 from .attendance_session import AttendanceSession
 from .fraud_alert import FraudAlert
