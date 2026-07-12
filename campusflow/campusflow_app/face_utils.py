@@ -74,14 +74,18 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
     return cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
 
-def _analyse_image(image_bytes: bytes):
+def _analyse_image(image_bytes: bytes = None, *, cv_image: Optional[np.ndarray] = None):
     """
     Run InsightFace on the image once and return the single detected Face object.
+
+    Pass a pre-decoded `cv_image` to skip re-decoding when the caller already
+    has one (e.g. the shared-detection path in tasks.py::run_face_pipeline).
 
     Raises ValueError if no face or multiple faces detected.
     Returns the face object (has .normed_embedding, .det_score, .pose, …).
     """
-    cv_image = _decode_image(image_bytes)
+    if cv_image is None:
+        cv_image = _decode_image(image_bytes)
     analyzer = _get_face_analyzer()
     faces = analyzer.get(cv_image)
 
@@ -109,14 +113,20 @@ def _analyse_image(image_bytes: bytes):
 # ──────────────────────────────────────────────────────────────────────────────
 # Embedding extraction (single pass)
 # ──────────────────────────────────────────────────────────────────────────────
-def extract_embedding(image_bytes: bytes) -> np.ndarray:
+def extract_embedding(image_bytes: bytes = None, *, _face=None) -> np.ndarray:
     """
     Extract a 512-d ArcFace embedding.  Single model pass.
+
+    Pass a pre-computed `_face` (from _analyse_image) to skip re-detecting a
+    frame that's already been analysed elsewhere in the same pipeline run —
+    see tasks.py::run_face_pipeline, which shares one detection pass across
+    liveness/motion/embedding for the same "action" frame instead of the
+    three independent passes this used to cost.
 
     Raises:
         ValueError — no face / multiple faces / low confidence.
     """
-    face, _ = _analyse_image(image_bytes)
+    face = _face if _face is not None else _analyse_image(image_bytes)[0]
 
     if face.det_score < 0.5:
         raise ValueError(
@@ -300,7 +310,9 @@ def _anti_spoof_score(face_crop_bgr: np.ndarray) -> float:
     return 0.05       # Clean
 
 
-def basic_liveness_check(image_bytes: bytes) -> Tuple[bool, str]:
+def basic_liveness_check(
+    image_bytes: bytes, *, _face=None, _cv_image: Optional[np.ndarray] = None,
+) -> Tuple[bool, str]:
     """
     Two-layer liveness check:
 
@@ -312,18 +324,26 @@ def basic_liveness_check(image_bytes: bytes) -> Tuple[bool, str]:
         Detects printed photos or photos displayed on a phone/monitor screen.
         Only blocks when BOTH texture and frequency signals agree to minimise
         false positives on real users in classroom lighting.
+
+    Pass pre-computed `_face`/`_cv_image` to skip re-decoding/re-detecting a
+    frame already analysed elsewhere in the same pipeline run — see
+    tasks.py::run_face_pipeline. Falls back to doing its own detection (and
+    the same error handling as before) when they aren't provided.
     """
-    cv_image = _decode_image(image_bytes)
+    cv_image = _cv_image if _cv_image is not None else _decode_image(image_bytes)
 
     h, w = cv_image.shape[:2]
     if w < 200 or h < 200:
         return False, "Image resolution too low. Please take a higher-quality photo."
 
     # ── Layer 1: face detection confidence ───────────────────────────────
-    try:
-        face, _ = _analyse_image(image_bytes)
-    except ValueError as e:
-        return False, str(e)
+    if _face is not None:
+        face = _face
+    else:
+        try:
+            face, _ = _analyse_image(image_bytes)
+        except ValueError as e:
+            return False, str(e)
 
     if face.det_score < 0.65:
         return False, (
@@ -457,6 +477,7 @@ def detect_specular_flash_reflection(
 def check_frame_motion(
     frame1_bytes: bytes,
     frame2_bytes: bytes,
+    *, _face2=None, _img2: Optional[np.ndarray] = None,
 ) -> Tuple[bool, float, str]:
     """
     Blink-based liveness check using eye-region comparison.
@@ -471,6 +492,12 @@ def check_frame_motion(
         (intensity change from eyelid closing) produces a high score.
 
     Tune the threshold via Django setting LIVENESS_BLINK_THRESHOLD (default 8.0).
+
+    frame2 is normally the same "action" frame also passed to
+    basic_liveness_check/extract_embedding — pass its pre-computed
+    `_face2`/`_img2` (from tasks.py::run_face_pipeline) to skip detecting it
+    a second time. frame1 (the baseline) is always freshly detected here
+    since nothing else in the pipeline analyses it.
     """
     from django.conf import settings as django_settings
     THRESHOLD = getattr(django_settings, "LIVENESS_BLINK_THRESHOLD", 5.5)
@@ -478,13 +505,13 @@ def check_frame_motion(
     analyzer = _get_face_analyzer()
 
     img1 = _decode_image(frame1_bytes)
-    img2 = _decode_image(frame2_bytes)
+    img2 = _img2 if _img2 is not None else _decode_image(frame2_bytes)
 
     def _largest(faces):
         return max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])) if faces else None
 
     face1 = _largest(analyzer.get(img1))
-    face2 = _largest(analyzer.get(img2))
+    face2 = _face2 if _face2 is not None else _largest(analyzer.get(img2))
 
     if face1 is None:
         # Don't skip — a missing baseline face means we can't verify liveness.
@@ -602,6 +629,7 @@ def check_head_motion(
     frame1_bytes: bytes,
     frame2_bytes: bytes,
     challenge_type: str,
+    *, _face2=None, _img2: Optional[np.ndarray] = None,
 ) -> Tuple[bool, float, str]:
     """
     Two-frame liveness check for head-motion challenges.
@@ -616,6 +644,11 @@ def check_head_motion(
         'nod'        — nose must move downward  (dy > threshold)
         'turn_left'  — nose must move rightward (dx > threshold, front-cam mirrored)
         'turn_right' — nose must move leftward  (dx < -threshold)
+
+    frame2 is normally the same "action" frame also passed to
+    basic_liveness_check/extract_embedding — pass its pre-computed
+    `_face2`/`_img2` (from tasks.py::run_face_pipeline) to skip detecting it
+    a second time.
     """
     analyzer = _get_face_analyzer()
 
@@ -644,8 +677,8 @@ def check_head_motion(
     nose1 = kps1[2]
     THRESHOLD = 0.25   # ≥25% of inter-eye distance — requires conscious movement
 
-    img2 = _decode_image(frame2_bytes)
-    face2 = _largest(analyzer.get(img2))
+    img2 = _img2 if _img2 is not None else _decode_image(frame2_bytes)
+    face2 = _face2 if _face2 is not None else _largest(analyzer.get(img2))
     if face2 is None:
         return False, 0.0, "No face detected in final frame. Please try again."
 

@@ -4,6 +4,33 @@ from locust import HttpUser, task, between
 
 import requests
 
+# ── Attendance-rush load test config ────────────────────────────────────────
+# Points at a lecture that must already have an *active* AttendanceSession
+# (start one via the lecturer app/API before running this) and a folder with
+# front.png/left.png (any real face photos work — used as the live selfie and
+# the baseline motion frame). Every attempt will legitimately fail the final
+# embedding-match step unless the logged-in student's own face was actually
+# registered from these exact photos — that's fine, we're measuring pipeline
+# throughput/latency under load, not correctness. Attempts also naturally
+# stop counting after the first success per (student, lecture) — the
+# duplicate-attendance check short-circuits before the CPU pipeline runs —
+# so this is best pointed at a lecture/session dedicated to load testing,
+# ideally with a large pool of never-yet-marked student accounts.
+LOCUST_LECTURE_ID = os.getenv("LOCUST_LECTURE_ID")
+LOCUST_IMAGES_DIR = os.getenv(
+    "LOCUST_IMAGES_DIR",
+    r"D:\Polynexus\Servers\Campusnexus\New folder\campusflow_mobile_new\test_images",
+)
+_front_bytes, _left_bytes = None, None
+if LOCUST_LECTURE_ID:
+    try:
+        with open(os.path.join(LOCUST_IMAGES_DIR, "front.png"), "rb") as f:
+            _front_bytes = f.read()
+        with open(os.path.join(LOCUST_IMAGES_DIR, "left.png"), "rb") as f:
+            _left_bytes = f.read()
+    except OSError as e:
+        print(f"Could not load test images for attendance load test: {e}")
+
 # Load usernames dynamically from target server API
 db_usernames = []
 TARGET_HOST = os.getenv("LOCUST_HOST", "https://api.campusnexus.in")
@@ -117,3 +144,93 @@ class CampusFlowUser(HttpUser):
                 response.success()
             else:
                 response.failure(f"Failed to log in: {response.status_code} - {response.text}")
+
+
+class AttendanceRushUser(HttpUser):
+    """
+    Simulates the actual capacity bottleneck: concurrent face-attendance
+    verification during a class-start rush (see MarkAttendanceView /
+    campusflow_app/tasks.py::run_face_pipeline). This is deliberately a
+    separate User class from CampusFlowUser's plain login test — run it in
+    isolation so the two scenarios' numbers don't mix:
+
+        LOCUST_LECTURE_ID=42 locust -f locustfile.py AttendanceRushUser --host=http://localhost:8200
+
+    Requires a lecture (LOCUST_LECTURE_ID) with an already-active
+    AttendanceSession — start one via the lecturer app/API first. Every
+    user stops immediately on start if that's not configured, so running
+    the plain `locust -f locustfile.py` command without it is unaffected.
+
+    Caveat: the duplicate-attendance check short-circuits BEFORE the CPU
+    pipeline runs, so only the first attempt per (student, lecture) pair
+    actually exercises face_utils.py — a large db_usernames pool matters
+    more here than request rate. A steady stream of 409s means the pool of
+    fresh (student, lecture) pairs is exhausted, not that load has dropped.
+    """
+    wait_time = between(1, 2)
+
+    def on_start(self):
+        if not LOCUST_LECTURE_ID or _front_bytes is None:
+            print(
+                "AttendanceRushUser: LOCUST_LECTURE_ID or test images not "
+                "configured — stopping this user without generating load."
+            )
+            self.environment.runner.quit()
+            return
+
+        self.token = None
+        self.username = random.choice(db_usernames) if db_usernames else "stu_00001"
+        self.password = "Password123"
+
+        with self.client.post(
+            "/login/",
+            json={"username": self.username, "password": self.password},
+            headers={"Content-Type": "application/json"},
+            catch_response=True,
+        ) as response:
+            if response.status_code == 200:
+                self.token = response.json().get("access")
+                response.success()
+            else:
+                response.failure(f"Login failed: {response.status_code} - {response.text}")
+
+    @task
+    def mark_attendance(self):
+        if not self.token:
+            return
+
+        headers = {"Authorization": f"Bearer {self.token}"}
+
+        with self.client.get(
+            "/liveness-challenge/", headers=headers, catch_response=True,
+            name="/liveness-challenge/",
+        ) as challenge_resp:
+            if challenge_resp.status_code != 200:
+                challenge_resp.failure(f"Challenge fetch failed: {challenge_resp.status_code}")
+                return
+            challenge_resp.success()
+            challenge_id = challenge_resp.json().get("challenge_id")
+
+        files = {
+            "photo": ("front.png", _front_bytes, "image/png"),
+            "photo_prev": ("left.png", _left_bytes, "image/png"),
+        }
+        data = {
+            "lecture_id": LOCUST_LECTURE_ID,
+            "challenge_id": challenge_id,
+        }
+        with self.client.post(
+            "/mark-attendance/", headers=headers, data=data, files=files,
+            catch_response=True, name="/mark-attendance/",
+        ) as response:
+            # 200 = verified, 400 = liveness/motion/embedding-match failure
+            # (still ran the full CPU pipeline — expected here since these
+            # test photos won't match any real student's registered face),
+            # 409 = duplicate (pipeline skipped, see class docstring),
+            # 503 = queue backpressure timeout. All are "not a bug" outcomes
+            # for this load test; only unexpected status codes count as
+            # failures.
+            if response.status_code in (200, 400, 409, 503):
+                response.success()
+            else:
+                response.failure(f"Unexpected status: {response.status_code} - {response.text}")
