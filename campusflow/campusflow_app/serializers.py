@@ -808,6 +808,9 @@ class PlacementApplicationSerializer(serializers.ModelSerializer):
     class Meta:
         model = PlacementApplication
         fields = '__all__'
+        extra_kwargs = {
+            'student': {'required': False}
+        }
 
 
 # ── Library Management Serializers ──

@@ -20,3 +20,13 @@ class PlacementApplicationViewSet(viewsets.ModelViewSet):
         if student_id:
             qs = qs.filter(student_id=student_id)
         return qs
+
+    def perform_create(self, serializer):
+        student = serializer.validated_data.get('student')
+        if not student:
+            if hasattr(self.request.user, 'student_profile'):
+                student = self.request.user.student_profile
+            else:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({"student": "Student profile is required."})
+        serializer.save(student=student)
