@@ -43,6 +43,7 @@ from .models.profile import (
 from .models.schedule import Schedule
 from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
+from .models.result import StudentExamResult
 from .models.bus_tracking import BusRoute
 
 
@@ -947,5 +948,35 @@ class ScannedPaperSerializer(serializers.ModelSerializer):
         return attrs
 
 
+# ── Student Exam Results ──
+class StudentExamResultSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.CharField(source='student.student_id', read_only=True)
+    exam_name = serializers.CharField(source='exam.name', read_only=True)
+    course_name = serializers.CharField(source='exam.course.course_name', read_only=True)
+    total_marks = serializers.IntegerField(source='exam.total_marks', read_only=True)
+    academic_year = serializers.CharField(source='exam.academic_year', read_only=True)
+    semester = serializers.CharField(source='exam.semester', read_only=True)
+    percentage = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentExamResult
+        fields = '__all__'
+        read_only_fields = ('grade', 'is_pass', 'entered_by')
+
+    def get_student_name(self, obj):
+        if not obj.student or not obj.student.user:
+            return "Unknown Student"
+        return obj.student.user.get_full_name() or obj.student.user.username
+
+    def get_percentage(self, obj):
+        return obj.percentage
+
+    def validate(self, attrs):
+        exam = attrs.get('exam') or getattr(self.instance, 'exam', None)
+        marks = attrs.get('marks_obtained', getattr(self.instance, 'marks_obtained', None))
+        if exam and marks is not None and marks > exam.total_marks:
+            raise serializers.ValidationError("Marks obtained cannot exceed exam total marks.")
+        return attrs
 
 

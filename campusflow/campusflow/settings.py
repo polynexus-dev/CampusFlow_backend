@@ -117,6 +117,8 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False  # the frontend JS must be able to read this to set the CSRF header
 SECURE_SSL_REDIRECT = not DEBUG
+# Let Django know it's behind a reverse proxy terminating SSL, so request.is_secure() returns True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 SECURE_HSTS_PRELOAD = not DEBUG

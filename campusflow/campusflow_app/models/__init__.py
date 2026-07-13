@@ -47,6 +47,7 @@ from .tpo import RecruitmentDrive, PlacementApplication
 from .library import Book, BookCopy, BookIssue
 from .inventory import InventoryCategory, InventoryItem, Supplier, InventoryTransaction
 from .valuation import ValuationSession, ScannedPaper
+from .result import StudentExamResult
 
 
 

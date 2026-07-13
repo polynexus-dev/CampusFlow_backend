@@ -82,6 +82,8 @@ from .views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
 from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
 from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from .views.valuation import ValuationSessionViewSet, ScannedPaperViewSet
+from .views.result import StudentExamResultViewSet
+from .views.progress import StudentProgressView
 from .views.contact import ContactEnquiryView
 
 
@@ -234,6 +236,7 @@ urlpatterns = [
     path('analytics/department-performance/', DepartmentPerformanceView.as_view(), name='analytics-department-performance'),
     path('analytics/leave/', LeaveAnalyticsView.as_view(), name='analytics-leave'),
     path('analytics/payroll/', PayrollSummaryView.as_view(), name='analytics-payroll'),
+    path('analytics/student-progress/', StudentProgressView.as_view(), name='analytics-student-progress'),
 
     # ── Assignments ──────────────────────────────────────────────────
     path('assignments/', AssignmentListCreateView.as_view(), name='assignment-list-create'),
@@ -326,6 +329,10 @@ urlpatterns = [
     path('valuation-sessions/<int:pk>/', ValuationSessionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='valuationsession-detail'),
     path('scanned-papers/', ScannedPaperViewSet.as_view({'get': 'list', 'post': 'create'}), name='scannedpaper-list'),
     path('scanned-papers/<int:pk>/', ScannedPaperViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='scannedpaper-detail'),
+
+    # Student Exam Results
+    path('exam-results/', StudentExamResultViewSet.as_view({'get': 'list', 'post': 'create'}), name='studentexamresult-list'),
+    path('exam-results/<int:pk>/', StudentExamResultViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='studentexamresult-detail'),
 
 ]
 
