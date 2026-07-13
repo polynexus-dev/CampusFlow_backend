@@ -605,7 +605,7 @@ class BusRouteSerializer(drf_serializers.ModelSerializer):
         fields = [
             "id", "name", "driver", "driver_name",
             "conductor", "conductor_name",
-            "stops", "is_active", "created_at",
+            "stops", "is_active", "created_at", "subscriber_count",
         ]
 
     def get_driver_name(self, obj):

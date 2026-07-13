@@ -1738,11 +1738,19 @@ class UserProfileView(APIView):
         else:
             return Response({"detail": "User group not recognized."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Retrieve consent status from local profile variables safely
+        # Retrieve consent status and user/profile ID formatting safely
         try:
             profile_obj = locals().get('profile', None)
-            if profile_obj and hasattr(profile_obj, 'consent_given'):
-                profile_data["consent_given"] = profile_obj.consent_given
+            if profile_obj:
+                profile_data["user_id"] = user.id
+                profile_data["profile"] = {
+                    "id": profile_obj.id,
+                    "department_id": profile_obj.department.id if hasattr(profile_obj, 'department') and profile_obj.department else None,
+                }
+                if hasattr(profile_obj, 'consent_given'):
+                    profile_data["consent_given"] = profile_obj.consent_given
+                else:
+                    profile_data["consent_given"] = True
             else:
                 profile_data["consent_given"] = True
         except Exception:
@@ -2017,21 +2025,25 @@ class ApproveUserView(APIView):
 class CollegeEmployeesListView(APIView):
     """
     List all non-student, non-superuser users in the current tenant schema.
-    Only accessible by College Admins (Management or Administrator).
+    Only accessible by non-student roles.
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsNotStudent]
 
     def get(self, request):
         from django.contrib.auth.models import User
         # Exclude students and superusers
-        # prefetch_related avoids one extra groups query per employee (N+1)
-        employees = User.objects.exclude(groups__name='student').exclude(is_superuser=True).prefetch_related('groups')
+        # prefetch_related avoids one extra query per employee (N+1)
+        employees = User.objects.exclude(groups__name='student').exclude(is_superuser=True).prefetch_related('groups', 'teaching_staff_profile')
         data = []
         for e in employees:
             employee_groups = e.groups.all()
             group_name = employee_groups[0].name if employee_groups else "No Role"
+            teaching_staff_profile_id = None
+            if hasattr(e, 'teaching_staff_profile') and e.teaching_staff_profile:
+                teaching_staff_profile_id = e.teaching_staff_profile.id
             data.append({
                 "id": e.id,
+                "teaching_staff_profile_id": teaching_staff_profile_id,
                 "username": e.username,
                 "email": e.email,
                 "first_name": e.first_name,

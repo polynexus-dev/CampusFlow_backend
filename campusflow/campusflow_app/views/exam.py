@@ -15,6 +15,34 @@ from ..permissions import (
 )
 
 
+def validate_question_structure(value):
+    """
+    Validates the optional per-question breakdown attached to an exam.
+
+    Each entry must be either a plain number (legacy shape, e.g. {"Q1": 10})
+    or an object {"marks": <number>, "topic": <string, optional>}. Returns
+    an error string, or None if valid.
+    """
+    if not isinstance(value, dict):
+        return "question_structure must be an object mapping question keys to marks."
+    for key, spec in value.items():
+        if isinstance(spec, dict):
+            if 'marks' not in spec:
+                return f"question_structure['{key}'] must include 'marks'."
+            try:
+                float(spec['marks'])
+            except (TypeError, ValueError):
+                return f"question_structure['{key}'].marks must be a number."
+            if 'topic' in spec and spec['topic'] is not None and not isinstance(spec['topic'], str):
+                return f"question_structure['{key}'].topic must be a string."
+        else:
+            try:
+                float(spec)
+            except (TypeError, ValueError):
+                return f"question_structure['{key}'] must be a number or an object with 'marks'."
+    return None
+
+
 class ExamTypeListCreateView(APIView):
     """GET: List exam types. POST: Create (Admin only)."""
     permission_classes = [IsAuthenticated]
@@ -130,6 +158,12 @@ class ExamListCreateView(APIView):
             except User.DoesNotExist:
                 pass
 
+        question_structure = request.data.get('question_structure') or {}
+        if question_structure:
+            error = validate_question_structure(question_structure)
+            if error:
+                return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
+
         exam = Exam.objects.create(
             name=request.data['name'],
             exam_type=exam_type,
@@ -143,6 +177,7 @@ class ExamListCreateView(APIView):
             passing_marks=request.data.get('passing_marks', 35),
             semester=request.data.get('semester', ''),
             academic_year=request.data.get('academic_year', ''),
+            question_structure=question_structure,
             invigilator=invigilator,
             created_by=request.user,
             instructions=request.data.get('instructions', ''),
@@ -174,6 +209,7 @@ class ExamDetailView(APIView):
             "passing_marks": exam.passing_marks,
             "semester": exam.semester,
             "academic_year": exam.academic_year,
+            "question_structure": exam.question_structure,
             "invigilator": {"id": exam.invigilator.id, "name": exam.invigilator.get_full_name()} if exam.invigilator else None,
             "status": exam.status,
             "instructions": exam.instructions,
@@ -189,8 +225,14 @@ class ExamDetailView(APIView):
         except Exam.DoesNotExist:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        if 'question_structure' in request.data:
+            error = validate_question_structure(request.data['question_structure'] or {})
+            if error:
+                return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
+
         simple_fields = ['name', 'date', 'start_time', 'end_time', 'total_marks',
-                         'passing_marks', 'semester', 'academic_year', 'status', 'instructions']
+                         'passing_marks', 'semester', 'academic_year', 'status', 'instructions',
+                         'question_structure']
         for field in simple_fields:
             if field in request.data:
                 setattr(exam, field, request.data[field])

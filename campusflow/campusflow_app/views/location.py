@@ -106,6 +106,40 @@ class LocationDetailView(APIView):
 
         return JsonResponse(data, safe=False, status=200)
 
+    def put(self, request):
+        """Update a specific location by location_id. College Admins and SaaS Admin only."""
+        if not self._can_write(request.user):
+            return Response(
+                {"error": "Only College Admins or SaaS Admin can update locations."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        location_id = request.data.get('location_id')
+        if not location_id:
+            return Response({"error": "location_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            loc = Location.objects.get(location_id=location_id)
+            loc.name = request.data.get('name', loc.name)
+            loc.latitude = request.data.get('latitude', loc.latitude)
+            loc.longitude = request.data.get('longitude', loc.longitude)
+            loc.geofence_radius_meters = request.data.get('geofence_radius_meters', loc.geofence_radius_meters)
+            loc.is_premises_entry = request.data.get('is_premises_entry', loc.is_premises_entry)
+            loc.is_classroom_entry = request.data.get('is_classroom_entry', loc.is_classroom_entry)
+            
+            department_owner_id = request.data.get('department_owner_id', None)
+            if department_owner_id:
+                loc.department_owner = Department.objects.get(id=department_owner_id)
+            elif department_owner_id == "":
+                loc.department_owner = None
+
+            loc.save()
+            return Response({"message": "Location updated successfully.", "location_id": loc.location_id}, status=status.HTTP_200_OK)
+        except Location.DoesNotExist:
+            return Response({"error": "Location not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Department.DoesNotExist:
+            return Response({"error": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     def delete(self, request):
         """Delete a location by location_id. College Admins and SaaS Admin only."""
         if not self._can_write(request.user):

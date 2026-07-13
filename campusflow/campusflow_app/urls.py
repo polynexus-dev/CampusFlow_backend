@@ -83,7 +83,7 @@ from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
 from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from .views.valuation import ValuationSessionViewSet, ScannedPaperViewSet
 from .views.result import StudentExamResultViewSet
-from .views.progress import StudentProgressView
+from .views.progress import StudentProgressView, StudentTopicPerformanceView
 from .views.contact import ContactEnquiryView
 
 
@@ -237,6 +237,7 @@ urlpatterns = [
     path('analytics/leave/', LeaveAnalyticsView.as_view(), name='analytics-leave'),
     path('analytics/payroll/', PayrollSummaryView.as_view(), name='analytics-payroll'),
     path('analytics/student-progress/', StudentProgressView.as_view(), name='analytics-student-progress'),
+    path('analytics/student-topic-performance/', StudentTopicPerformanceView.as_view(), name='analytics-student-topic-performance'),
 
     # ── Assignments ──────────────────────────────────────────────────
     path('assignments/', AssignmentListCreateView.as_view(), name='assignment-list-create'),

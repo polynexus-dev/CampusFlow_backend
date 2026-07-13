@@ -2,6 +2,9 @@
 *.py[cod]
 *$py.class
 
+# Claude Code local settings (personal overrides, not shared with the team)
+.claude/settings.local.json
+
 # C extensions
 *.so
 
@@ -166,5 +169,11 @@ fine_tuned_embeddings/
 # Django Migrations
 **/migrations/*.py
 !**/migrations/__init__.py
+
+# User Manual / Pilot Docs
+Docs/
+docs/
+Doc/
+doc/
 
 

@@ -443,7 +443,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     office_location_details = serializers.CharField(max_length=255, required=False, allow_blank=True)
     
     # DPDP Compliance fields
-    consent_given = serializers.BooleanField(required=False, default=False)
+    consent_given = serializers.BooleanField(required=False, default=True)
     consent_version = serializers.CharField(max_length=10, required=False, allow_blank=True, default='v1.0')
     parent_guardian_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     parent_guardian_email = serializers.EmailField(required=False, allow_null=True)
