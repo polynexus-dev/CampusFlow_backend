@@ -247,4 +247,4 @@ class ExamDetailView(APIView):
         except Exam.DoesNotExist:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         exam.delete()
-        return Response({"message": "Exam deleted."}, status=status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_204_NO_CONTENT)

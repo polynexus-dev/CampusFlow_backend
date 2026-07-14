@@ -153,6 +153,6 @@ class LocationDetailView(APIView):
         try:
             loc = Location.objects.get(location_id=location_id)
             loc.delete()
-            return Response({"message": "Location deleted."}, status=status.HTTP_204_NO_CONTENT)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         except Location.DoesNotExist:
             return Response({"error": "Location not found."}, status=status.HTTP_404_NOT_FOUND)

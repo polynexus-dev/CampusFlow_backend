@@ -161,7 +161,7 @@ class LectureDetailView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         lecture.delete()
-        return Response({"message": "Lecture deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class LectureByClassroomView(APIView):

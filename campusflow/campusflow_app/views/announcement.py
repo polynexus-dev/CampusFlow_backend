@@ -182,4 +182,4 @@ class AnnouncementDetailView(APIView):
             return Response({"error": "You can only delete your own announcements."}, status=status.HTTP_403_FORBIDDEN)
 
         ann.delete()
-        return Response({"message": "Announcement deleted."}, status=status.HTTP_204_NO_CONTENT)
+        return Response(status=status.HTTP_204_NO_CONTENT)

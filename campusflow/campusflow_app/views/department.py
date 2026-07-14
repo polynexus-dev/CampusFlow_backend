@@ -112,7 +112,7 @@ class DepartmentView(APIView):
             )
         try:
             Department.objects.all().delete()
-            return Response({"message": "All departments deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -214,7 +214,7 @@ class DepartmentDetailView(APIView):
         try:
             department = Department.objects.get(pk=pk)
             department.delete()
-            return Response({"message": "Department deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         except Department.DoesNotExist:
             return Response({"error": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:

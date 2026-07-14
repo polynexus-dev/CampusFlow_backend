@@ -172,10 +172,10 @@ INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in S
 # ============================================================
 
 MIDDLEWARE = [
-    'campusflow.middleware.CampusFlowTenantMiddleware',  # MUST be first
+    'corsheaders.middleware.CorsMiddleware',  # Must be first for early CORS preflight handling
+    'campusflow.middleware.CampusFlowTenantMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
