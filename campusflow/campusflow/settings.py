@@ -84,6 +84,10 @@ if DEBUG:
 CSRF_TRUSTED_ORIGINS = [
     'https://campusnexus.in',
     'https://*.campusnexus.in',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
 ]
 
 # Explicit origin allowlist instead of CORS_ALLOW_ALL_ORIGINS — mirrors
@@ -91,12 +95,18 @@ CSRF_TRUSTED_ORIGINS = [
 # env var (comma-separated) for local frontend dev servers, e.g.
 # "http://localhost:5173,http://localhost:3000".
 CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+]
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://([a-z0-9-]+\.)?campusnexus\.in$",
 ]
 _extra_cors_origins = [o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o]
 if _extra_cors_origins:
-    CORS_ALLOWED_ORIGINS = _extra_cors_origins
+    CORS_ALLOWED_ORIGINS.extend(_extra_cors_origins)
 if DEBUG:
     CORS_ALLOWED_ORIGIN_REGEXES.append(r"^http://([a-z0-9-]+\.)?localhost:\d+$")
 
