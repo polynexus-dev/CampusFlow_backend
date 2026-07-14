@@ -240,7 +240,8 @@ DATABASES = {
         # DB_HOST/DB_PORT point at PgBouncer (SESSION pool mode) in
         # docker-compose, not straight at Postgres — see the pgbouncer
         # service comment in docker-compose.yml before changing pool mode.
-        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60)),
+        # Note: Must be 0 when using PgBouncer to prevent session pool exhaustion.
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 0)),
     }
 }
 
