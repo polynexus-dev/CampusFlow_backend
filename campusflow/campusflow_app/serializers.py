@@ -45,6 +45,7 @@ from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
 from .models.result import StudentExamResult
 from .models.bus_tracking import BusRoute
+from .demo_guard import is_demo_tenant
 
 
 
