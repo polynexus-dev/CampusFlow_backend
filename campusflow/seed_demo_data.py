@@ -52,6 +52,13 @@ domains_to_create = ['demo.localhost']
 if public_domain_name != 'localhost':
     domains_to_create.append(f"demo.{public_domain_name}")
 
+# The domain real users on THIS deployment are expected to register with —
+# demo.<production-domain> once deployed, demo.localhost only for pure local dev.
+# Must track domains_to_create above: registering with an email domain that
+# isn't also a routing domain would let someone create an account for a
+# college they could never actually log into.
+active_email_domain = f"demo.{public_domain_name}" if public_domain_name != 'localhost' else 'demo.localhost'
+
 # ── 1. Create/Get Tenant ──────────────────────────────────────────────────────
 tenant = Tenant.objects.filter(schema_name=SCHEMA).first()
 if not tenant:
@@ -61,13 +68,20 @@ if not tenant:
         name=TENANT_NAME,
         code=TENANT_CODE,
         address="123 Education Lane, Demo City",
-        contact_email="admin@demo.localhost",
-        permitted_email_domain="demo.localhost",
+        contact_email=f"admin@{active_email_domain}",
+        permitted_email_domain=active_email_domain,
         timezone="Asia/Kolkata"
     )
     print(f"✅ Tenant '{SCHEMA}' created successfully.")
 else:
     print(f"✅ Tenant '{SCHEMA}' already exists.")
+    # Self-heal a tenant created before this deployment's domain was known
+    # (e.g. seeded back when permitted_email_domain was hardcoded to
+    # 'demo.localhost' regardless of environment).
+    if tenant.permitted_email_domain != active_email_domain:
+        print(f"   Updating permitted_email_domain: '{tenant.permitted_email_domain}' -> '{active_email_domain}'")
+        tenant.permitted_email_domain = active_email_domain
+        tenant.save(update_fields=['permitted_email_domain'])
 
 # Ensure primary and secondary domains exist
 for i, dom in enumerate(domains_to_create):

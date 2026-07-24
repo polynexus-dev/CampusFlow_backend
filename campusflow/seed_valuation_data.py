@@ -19,10 +19,18 @@ from campusflow_app.models.course import Course
 from campusflow_app.models.exam import ExamType, Exam
 from campusflow_app.models.profile import StudentProfile, TeachingStaffProfile
 from campusflow_app.models.valuation import ValuationSession, ScannedPaper
+from tenants.models import Tenant
 
 TARGET_SCHEMA = 'demo'
 
 print(f"Starting digital valuation seeding for schema context: '{TARGET_SCHEMA}'")
+
+# Read the tenant's actual permitted_email_domain rather than hardcoding one —
+# it varies by deployment (demo.localhost locally, demo.<real-domain> once
+# deployed), and a mismatch here silently breaks self-registration/forgot-
+# password for this test user (see seed_demo_data.py for where it's set).
+_tenant = Tenant.objects.filter(schema_name=TARGET_SCHEMA).first()
+_email_domain = (_tenant.permitted_email_domain if _tenant and _tenant.permitted_email_domain else 'demo.localhost')
 
 try:
     with schema_context(TARGET_SCHEMA):
@@ -60,7 +68,7 @@ try:
         # Ensure dynamic second test student for better listings
         student_user_2, _ = User.objects.get_or_create(
             username='demo_student_2',
-            defaults={'email': 'student2@demo.edu', 'is_staff': False}
+            defaults={'email': f'student2@{_email_domain}', 'is_staff': False}
         )
         student_user_2.set_password('Password123')
         student_user_2.save()
