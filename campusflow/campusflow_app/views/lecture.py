@@ -19,6 +19,8 @@ import string
 from ..models.lecture import Lecture
 from ..serializers import LectureSerializer
 from ..permissions import CanCreateLecture, get_user_group, is_saas_or_college_admin, is_saas_admin
+from django.db import connection
+from ..demo_guard import is_demo_tenant
 from django.shortcuts import get_object_or_404
 
 class LectureListCreateView(APIView):
@@ -27,12 +29,18 @@ class LectureListCreateView(APIView):
     def get(self, request):
         """List all lectures. For students, filter by active code & department."""
         user = request.user
+        is_demo = is_demo_tenant() or connection.schema_name == 'demo'
         if hasattr(user, 'student_profile'):
             student_profile = user.student_profile
-            lectures = Lecture.objects.filter(
-                faculty__teaching_staff_profile__department=student_profile.department,
-                code__isnull=False
-            ).exclude(code='').select_related('classroom', 'faculty')
+            if is_demo:
+                lectures = Lecture.objects.filter(
+                    code__isnull=False
+                ).exclude(code='').select_related('classroom', 'faculty')
+            else:
+                lectures = Lecture.objects.filter(
+                    faculty__teaching_staff_profile__department=student_profile.department,
+                    code__isnull=False
+                ).exclude(code='').select_related('classroom', 'faculty')
         else:
             lectures = Lecture.objects.all().select_related('classroom', 'faculty')
         
