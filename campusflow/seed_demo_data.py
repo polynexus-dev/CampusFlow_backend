@@ -141,7 +141,7 @@ with schema_context(SCHEMA):
     u_admin, created = User.objects.get_or_create(
         username='demo_admin',
         defaults={
-            'email': 'admin@demo.localhost',
+            'email': f'admin@{active_email_domain}',
             'first_name': 'Demo',
             'last_name': 'Admin',
             'is_staff': True,
@@ -151,6 +151,9 @@ with schema_context(SCHEMA):
     if created:
         u_admin.set_password('admin123')
         u_admin.save()
+    elif u_admin.email != f'admin@{active_email_domain}':
+        u_admin.email = f'admin@{active_email_domain}'
+        u_admin.save(update_fields=['email'])
     assign_user_to_role(u_admin, 'Administrator')
     profile_admin, _ = AdministratorProfile.objects.get_or_create(
         user=u_admin,
@@ -166,7 +169,7 @@ with schema_context(SCHEMA):
     u_mgmt, created = User.objects.get_or_create(
         username='demo_mgmt',
         defaults={
-            'email': 'mgmt@demo.localhost',
+            'email': f'mgmt@{active_email_domain}',
             'first_name': 'Demo',
             'last_name': 'Director',
             'is_active': True
@@ -175,6 +178,9 @@ with schema_context(SCHEMA):
     if created:
         u_mgmt.set_password('admin123')
         u_mgmt.save()
+    elif u_mgmt.email != f'mgmt@{active_email_domain}':
+        u_mgmt.email = f'mgmt@{active_email_domain}'
+        u_mgmt.save(update_fields=['email'])
     assign_user_to_role(u_mgmt, 'Management')
     profile_mgmt, _ = ManagementProfile.objects.get_or_create(
         user=u_mgmt,
@@ -190,7 +196,7 @@ with schema_context(SCHEMA):
     u_hod, created = User.objects.get_or_create(
         username='demo_hod',
         defaults={
-            'email': 'hod@demo.localhost',
+            'email': f'hod@{active_email_domain}',
             'first_name': 'Dr. Robert',
             'last_name': 'HOD',
             'is_active': True
@@ -199,6 +205,9 @@ with schema_context(SCHEMA):
     if created:
         u_hod.set_password('admin123')
         u_hod.save()
+    elif u_hod.email != f'hod@{active_email_domain}':
+        u_hod.email = f'hod@{active_email_domain}'
+        u_hod.save(update_fields=['email'])
     assign_user_to_role(u_hod, 'Department Head')
     profile_hod, _ = DepartmentHeadProfile.objects.get_or_create(
         user=u_hod,
@@ -215,7 +224,7 @@ with schema_context(SCHEMA):
     u_faculty, created = User.objects.get_or_create(
         username='demo_faculty',
         defaults={
-            'email': 'faculty@demo.localhost',
+            'email': f'faculty@{active_email_domain}',
             'first_name': 'Dr. Jane',
             'last_name': 'Doe',
             'is_active': True
@@ -224,6 +233,9 @@ with schema_context(SCHEMA):
     if created:
         u_faculty.set_password('admin123')
         u_faculty.save()
+    elif u_faculty.email != f'faculty@{active_email_domain}':
+        u_faculty.email = f'faculty@{active_email_domain}'
+        u_faculty.save(update_fields=['email'])
     assign_user_to_role(u_faculty, 'Faculty')
     profile_faculty, _ = TeachingStaffProfile.objects.get_or_create(
         user=u_faculty,
@@ -242,7 +254,7 @@ with schema_context(SCHEMA):
     u_faculty2, created = User.objects.get_or_create(
         username='demo_faculty2',
         defaults={
-            'email': 'faculty2@demo.localhost',
+            'email': f'faculty2@{active_email_domain}',
             'first_name': 'Prof. John',
             'last_name': 'Smith',
             'is_active': True
@@ -251,6 +263,9 @@ with schema_context(SCHEMA):
     if created:
         u_faculty2.set_password('admin123')
         u_faculty2.save()
+    elif u_faculty2.email != f'faculty2@{active_email_domain}':
+        u_faculty2.email = f'faculty2@{active_email_domain}'
+        u_faculty2.save(update_fields=['email'])
     assign_user_to_role(u_faculty2, 'Faculty')
     profile_faculty2, _ = TeachingStaffProfile.objects.get_or_create(
         user=u_faculty2,
@@ -269,7 +284,7 @@ with schema_context(SCHEMA):
     u_support, created = User.objects.get_or_create(
         username='demo_support',
         defaults={
-            'email': 'support@demo.localhost',
+            'email': f'support@{active_email_domain}',
             'first_name': 'Sarah',
             'last_name': 'Connor',
             'is_active': True
@@ -278,6 +293,9 @@ with schema_context(SCHEMA):
     if created:
         u_support.set_password('admin123')
         u_support.save()
+    elif u_support.email != f'support@{active_email_domain}':
+        u_support.email = f'support@{active_email_domain}'
+        u_support.save(update_fields=['email'])
     assign_user_to_role(u_support, 'Support Staff')
     profile_support, _ = NonTeachingStaffProfile.objects.get_or_create(
         user=u_support,
@@ -293,7 +311,7 @@ with schema_context(SCHEMA):
     u_student, created = User.objects.get_or_create(
         username='demo_student',
         defaults={
-            'email': 'student@demo.localhost',
+            'email': f'student@{active_email_domain}',
             'first_name': 'Alice',
             'last_name': 'Johnson',
             'is_active': True
@@ -302,6 +320,9 @@ with schema_context(SCHEMA):
     if created:
         u_student.set_password('admin123')
         u_student.save()
+    elif u_student.email != f'student@{active_email_domain}':
+        u_student.email = f'student@{active_email_domain}'
+        u_student.save(update_fields=['email'])
     assign_user_to_role(u_student, 'student')
     profile_student, _ = StudentProfile.objects.get_or_create(
         user=u_student,
@@ -323,7 +344,7 @@ with schema_context(SCHEMA):
     u_student2, created = User.objects.get_or_create(
         username='demo_student2',
         defaults={
-            'email': 'student2@demo.localhost',
+            'email': f'student2@{active_email_domain}',
             'first_name': 'Bob',
             'last_name': 'Wilson',
             'is_active': True
@@ -332,6 +353,9 @@ with schema_context(SCHEMA):
     if created:
         u_student2.set_password('admin123')
         u_student2.save()
+    elif u_student2.email != f'student2@{active_email_domain}':
+        u_student2.email = f'student2@{active_email_domain}'
+        u_student2.save(update_fields=['email'])
     assign_user_to_role(u_student2, 'student')
     profile_student2, _ = StudentProfile.objects.get_or_create(
         user=u_student2,
@@ -353,7 +377,7 @@ with schema_context(SCHEMA):
     u_student3, created = User.objects.get_or_create(
         username='demo_student3',
         defaults={
-            'email': 'student3@demo.localhost',
+            'email': f'student3@{active_email_domain}',
             'first_name': 'Charlie',
             'last_name': 'Brown',
             'is_active': True
@@ -362,6 +386,9 @@ with schema_context(SCHEMA):
     if created:
         u_student3.set_password('admin123')
         u_student3.save()
+    elif u_student3.email != f'student3@{active_email_domain}':
+        u_student3.email = f'student3@{active_email_domain}'
+        u_student3.save(update_fields=['email'])
     assign_user_to_role(u_student3, 'student')
     profile_student3, _ = StudentProfile.objects.get_or_create(
         user=u_student3,
