@@ -49,7 +49,7 @@ from .views.payroll import (
     GeneratePayslipView, BulkPayslipGenerationView, PayslipListView
 )
 from .views.exam import ExamTypeListCreateView, ExamListCreateView, ExamDetailView
-from .views.course import CourseListCreateView
+from .views.course import CourseListCreateView, CourseDetailView
 from .views.schedule import ScheduleListView, TeacherTodayScheduleView
 from .views.attendance_correction import (
     GuardianCreateCorrectionRequestView, TeacherCorrectionRequestListView,
@@ -72,6 +72,13 @@ from .views.academics import (
     AcademicYearListCreateView, AcademicYearDetailView,
     TermListCreateView, TermDetailView,
     CurrentTermView, SetCurrentTermView,
+)
+from .views.curriculum import (
+    ProgramListCreateView, ProgramDetailView,
+    RegulationListCreateView, RegulationDetailView, RegulationCourseListView,
+    BatchListCreateView, BatchDetailView,
+    SectionListCreateView, SectionDetailView,
+    GradingSchemeListView, GradingSchemeDetailView,
 )
 from .views.paper_setting import (
     PaperBlueprintView, GeneratePaperView, ExamPaperView,
@@ -194,6 +201,21 @@ urlpatterns = [
     path('academics/current-term/', CurrentTermView.as_view(), name='current-term'),
     path('academics/current-term/set/', SetCurrentTermView.as_view(), name='current-term-set'),
 
+    # ── Curriculum Structure ──────────────────────────────────────────
+    # Program > Regulation > Batch > Section. A batch owns the regulation, and
+    # students inherit it from their batch rather than choosing one.
+    path('academics/programs/', ProgramListCreateView.as_view(), name='program-list'),
+    path('academics/programs/<int:pk>/', ProgramDetailView.as_view(), name='program-detail'),
+    path('academics/regulations/', RegulationListCreateView.as_view(), name='regulation-list'),
+    path('academics/regulations/<int:pk>/', RegulationDetailView.as_view(), name='regulation-detail'),
+    path('academics/regulations/<int:pk>/courses/', RegulationCourseListView.as_view(), name='regulation-courses'),
+    path('academics/batches/', BatchListCreateView.as_view(), name='batch-list'),
+    path('academics/batches/<int:pk>/', BatchDetailView.as_view(), name='batch-detail'),
+    path('academics/sections/', SectionListCreateView.as_view(), name='section-list'),
+    path('academics/sections/<int:pk>/', SectionDetailView.as_view(), name='section-detail'),
+    path('academics/grading-schemes/', GradingSchemeListView.as_view(), name='grading-scheme-list'),
+    path('academics/grading-schemes/<int:pk>/', GradingSchemeDetailView.as_view(), name='grading-scheme-detail'),
+
     # ── Location ──────────────────────────────────────────────────────
     # GET list (any auth) / POST create (College Admins+) / DELETE (College Admins+)
     path('location/', LocationDetailView.as_view(), name='location_detail'),
@@ -278,6 +300,7 @@ urlpatterns = [
     path('exams/', ExamListCreateView.as_view(), name='exam-list-create'),
     path('exams/<int:pk>/', ExamDetailView.as_view(), name='exam-detail'),
     path('courses/', CourseListCreateView.as_view(), name='course-list-create'),
+    path('courses/<int:pk>/', CourseDetailView.as_view(), name='course-detail'),
     path('schedules/', ScheduleListView.as_view(), name='schedule-list'),
     path('schedule/today/', TeacherTodayScheduleView.as_view(), name='schedule-today'),
 

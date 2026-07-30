@@ -53,6 +53,32 @@ class FeeStructure(models.Model):
         null=True,
         help_text="Current Semester / Year, e.g. Semester 1 (optional).",
     )
+
+    # ── Structured targeting ──
+    # Alongside, not replacing, the three CharFields above. Bulk invoice
+    # generation matches students by exact string equality on those, so this is
+    # the money path: if students carry FKs while fee structures still carry
+    # strings, some students silently go unbilled. Both forms coexist until the
+    # matching logic resolves either, which is why nothing here is required.
+    #
+    # The FK is `academic_year_ref`, not `academic_year`, on purpose. FeeStructure
+    # has no `academic_year` field today but Exam and Schedule do, and a distinct
+    # name keeps the string-versus-FK distinction visible at every call site
+    # during the parallel run.
+    program = models.ForeignKey(
+        "campusflow_app.Program", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="fee_structures",
+    )
+    batch = models.ForeignKey(
+        "campusflow_app.Batch", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="fee_structures",
+    )
+    semester_number = models.PositiveSmallIntegerField(null=True, blank=True)
+    academic_year_ref = models.ForeignKey(
+        "campusflow_app.AcademicYear", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="fee_structures",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

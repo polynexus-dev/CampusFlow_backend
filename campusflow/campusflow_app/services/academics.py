@@ -140,3 +140,66 @@ def get_current_academic_year(on_date=None):
     """The current AcademicYear, derived from the current Term."""
     term = get_current_term(on_date)
     return term.academic_year if term else None
+
+
+# ---------------------------------------------------------------------
+# Grading schemes
+# ---------------------------------------------------------------------
+
+# A 10-point absolute scale, the most common shape across Indian universities
+# (AICTE/UGC guidance, VTU/JNTU/Anna variants). Bands end at .99 rather than at
+# whole numbers so no percentage falls between two bands: 89.5 must grade as A+,
+# not as nothing.
+DEFAULT_SCHEME_NAME = "Standard 10-Point Scale"
+DEFAULT_GRADE_BANDS = [
+    # letter, min%, max%, points, is_pass
+    ("O",  90, 100.00, 10, True),
+    ("A+", 80, 89.99, 9, True),
+    ("A",  70, 79.99, 8, True),
+    ("B+", 60, 69.99, 7, True),
+    ("B",  55, 59.99, 6, True),
+    ("C",  50, 54.99, 5, True),
+    ("P",  40, 49.99, 4, True),
+    ("F",  0, 39.99, 0, False),
+]
+
+
+@transaction.atomic
+def get_default_grading_scheme():
+    """
+    Fetch (or lazily create) the tenant's default grading scheme with its bands.
+
+    Same lazy-provisioning rationale as the calendar: no backfill command and no
+    change to tenant provisioning is needed, because the first caller in a schema
+    creates what it needs.
+
+    Note this does NOT create the absent/incomplete letters (AB, I, W). Those
+    carry regulation-specific rules about whether they count in the average, so
+    an administrator should add them deliberately rather than inherit a guess.
+    """
+    from ..models.grading import GradeBand, GradingScheme
+
+    scheme = GradingScheme.objects.filter(is_default=True).first()
+    if scheme is None:
+        scheme, _ = GradingScheme.objects.get_or_create(
+            name=DEFAULT_SCHEME_NAME,
+            defaults={
+                "max_points": 10,
+                "passing_grade_points": 4,
+                "is_absolute": True,
+                "is_default": True,
+            },
+        )
+
+    if not scheme.bands.exists():
+        GradeBand.objects.bulk_create([
+            GradeBand(
+                scheme=scheme, letter=letter,
+                min_percentage=low, max_percentage=high,
+                grade_points=points, is_pass=is_pass,
+                counts_in_gpa=True, order=index,
+            )
+            for index, (letter, low, high, points, is_pass) in enumerate(DEFAULT_GRADE_BANDS)
+        ])
+
+    return scheme

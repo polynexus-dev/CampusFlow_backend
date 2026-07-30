@@ -76,6 +76,45 @@ class StudentProfile(models.Model):
     parent_guardian_email = models.EmailField(blank=True, null=True)
     guardian_consent_given = models.BooleanField(default=False)
 
+    # ── Structured academic placement ──
+    # Parallel-run alongside the four free-text fields above, not a replacement
+    # yet. All nullable so the auto-makemigrations on the production host stays
+    # non-interactive. Nothing reads these until the backfill has run and been
+    # verified; program_enrolled_in and friends remain authoritative meanwhile.
+    # `department` is deliberately left untouched — it has too many readers, and
+    # it becomes derivable from program.department later.
+    program = models.ForeignKey(
+        "campusflow_app.Program", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="students",
+    )
+    batch = models.ForeignKey(
+        "campusflow_app.Batch", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="students",
+    )
+    section = models.ForeignKey(
+        "campusflow_app.Section", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="students",
+    )
+    current_semester_number = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Curriculum position 1..N. Structured form of current_semester_year.",
+    )
+    regulation = models.ForeignKey(
+        "campusflow_app.Regulation", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="students",
+        help_text="Normally inherited from the batch. Set explicitly ONLY for a "
+                  "regulation-transferred student who failed and re-joined under a newer scheme.",
+    )
+    academic_status = models.CharField(
+        max_length=20, default="active",
+        choices=[
+            ("active", "Active"), ("detained", "Detained"), ("dropped", "Dropped"),
+            ("graduated", "Graduated"), ("transferred", "Transferred"),
+            ("on_break", "On Break (NEP exit)"),
+        ],
+        help_text="Academic standing. Distinct from `status`, which is account state.",
+    )
+
     # Bus conductor ID-card scan — unique token embedded in the student's
     # printed/digital ID card QR. Regenerating invalidates old printed cards.
     qr_token = models.UUIDField(
@@ -96,6 +135,19 @@ class StudentProfile(models.Model):
         """Call this to invalidate all existing printed ID-card QR codes for this student."""
         self.qr_token = uuid.uuid4()
         self.save(update_fields=["qr_token"])
+
+    @property
+    def effective_regulation(self):
+        """
+        The regulation to grade this student against: their own override if set,
+        otherwise the one their batch was admitted under. Always resolve through
+        here rather than reading `regulation` directly — the override exists only
+        for students who failed and re-joined under a newer scheme, so the batch
+        is the answer for almost everyone.
+        """
+        if self.regulation_id:
+            return self.regulation
+        return self.batch.regulation if self.batch_id else None
 
 # Teaching Staff Profile Model (remains the same)
 class TeachingStaffProfile(models.Model):

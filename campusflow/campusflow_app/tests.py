@@ -566,3 +566,458 @@ class AcademicCalendarTests(TenantTestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('academics', response.data['allowed_modules'])
+
+
+class CurriculumStructureTests(TenantTestCase):
+    """
+    Covers the curriculum spine: the Course unique-constraint swap (the risky part
+    of this change), PROTECT on department, regulation inheritance via batch, and
+    the configurable grading scheme.
+    """
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            for role in ('student', 'Management'):
+                Group.objects.get_or_create(name=role)
+            self.dept = Department.objects.create(name="Computer Science", code="CS")
+
+    def _admin_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username='cur_admin', email='cur_admin@test.com', password='pw12345!'
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def _spine(self):
+        """Program + two regulations + a batch, the minimum useful structure."""
+        from .models.academics import Batch, Program, Regulation
+        from .services.academics import get_default_grading_scheme
+
+        scheme = get_default_grading_scheme()
+        program = Program.objects.create(
+            name="B.Tech Computer Science", code="BTCSE", department=self.dept,
+        )
+        reg_2021 = Regulation.objects.create(
+            program=program, code="R2021", effective_from_year=2021, grading_scheme=scheme,
+        )
+        reg_2023 = Regulation.objects.create(
+            program=program, code="R2023", effective_from_year=2023, grading_scheme=scheme,
+        )
+        batch = Batch.objects.create(
+            program=program, regulation=reg_2023, admission_year=2023, name="2023-2027",
+        )
+        return program, reg_2021, reg_2023, batch
+
+    # -- the constraint swap ------------------------------------------
+
+    def test_same_course_code_allowed_across_regulations(self):
+        """
+        The whole point of the swap. Two regulations must each be able to define
+        CS301 with different credits — impossible under the old global unique.
+        """
+        from .models.course import Course
+
+        with schema_context(self.tenant.schema_name):
+            _, reg_2021, reg_2023, _ = self._spine()
+
+            old = Course.objects.create(
+                course_code="CS301", course_name="Data Structures",
+                department=self.dept, regulation=reg_2021,
+                semester_number=3, credits=4,
+            )
+            new = Course.objects.create(
+                course_code="CS301", course_name="Data Structures & Algorithms",
+                department=self.dept, regulation=reg_2023,
+                semester_number=3, credits=3,
+            )
+            self.assertNotEqual(old.pk, new.pk)
+            self.assertEqual(Course.objects.filter(course_code="CS301").count(), 2)
+
+    def test_same_course_code_rejected_within_one_regulation(self):
+        from django.db import IntegrityError, transaction
+        from .models.course import Course
+
+        with schema_context(self.tenant.schema_name):
+            _, _, reg_2023, _ = self._spine()
+            Course.objects.create(
+                course_code="CS302", course_name="Operating Systems",
+                department=self.dept, regulation=reg_2023, credits=4,
+            )
+            with self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    Course.objects.create(
+                        course_code="CS302", course_name="OS Duplicate",
+                        department=self.dept, regulation=reg_2023, credits=4,
+                    )
+
+    def test_legacy_courses_keep_global_uniqueness(self):
+        """
+        Pre-spine rows have regulation=NULL. Postgres treats NULLs as distinct, so
+        the composite unique alone would let them duplicate freely — the partial
+        constraint is what preserves today's behaviour.
+        """
+        from django.db import IntegrityError, transaction
+        from .models.course import Course
+
+        with schema_context(self.tenant.schema_name):
+            Course.objects.create(
+                course_code="LEGACY101", course_name="Legacy Course", department=self.dept,
+            )
+            with self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    Course.objects.create(
+                        course_code="LEGACY101", course_name="Another Legacy",
+                        department=self.dept,
+                    )
+
+    def test_department_with_courses_cannot_be_deleted(self):
+        """Was CASCADE — deleting a department silently destroyed its courses."""
+        from django.db.models import ProtectedError
+        from .models.course import Course
+
+        with schema_context(self.tenant.schema_name):
+            Course.objects.create(
+                course_code="CS999", course_name="Protected Course", department=self.dept,
+            )
+            with self.assertRaises(ProtectedError):
+                self.dept.delete()
+
+    # -- grading scheme ----------------------------------------------
+
+    def test_default_grading_scheme_is_provisioned_and_idempotent(self):
+        from .models.grading import GradeBand, GradingScheme
+        from .services.academics import get_default_grading_scheme
+
+        with schema_context(self.tenant.schema_name):
+            self.assertEqual(GradingScheme.objects.count(), 0)
+
+            first = get_default_grading_scheme()
+            self.assertTrue(first.is_default)
+            self.assertEqual(first.bands.count(), 8)
+
+            second = get_default_grading_scheme()
+            self.assertEqual(first.pk, second.pk)
+            self.assertEqual(GradingScheme.objects.count(), 1)
+            self.assertEqual(GradeBand.objects.count(), 8)
+
+    def test_grade_bands_leave_no_gap_between_letters(self):
+        """
+        A band ending at 89 and the next starting at 90 would leave 89.5 ungraded.
+        Every whole and half percentage from 0 to 100 must resolve to a letter.
+        """
+        from decimal import Decimal
+        from .services.academics import get_default_grading_scheme
+
+        with schema_context(self.tenant.schema_name):
+            scheme = get_default_grading_scheme()
+            for tenth in range(0, 1001):
+                pct = Decimal(tenth) / 10
+                band = scheme.band_for_percentage(pct)
+                self.assertIsNotNone(band, f"{pct}% falls into no grade band")
+
+            self.assertEqual(scheme.band_for_percentage(Decimal('89.5')).letter, 'A+')
+            self.assertEqual(scheme.band_for_percentage(Decimal('90')).letter, 'O')
+            self.assertEqual(scheme.band_for_percentage(Decimal('39.99')).letter, 'F')
+            self.assertFalse(scheme.band_for_percentage(Decimal('20')).is_pass)
+
+    def test_only_one_grading_scheme_can_be_default(self):
+        from django.db import IntegrityError, transaction
+        from .models.grading import GradingScheme
+        from .services.academics import get_default_grading_scheme
+
+        with schema_context(self.tenant.schema_name):
+            get_default_grading_scheme()
+            with self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    GradingScheme.objects.create(name="Rival Default", is_default=True)
+
+    def test_regulation_falls_back_to_default_grading_scheme(self):
+        from .models.academics import Program, Regulation
+        from .services.academics import get_default_grading_scheme
+
+        with schema_context(self.tenant.schema_name):
+            default = get_default_grading_scheme()
+            program = Program.objects.create(
+                name="B.Tech Mechanical", code="BTMECH", department=self.dept,
+            )
+            regulation = Regulation.objects.create(
+                program=program, code="R2020", effective_from_year=2020, grading_scheme=None,
+            )
+            self.assertEqual(regulation.effective_grading_scheme.pk, default.pk)
+
+    # -- regulation inheritance --------------------------------------
+
+    def test_student_regulation_comes_from_batch_unless_overridden(self):
+        """
+        A cohort must not be able to split across schemes by accident, so the
+        batch is the source of truth. The per-student override exists only for a
+        student who failed and re-joined under a newer scheme.
+        """
+        with schema_context(self.tenant.schema_name):
+            _, reg_2021, reg_2023, batch = self._spine()
+
+            user = User.objects.create_user(username='stu_reg', email='stu_reg@test.com')
+            student = StudentProfile.objects.create(
+                user=user, student_id='STU-REG-1', department=self.dept, batch=batch,
+            )
+            self.assertEqual(student.effective_regulation.pk, reg_2023.pk)
+
+            student.regulation = reg_2021
+            student.save()
+            self.assertEqual(student.effective_regulation.pk, reg_2021.pk)
+
+    def test_batch_rejects_a_regulation_from_another_program(self):
+        """Silently grading a cohort against another programme's scheme is unrecoverable."""
+        from .models.academics import Program, Regulation
+
+        token = self._admin_token()
+        with schema_context(self.tenant.schema_name):
+            program_a, _, _, _ = self._spine()
+            program_b = Program.objects.create(
+                name="B.Tech Civil", code="BTCIVIL", department=self.dept,
+            )
+            foreign_reg = Regulation.objects.create(
+                program=program_b, code="RCIVIL", effective_from_year=2023,
+            )
+
+        response = self.client.post(
+            reverse('batch-list'),
+            {
+                'program_id': program_a.id, 'regulation_id': foreign_reg.id,
+                'admission_year': 2026,
+            },
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('different program', str(response.data.get('error', '')))
+
+    # -- sections -----------------------------------------------------
+
+    def test_sections_are_scoped_per_semester(self):
+        """
+        Section A must be able to exist in several semesters of one batch, because
+        colleges re-cut sections when electives begin. Only a repeat within the
+        same semester is a clash.
+        """
+        from django.db import IntegrityError, transaction
+        from .models.academics import Section
+
+        with schema_context(self.tenant.schema_name):
+            _, _, _, batch = self._spine()
+
+            Section.objects.create(batch=batch, name="A", semester_number=1)
+            Section.objects.create(batch=batch, name="A", semester_number=5)
+            Section.objects.create(batch=batch, name="C", semester_number=5)
+            self.assertEqual(Section.objects.filter(batch=batch).count(), 3)
+
+            with self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    Section.objects.create(batch=batch, name="A", semester_number=5)
+
+    # -- API ----------------------------------------------------------
+
+    def test_program_and_batch_creation_via_api_derives_batch_name(self):
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+
+        program_res = self.client.post(
+            reverse('program-list'),
+            {'name': 'B.Tech Electronics', 'code': 'btece', 'department_id': self.dept.id,
+             'duration_years': 4},
+            format='json', **auth,
+        )
+        self.assertEqual(program_res.status_code, status.HTTP_201_CREATED)
+        # Codes are normalised to upper case.
+        self.assertEqual(program_res.data['code'], 'BTECE')
+
+        reg_res = self.client.post(
+            reverse('regulation-list'),
+            {'program_id': program_res.data['id'], 'code': 'R2024', 'effective_from_year': 2024},
+            format='json', **auth,
+        )
+        self.assertEqual(reg_res.status_code, status.HTTP_201_CREATED)
+        # A regulation is never left ungradeable.
+        self.assertIsNotNone(reg_res.data['grading_scheme_id'])
+
+        batch_res = self.client.post(
+            reverse('batch-list'),
+            {'program_id': program_res.data['id'], 'regulation_id': reg_res.data['id'],
+             'admission_year': 2024},
+            format='json', **auth,
+        )
+        self.assertEqual(batch_res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(batch_res.data['name'], '2024-2028')
+
+    def test_duplicate_program_code_rejected_with_400_not_500(self):
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        payload = {'name': 'Duplicate Program', 'code': 'DUP1', 'department_id': self.dept.id}
+
+        self.assertEqual(
+            self.client.post(reverse('program-list'), payload, format='json', **auth).status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertEqual(
+            self.client.post(reverse('program-list'), payload, format='json', **auth).status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_regulation_courses_endpoint_totals_only_credit_bearing_courses(self):
+        """
+        Mandatory non-credit courses appear on a transcript but must not inflate
+        the credit total used for graduation checks.
+        """
+        from .models.course import Course
+
+        token = self._admin_token()
+        with schema_context(self.tenant.schema_name):
+            _, _, reg_2023, _ = self._spine()
+            Course.objects.create(
+                course_code="CS401", course_name="Compilers", department=self.dept,
+                regulation=reg_2023, semester_number=1, credits=4,
+            )
+            Course.objects.create(
+                course_code="CS402", course_name="Networks", department=self.dept,
+                regulation=reg_2023, semester_number=1, credits=3,
+            )
+            Course.objects.create(
+                course_code="MC403", course_name="Environmental Science", department=self.dept,
+                regulation=reg_2023, semester_number=1, credits=0,
+                course_type="mandatory_nc", is_credit_bearing=False,
+            )
+
+        response = self.client.get(
+            reverse('regulation-courses', args=[reg_2023.id]),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 3)
+        self.assertEqual(response.data['total_credits'], 7.0)
+
+    def test_course_list_still_returns_a_bare_array(self):
+        """
+        Assignments.jsx and Exams.jsx both do `setCourses(res.data || [])`. Wrapping
+        this response in {"results": ...} would silently empty both dropdowns, so
+        the array shape is part of the contract.
+        """
+        from .models.course import Course
+
+        token = self._admin_token()
+        with schema_context(self.tenant.schema_name):
+            Course.objects.create(
+                course_code="SHAPE1", course_name="Shape Check", department=self.dept,
+            )
+
+        response = self.client.get(
+            reverse('course-list-create'),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsInstance(response.data, list)
+        self.assertIn('credits', response.data[0])
+
+    def test_course_credits_can_be_set_and_updated(self):
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        with schema_context(self.tenant.schema_name):
+            _, _, reg_2023, _ = self._spine()
+
+        created = self.client.post(
+            reverse('course-list-create'),
+            {
+                'course_code': 'cs501', 'course_name': 'Machine Learning',
+                'department_id': self.dept.id, 'regulation_id': reg_2023.id,
+                'semester_number': 5, 'credits': 3, 'lecture_hours': 3,
+                'tutorial_hours': 0, 'practical_hours': 2, 'course_type': 'core',
+            },
+            format='json', **auth,
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.data['course']['credits'], 3.0)
+        self.assertEqual(created.data['course']['course_code'], 'CS501')
+        self.assertEqual(created.data['course']['total_contact_hours'], 5)
+
+        # Django's test Client.put defaults to application/octet-stream, unlike
+        # post, so the content type must be explicit or DRF answers 415.
+        import json
+        updated = self.client.put(
+            reverse('course-detail', args=[created.data['id']]),
+            json.dumps({'credits': 4}),
+            content_type='application/json', **auth,
+        )
+        self.assertEqual(updated.status_code, status.HTTP_200_OK)
+        self.assertEqual(updated.data['credits'], 4.0)
+
+    def test_locked_regulation_freezes_credits_but_allows_renaming(self):
+        """
+        Once transcripts are issued, re-weighting a course would silently move
+        every SGPA computed from it. Renaming is harmless and stays allowed.
+        """
+        from .models.course import Course
+
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        with schema_context(self.tenant.schema_name):
+            _, _, reg_2023, _ = self._spine()
+            course = Course.objects.create(
+                course_code="CS601", course_name="Locked Course", department=self.dept,
+                regulation=reg_2023, semester_number=6, credits=4,
+            )
+            reg_2023.is_locked = True
+            reg_2023.save()
+
+        import json
+        blocked = self.client.put(
+            reverse('course-detail', args=[course.id]),
+            json.dumps({'credits': 2}),
+            content_type='application/json', **auth,
+        )
+        self.assertEqual(blocked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('locked', str(blocked.data.get('error', '')).lower())
+
+        allowed = self.client.put(
+            reverse('course-detail', args=[course.id]),
+            json.dumps({'course_name': 'Renamed Safely'}),
+            content_type='application/json', **auth,
+        )
+        self.assertEqual(allowed.status_code, status.HTTP_200_OK)
+        self.assertEqual(allowed.data['course_name'], 'Renamed Safely')
+        self.assertEqual(allowed.data['credits'], 4.0)
+
+    def test_course_api_duplicate_guard_is_regulation_scoped(self):
+        """The guard must mirror the DB constraints, not the old global unique."""
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        with schema_context(self.tenant.schema_name):
+            _, reg_2021, reg_2023, _ = self._spine()
+
+        payload = {
+            'course_code': 'CS777', 'course_name': 'Shared Code',
+            'department_id': self.dept.id, 'credits': 3,
+        }
+        first = self.client.post(
+            reverse('course-list-create'), {**payload, 'regulation_id': reg_2021.id},
+            format='json', **auth,
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+
+        # Same code, different regulation — must be allowed.
+        second = self.client.post(
+            reverse('course-list-create'), {**payload, 'regulation_id': reg_2023.id},
+            format='json', **auth,
+        )
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+
+        # Same code, same regulation — must be rejected cleanly.
+        third = self.client.post(
+            reverse('course-list-create'), {**payload, 'regulation_id': reg_2023.id},
+            format='json', **auth,
+        )
+        self.assertEqual(third.status_code, status.HTTP_400_BAD_REQUEST)

@@ -19,8 +19,9 @@ from .attendance_session import AttendanceSession
 from .fraud_alert import FraudAlert
 from .device_reset import DeviceResetRequest
 
-# ── Academic Calendar ──
-from .academics import AcademicYear, Term
+# ── Academic Calendar & Curriculum ──
+from .grading import GradingScheme, GradeBand
+from .academics import AcademicYear, Term, Program, Regulation, Batch, Section
 
 # ── New Modules ──
 from .audit import AuditLog

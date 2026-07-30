@@ -24,8 +24,11 @@ Note the distinction that causes the most confusion downstream:
 
 from datetime import date
 
+from django.contrib.auth.models import User
 from django.db import models
 from django.db.models import F, Q
+
+from .department import Department
 
 
 class AcademicYear(models.Model):
@@ -145,3 +148,210 @@ class Term(models.Model):
     @property
     def contains_today(self):
         return self.start_date <= date.today() <= self.end_date
+
+
+# ---------------------------------------------------------------------
+# Curriculum structure
+# ---------------------------------------------------------------------
+# Department currently doubles as the branch — StudentProfile.department is the
+# only real academic FK a student has, and `program_enrolled_in` is free text.
+# Program takes over the branch role so Department can go back to being an
+# organisational unit.
+
+
+class Program(models.Model):
+    """A degree/branch, e.g. "B.Tech Computer Science & Engineering"."""
+
+    LEVEL_CHOICES = [
+        ("ug", "Undergraduate"),
+        ("pg", "Postgraduate"),
+        ("diploma", "Diploma"),
+        ("phd", "Doctoral"),
+        ("certificate", "Certificate"),
+    ]
+
+    name = models.CharField(max_length=200)
+    code = models.CharField(max_length=20, help_text="Short code, e.g. BTCSE.")
+    short_name = models.CharField(
+        max_length=50, blank=True,
+        help_text="Display form, e.g. B.Tech CS. Capped at 50 to fit the legacy "
+                  "StudentProfile.program_enrolled_in column it mirrors during cutover.",
+    )
+    level = models.CharField(max_length=15, choices=LEVEL_CHOICES, default="ug")
+    department = models.ForeignKey(
+        Department, on_delete=models.PROTECT, related_name="programs",
+    )
+    duration_years = models.DecimalField(max_digits=3, decimal_places=1, default=4)
+    total_terms = models.PositiveSmallIntegerField(
+        default=8, help_text="Number of curriculum semesters, e.g. 8 for a 4-year degree.",
+    )
+    total_credits_required = models.DecimalField(
+        max_digits=6, decimal_places=1, null=True, blank=True,
+    )
+    # NEP hooks. Nullable and unread for now — costs nothing here and saves a
+    # migration on these tables when the APAAR/ABC work lands.
+    nep_multiple_entry_exit = models.BooleanField(default=False)
+    aicte_program_code = models.CharField(max_length=30, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Program"
+        verbose_name_plural = "Programs"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["code"], name="uniq_program_code"),
+        ]
+        indexes = [models.Index(fields=["department", "is_active"])]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class Regulation(models.Model):
+    """
+    A versioned curriculum scheme, e.g. R2023. Owns the grading scheme and the
+    graduation rules, which is what makes grading configurable per programme
+    rather than hardcoded.
+    """
+
+    STATUS_CHOICES = [
+        ("draft", "Draft"),
+        ("active", "Active"),
+        ("archived", "Archived"),
+    ]
+
+    program = models.ForeignKey(
+        Program, on_delete=models.CASCADE, related_name="regulations",
+    )
+    code = models.CharField(max_length=30, help_text="e.g. R2023 or 2021 Scheme.")
+    name = models.CharField(max_length=200, blank=True)
+    effective_from_year = models.PositiveSmallIntegerField(
+        help_text="First admission year this scheme applies to.",
+    )
+    effective_to_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    grading_scheme = models.ForeignKey(
+        "campusflow_app.GradingScheme", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="regulations",
+        help_text="Falls back to the default scheme when unset.",
+    )
+    min_credits_to_graduate = models.DecimalField(
+        max_digits=6, decimal_places=1, null=True, blank=True,
+    )
+    max_backlogs_to_promote = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Drives the suggested promotion decision once promotion reads marks.",
+    )
+    is_locked = models.BooleanField(
+        default=False,
+        help_text="Once locked, credits and L-T-P on its courses cannot change. "
+                  "Protects transcripts already issued under this scheme.",
+    )
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="draft")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Regulation"
+        verbose_name_plural = "Regulations"
+        ordering = ["-effective_from_year", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["program", "code"], name="uniq_regulation_per_program",
+            ),
+        ]
+        indexes = [models.Index(fields=["program", "status"])]
+
+    def __str__(self):
+        return f"{self.program.code} {self.code}"
+
+    @property
+    def effective_grading_scheme(self):
+        """The scheme to grade against — this regulation's, or the tenant default."""
+        if self.grading_scheme_id:
+            return self.grading_scheme
+        from .grading import GradingScheme
+        return GradingScheme.objects.filter(is_default=True).first()
+
+
+class Batch(models.Model):
+    """
+    An admitted cohort, e.g. 2025-2029. The single place a regulation is decided:
+    students inherit it from their batch rather than choosing one, so a cohort
+    cannot end up split across schemes by accident.
+    """
+
+    program = models.ForeignKey(
+        Program, on_delete=models.PROTECT, related_name="batches",
+    )
+    regulation = models.ForeignKey(
+        Regulation, on_delete=models.PROTECT, related_name="batches",
+    )
+    admission_year = models.PositiveSmallIntegerField()
+    name = models.CharField(max_length=50, help_text="e.g. 2025-2029.")
+    expected_graduation_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    current_semester_number = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="Curriculum position of the bulk of this batch; advanced by a promotion run.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Batch"
+        verbose_name_plural = "Batches"
+        ordering = ["-admission_year", "program__code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["program", "admission_year"], name="uniq_batch_per_program_year",
+            ),
+        ]
+        indexes = [models.Index(fields=["program", "is_active"])]
+
+    def __str__(self):
+        return f"{self.program.code} {self.name}"
+
+
+class Section(models.Model):
+    """
+    A division within a batch, scoped per semester rather than per batch. That is
+    deliberate: colleges re-cut sections when electives begin, so "A/B in
+    semesters 1-4, A/B/C in 5-8" must be expressible. A batch-only section
+    cannot represent it, and the workaround is free text again.
+    """
+
+    batch = models.ForeignKey(
+        Batch, on_delete=models.CASCADE, related_name="sections",
+    )
+    name = models.CharField(
+        max_length=10,
+        help_text="e.g. A. Capped at 10 to mirror the legacy section_division.",
+    )
+    semester_number = models.PositiveSmallIntegerField(
+        help_text="Curriculum semester this section applies to.",
+    )
+    capacity = models.PositiveSmallIntegerField(null=True, blank=True)
+    # User rather than TeachingStaffProfile: the codebase is split, but
+    # Schedule.faculty and Exam.invigilator both use User, and it avoids a
+    # second lookup during permission checks.
+    mentor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="mentored_sections",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Section"
+        verbose_name_plural = "Sections"
+        ordering = ["semester_number", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "semester_number", "name"],
+                name="uniq_section_per_batch_sem",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.batch} Sem {self.semester_number} - {self.name}"
