@@ -43,6 +43,10 @@ class Announcement(models.Model):
         null=True, blank=True,
         help_text="Auto-hide announcement after this datetime. Null = never expires."
     )
+    notify_parents = models.BooleanField(
+        default=False,
+        help_text="If true, a notification is sent to the guardians of every student in the targeted department(s) when this is created.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

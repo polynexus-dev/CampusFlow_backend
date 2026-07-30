@@ -74,6 +74,16 @@ class Exam(models.Model):
     )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='scheduled')
     instructions = models.TextField(blank=True, null=True, help_text="Special instructions for this exam.")
+    results_published = models.BooleanField(
+        default=False,
+        help_text="Once true, entered marks are visible to parents and locked from direct edits (use a ResultCorrectionRequest instead).",
+    )
+    results_published_at = models.DateTimeField(null=True, blank=True)
+    paper_finalized = models.BooleanField(
+        default=False,
+        help_text="Once true, the composed question paper (ExamQuestion rows) is locked from further edits.",
+    )
+    paper_finalized_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

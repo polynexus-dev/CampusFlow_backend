@@ -50,7 +50,29 @@ from .views.payroll import (
 )
 from .views.exam import ExamTypeListCreateView, ExamListCreateView, ExamDetailView
 from .views.course import CourseListCreateView
-from .views.schedule import ScheduleListView
+from .views.schedule import ScheduleListView, TeacherTodayScheduleView
+from .views.attendance_correction import (
+    GuardianCreateCorrectionRequestView, TeacherCorrectionRequestListView,
+    TeacherCorrectionRequestActionView,
+)
+from .views.quick_create import QuickCreatePostView
+from .views.enrollment import AdminEnrollStudentView, StudentConsentGrantView, EnrollmentStatsView
+from .views.face_registration_queue import (
+    FaceRegistrationQueueView, FaceRegistrationCaptureView, FaceRegistrationRetakeView,
+)
+from .views.promotion import PromoteClassView, PromoteClassRevertView
+from .views.parent_link_request import (
+    ParentLinkRequestCreateView, AdminParentLinkRequestListView, AdminParentLinkRequestActionView,
+)
+from .views.question_bank import (
+    SyllabusTopicListCreateView, SyllabusTopicDetailView,
+    QuestionBankListCreateView, QuestionDetailView,
+)
+from .views.paper_setting import (
+    PaperBlueprintView, GeneratePaperView, ExamPaperView,
+    ExamQuestionAddView, ExamQuestionReplaceView, ExamQuestionDetailView,
+    FinalizePaperView,
+)
 from .views.assignment import AssignmentListCreateView, AssignmentDetailView
 from .views.submission import SubmissionListCreateView, SubmissionGradeView
 from .views.analytics import (
@@ -65,6 +87,10 @@ from .views.bus_tracking import (
     BusBoardingScanView, BusAttendanceListView,
     BusDriverDashboardView, BusSummaryStatsView,
     BusTripStartView, BusTripEndView, BusDriverTripStatsView,
+    BusConductorScanStudentView, BusTripSummaryView, StudentIDQRView,
+)
+from .views.notifications import (
+    NotificationListView, NotificationMarkReadView, NotificationUnreadCountView,
 )
 from .views.fees import (
     FeeCategoryViewSet, FeeStructureViewSet, StudentFeeInvoiceViewSet,
@@ -82,9 +108,17 @@ from .views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
 from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
 from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from .views.valuation import ValuationSessionViewSet, ScannedPaperViewSet
-from .views.result import StudentExamResultViewSet
+from .views.result import StudentExamResultViewSet, ExamClassStatsView, ExamPublishResultsView
+from .views.result_correction import (
+    ResultCorrectionRequestCreateView, HMCorrectionRequestListView, HMCorrectionRequestActionView,
+)
 from .views.progress import StudentProgressView, StudentTopicPerformanceView
 from .views.contact import ContactEnquiryView
+from .views.guardian import (
+    ParentLinkChildView, ParentChildrenListView,
+    ParentChildAttendanceView, ParentChildFeesView,
+    ParentChildExamsView, ParentChildAssignmentsView
+)
 
 
 urlpatterns = [
@@ -229,6 +263,12 @@ urlpatterns = [
     path('exams/<int:pk>/', ExamDetailView.as_view(), name='exam-detail'),
     path('courses/', CourseListCreateView.as_view(), name='course-list-create'),
     path('schedules/', ScheduleListView.as_view(), name='schedule-list'),
+    path('schedule/today/', TeacherTodayScheduleView.as_view(), name='schedule-today'),
+
+    # ── Attendance Correction Requests ───────────────────────────────
+    path('attendance/corrections/', GuardianCreateCorrectionRequestView.as_view(), name='attendance-correction-create'),
+    path('attendance/corrections/list/', TeacherCorrectionRequestListView.as_view(), name='attendance-correction-list'),
+    path('attendance/corrections/<int:pk>/action/', TeacherCorrectionRequestActionView.as_view(), name='attendance-correction-action'),
 
     # ── Analytics ─────────────────────────────────────────────────────
     path('analytics/overview/', OverviewKPIView.as_view(), name='analytics-overview'),
@@ -244,6 +284,41 @@ urlpatterns = [
     path('assignments/<int:pk>/', AssignmentDetailView.as_view(), name='assignment-detail'),
     path('assignments/<int:assignment_id>/submissions/', SubmissionListCreateView.as_view(), name='submission-list-create'),
     path('submissions/<int:pk>/grade/', SubmissionGradeView.as_view(), name='submission-grade'),
+    path('posts/quick-create/', QuickCreatePostView.as_view(), name='posts-quick-create'),
+
+    # ── Admin Enrollment & Consent ───────────────────────────────────
+    path('students/enroll/', AdminEnrollStudentView.as_view(), name='admin-enroll-student'),
+    path('students/enrollment-stats/', EnrollmentStatsView.as_view(), name='enrollment-stats'),
+    path('consents/<int:pk>/grant/', StudentConsentGrantView.as_view(), name='consent-grant'),
+
+    # ── Face Registration Queue (Admin) ──────────────────────────────
+    path('face-registration/queue/', FaceRegistrationQueueView.as_view(), name='face-registration-queue'),
+    path('face-registration/<int:student_id>/capture/', FaceRegistrationCaptureView.as_view(), name='face-registration-capture'),
+    path('face-registration/<int:student_id>/retake/<str:angle>/', FaceRegistrationRetakeView.as_view(), name='face-registration-retake'),
+
+    # ── Promote Class (year-end) ─────────────────────────────────────
+    path('students/promote/', PromoteClassView.as_view(), name='students-promote'),
+    path('students/promote/<int:batch_id>/revert/', PromoteClassRevertView.as_view(), name='students-promote-revert'),
+
+    # ── Parent Link Manager (Admin) ──────────────────────────────────
+    path('parent-link-requests/', ParentLinkRequestCreateView.as_view(), name='parent-link-request-create'),
+    path('parent-link-requests/list/', AdminParentLinkRequestListView.as_view(), name='parent-link-request-list'),
+    path('parent-link-requests/<int:pk>/action/', AdminParentLinkRequestActionView.as_view(), name='parent-link-request-action'),
+
+    # ── Syllabus & Question Bank ──────────────────────────────────────
+    path('courses/<int:course_id>/syllabus-topics/', SyllabusTopicListCreateView.as_view(), name='syllabus-topic-list'),
+    path('syllabus-topics/<int:pk>/', SyllabusTopicDetailView.as_view(), name='syllabus-topic-detail'),
+    path('courses/<int:course_id>/questions/', QuestionBankListCreateView.as_view(), name='question-bank-list'),
+    path('questions/<int:pk>/', QuestionDetailView.as_view(), name='question-bank-detail'),
+
+    # ── Paper Setting from Syllabus ───────────────────────────────────
+    path('exams/<int:pk>/blueprint/', PaperBlueprintView.as_view(), name='exam-paper-blueprint'),
+    path('exams/<int:pk>/paper/generate/', GeneratePaperView.as_view(), name='exam-paper-generate'),
+    path('exams/<int:pk>/paper/', ExamPaperView.as_view(), name='exam-paper'),
+    path('exams/<int:pk>/paper/questions/', ExamQuestionAddView.as_view(), name='exam-paper-question-add'),
+    path('exams/<int:pk>/paper/questions/<int:exam_question_id>/replace/', ExamQuestionReplaceView.as_view(), name='exam-paper-question-replace'),
+    path('exams/<int:pk>/paper/questions/<int:exam_question_id>/', ExamQuestionDetailView.as_view(), name='exam-paper-question-detail'),
+    path('exams/<int:pk>/paper/finalize/', FinalizePaperView.as_view(), name='exam-paper-finalize'),
 
     # ── Bus Tracking ─────────────────────────────────────────────────
     # Admin: route management
@@ -262,6 +337,15 @@ urlpatterns = [
     # Student: board the bus (QR scan)
     path('bus/scan/', BusBoardingScanView.as_view(), name='bus-boarding-scan'),
     path('bus/summary-stats/', BusSummaryStatsView.as_view(), name='bus-summary-stats'),
+    # Conductor: scan a student's ID card (board/alight)
+    path('bus/conductor/scan-student/', BusConductorScanStudentView.as_view(), name='bus-conductor-scan-student'),
+    path('bus/driver/trip/<int:pk>/summary/', BusTripSummaryView.as_view(), name='bus-trip-summary'),
+    path('bus/student/<int:pk>/id-card-qr/', StudentIDQRView.as_view(), name='bus-student-id-qr'),
+
+    # ── Notifications ────────────────────────────────────────────────
+    path('notifications/', NotificationListView.as_view(), name='notification-list'),
+    path('notifications/<int:pk>/read/', NotificationMarkReadView.as_view(), name='notification-mark-read'),
+    path('notifications/unread-count/', NotificationUnreadCountView.as_view(), name='notification-unread-count'),
 
 
     # ── Fees & Accounts ──────────────────────────────────────────────
@@ -334,6 +418,19 @@ urlpatterns = [
     # Student Exam Results
     path('exam-results/', StudentExamResultViewSet.as_view({'get': 'list', 'post': 'create'}), name='studentexamresult-list'),
     path('exam-results/<int:pk>/', StudentExamResultViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='studentexamresult-detail'),
+    path('exams/<int:pk>/class-stats/', ExamClassStatsView.as_view(), name='exam-class-stats'),
+    path('exams/<int:pk>/publish-results/', ExamPublishResultsView.as_view(), name='exam-publish-results'),
+    path('results/corrections/', ResultCorrectionRequestCreateView.as_view(), name='result-correction-create'),
+    path('results/corrections/list/', HMCorrectionRequestListView.as_view(), name='result-correction-list'),
+    path('results/corrections/<int:pk>/action/', HMCorrectionRequestActionView.as_view(), name='result-correction-action'),
+
+    # ── Parent / Guardian Endpoints ──
+    path('parent/children/', ParentChildrenListView.as_view(), name='parent-children-list'),
+    path('parent/children/link/', ParentLinkChildView.as_view(), name='parent-link-child'),
+    path('parent/children/<int:student_id>/attendance/', ParentChildAttendanceView.as_view(), name='parent-child-attendance'),
+    path('parent/children/<int:student_id>/fees/', ParentChildFeesView.as_view(), name='parent-child-fees'),
+    path('parent/children/<int:student_id>/exams/', ParentChildExamsView.as_view(), name='parent-child-exams'),
+    path('parent/children/<int:student_id>/assignments/', ParentChildAssignmentsView.as_view(), name='parent-child-assignments'),
 
 ]
 

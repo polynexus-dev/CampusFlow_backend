@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -75,12 +76,26 @@ class StudentProfile(models.Model):
     parent_guardian_email = models.EmailField(blank=True, null=True)
     guardian_consent_given = models.BooleanField(default=False)
 
+    # Bus conductor ID-card scan — unique token embedded in the student's
+    # printed/digital ID card QR. Regenerating invalidates old printed cards.
+    qr_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        help_text="Unique token for the student's ID card QR code. Regenerate to invalidate old printed cards.",
+    )
+
     class Meta:
         verbose_name = "Student Profile"
         verbose_name_plural = "Student Profiles"
 
     def __str__(self):
         return f"Student: {self.user.username} ({self.student_id})"
+
+    def regenerate_qr_token(self):
+        """Call this to invalidate all existing printed ID-card QR codes for this student."""
+        self.qr_token = uuid.uuid4()
+        self.save(update_fields=["qr_token"])
 
 # Teaching Staff Profile Model (remains the same)
 class TeachingStaffProfile(models.Model):
@@ -376,3 +391,25 @@ class DepartmentHeadProfile(models.Model):
 
     def __str__(self):
         return f"Department Head: {self.user.username} ({self.employee_id})"
+
+
+class GuardianProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='guardian_profile')
+    guardian_id = models.CharField(max_length=20, unique=True, help_text="Unique guardian identifier")
+    students = models.ManyToManyField(StudentProfile, related_name='guardians', help_text="Linked children")
+    contact_number = models.CharField(max_length=15, blank=True, null=True)
+    alternate_phone_number = models.CharField(max_length=15, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, default='active')
+
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
+
+    class Meta:
+        verbose_name = "Guardian Profile"
+        verbose_name_plural = "Guardian Profiles"
+
+    def __str__(self):
+        return f"Guardian: {self.user.username} ({self.guardian_id})"

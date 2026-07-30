@@ -9,6 +9,7 @@ from ..models.course import Course
 from ..permissions import IsFacultyOrAbove, get_user_group, is_college_admin
 from ..utils.tenant_utils import ensure_tenant_schema
 from ..utils.file_validation import validate_attachment
+from ..services.notifications import notify_guardians_of_department
 
 class AssignmentListCreateView(APIView):
     """
@@ -69,6 +70,7 @@ class AssignmentListCreateView(APIView):
         dept_id = request.data.get('department_id')
         course_id = request.data.get('course_id')
         attachment = request.FILES.get('attachment')
+        notify_parents = str(request.data.get('notify_parents', False)).lower() in ('true', '1')
 
         if not title or not description or not due_date or not dept_id or not course_id:
             return Response({"error": "title, description, due_date, department_id, and course_id are required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -90,8 +92,18 @@ class AssignmentListCreateView(APIView):
             course=course,
             due_date=due_date,
             attachment=attachment,
+            notify_parents=notify_parents,
             created_by=request.user
         )
+
+        if notify_parents:
+            notify_guardians_of_department(
+                dept.id,
+                title=f"New homework: {title}",
+                body=f"{course.course_name} · due {assignment.due_date.strftime('%Y-%m-%d %H:%M')}",
+                category="homework",
+                data={"assignment_id": assignment.id},
+            )
 
         return Response({
             "message": "Assignment created successfully.",

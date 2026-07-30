@@ -10,6 +10,7 @@ from .profile import (
     ManagementProfile,
     AdministratorProfile,
     DepartmentHeadProfile,
+    GuardianProfile,
 )
 from .attendance import Attendance
 from .face_embedding import FaceEmbedding, FaceEmbeddingSample
@@ -27,9 +28,13 @@ from .exam import ExamType, Exam
 from .assignment import Assignment
 from .submission import AssignmentSubmission
 from .manual_attendance_request import ManualAttendanceRequest
+from .attendance_correction import AttendanceCorrectionRequest
 
 # ── Bus Tracking ──
-from .bus_tracking import BusRoute, BusLocation, BusTrail, BusTrip, BusSubscription, BusAttendance
+from .bus_tracking import BusRoute, BusLocation, BusTrail, BusTrip, BusSubscription, BusAttendance, BusScanEvent
+
+# ── Notifications ──
+from .notification import Notification
 
 # ── Fees & Accounts ──
 from .fees import (
@@ -48,6 +53,13 @@ from .library import Book, BookCopy, BookIssue
 from .inventory import InventoryCategory, InventoryItem, Supplier, InventoryTransaction
 from .valuation import ValuationSession, ScannedPaper
 from .result import StudentExamResult
+from .result_correction import ResultCorrectionRequest
+from .consent import StudentConsent
+from .promotion import PromotionBatch, PromotionRecord
+from .parent_link_request import ParentLinkRequest
+
+# ── Paper Setting from Syllabus ──
+from .question_bank import SyllabusTopic, Question, PaperBlueprintTopic, ExamQuestion
 
 
 

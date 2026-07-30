@@ -21,8 +21,6 @@ REST API for the CampusNexus Bus Module:
   POST  /api/bus/scan/                         — Scan QR → validate subscription → board
 """
 
-import io
-import qrcode
 from django.http import HttpResponse
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -34,9 +32,11 @@ from datetime import timedelta
 
 from campusflow_app.models import (
     BusRoute, BusLocation, BusTrail, BusTrip,
-    BusSubscription, BusAttendance,
+    BusSubscription, BusAttendance, BusScanEvent,
 )
 from campusflow_app.permissions import IsSaaSOrCollegeAdmin, is_saas_or_college_admin, get_user_group
+from campusflow_app.services.qr_branding import render_branded_qr
+from campusflow_app.services.notifications import notify_guardians_of_student
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -218,95 +218,43 @@ class BusRouteQRView(APIView):
             return Response({"error": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # The QR payload — the mobile app will POST this token to /api/bus/scan/
-        payload = str(route.qr_token)
-
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_H,
-            box_size=10,
-            border=4,
+        png_bytes = render_branded_qr(
+            payload=str(route.qr_token),
+            title_text="CAMPUSNEXUS TRANSIT BOARDING PASS",
         )
-        qr.add_data(payload)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
 
-        # Custom-style QR into premium purple, white circle border, graduation cap and branded footer
-        from PIL import Image, ImageDraw, ImageFont
-        img = img.convert("RGBA")
-        w, h = img.size
-        pixels = img.load()
-        for x in range(w):
-            for y in range(h):
-                r, g, b, a = pixels[x, y]
-                if r < 127 and g < 127 and b < 127:
-                    pixels[x, y] = (112, 26, 117, 255) # Dark Purple
-                else:
-                    pixels[x, y] = (255, 255, 255, 255) # White
+        response = HttpResponse(png_bytes, content_type="image/png")
+        response["Content-Disposition"] = f'attachment; filename="bus_qr_{route.id}.png"'
+        return response
 
-        draw = ImageDraw.Draw(img)
-        logo_size = int(w * 0.22)
-        left = (w - logo_size) // 2
-        top = (h - logo_size) // 2
-        right = left + logo_size
-        bottom = top + logo_size
 
-        # Clear center for logo
-        draw.ellipse([left - 2, top - 2, right + 2, bottom + 2], fill=(255, 255, 255, 255), outline=(112, 26, 117, 255), width=2)
+class StudentIDQRView(APIView):
+    """
+    GET /api/bus/student/<id>/id-card-qr/
+    Returns a PNG of the student's ID-card QR code — this is what the bus
+    conductor scans to board/alight the student (see BusConductorScanStudentView).
+    Admins can fetch anyone's; a student may only fetch their own.
+    """
+    permission_classes = [IsAuthenticated]
 
-        # Draw graduation cap shape
-        cx = w // 2
-        cy = h // 2
-        cap_w = int(logo_size * 0.60)
-        cap_h = int(logo_size * 0.32)
-
-        top_pt = (cx, cy - cap_h // 2)
-        right_pt = (cx + cap_w // 2, cy)
-        bottom_pt = (cx, cy + cap_h // 2)
-        left_pt = (cx - cap_w // 2, cy)
-
-        draw.polygon([top_pt, right_pt, bottom_pt, left_pt], fill=(112, 26, 117, 255))
-
-        skull_w = int(logo_size * 0.34)
-        skull_h = int(logo_size * 0.14)
-        draw.chord([cx - skull_w // 2, cy, cx + skull_w // 2, cy + skull_h], start=0, end=180, fill=(112, 26, 117, 255))
-
-        # Gold tassel
-        draw.line([(cx, cy), (cx + cap_w // 3, cy + cap_h // 4), (cx + cap_w // 3, cy + cap_h // 2)], fill=(245, 158, 11, 255), width=2)
-
-        # Branded card with footer
-        footer_height = 80
-        card = Image.new("RGBA", (w, h + footer_height), (255, 255, 255, 255))
-        card.paste(img, (0, 0))
-
-        card_draw = ImageDraw.Draw(card)
-        card_draw.line([(25, h), (w - 25, h)], fill=(229, 231, 235, 255), width=1)
+    def get(self, request, pk):
+        from campusflow_app.models import StudentProfile
 
         try:
-            font_title = ImageFont.truetype("arial.ttf", 12)
-            font_sub = ImageFont.truetype("arial.ttf", 10)
-        except IOError:
-            font_title = ImageFont.load_default()
-            font_sub = ImageFont.load_default()
+            profile = StudentProfile.objects.select_related("user").get(pk=pk)
+        except StudentProfile.DoesNotExist:
+            return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        text_title = "CAMPUSNEXUS TRANSIT BOARDING PASS"
-        text_sub = "Powered & Developed by Polynexus Technologies"
+        if profile.user_id != request.user.id and not is_saas_or_college_admin(request.user):
+            return Response({"error": "You are not authorized to view this student's ID card."}, status=status.HTTP_403_FORBIDDEN)
 
-        if hasattr(card_draw, "textlength"):
-            w_title = card_draw.textlength(text_title, font=font_title)
-            w_sub = card_draw.textlength(text_sub, font=font_sub)
-        else:
-            w_title = len(text_title) * 6
-            w_sub = len(text_sub) * 5
+        png_bytes = render_branded_qr(
+            payload=str(profile.qr_token),
+            title_text="CAMPUSNEXUS STUDENT ID CARD",
+        )
 
-        card_draw.text(((w - w_title) // 2, h + 18), text_title, fill=(112, 26, 117, 255), font=font_title)
-        card_draw.text(((w - w_sub) // 2, h + 38), text_sub, fill=(156, 163, 175, 255), font=font_sub)
-
-        buffer = io.BytesIO()
-        card.save(buffer, format="PNG")
-        buffer.seek(0)
-
-        response = HttpResponse(buffer.read(), content_type="image/png")
-        response["Content-Disposition"] = f'attachment; filename="bus_qr_{route.id}.png"'
+        response = HttpResponse(png_bytes, content_type="image/png")
+        response["Content-Disposition"] = f'attachment; filename="student_id_qr_{profile.id}.png"'
         return response
 
 
@@ -477,6 +425,162 @@ class BusBoardingScanView(APIView):
                 "route": route.name,
                 "boarded_at": timezone.now().isoformat(),
                 "student_name": request.user.get_full_name() or request.user.username,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conductor scans a STUDENT's ID card (board / alight)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BusConductorScanStudentView(APIView):
+    """
+    POST /api/bus/conductor/scan-student/
+
+    Payload: {
+        "trip_id": <int>,
+        "student_qr_token": "<uuid>",
+        "direction": "board" | "alight",
+        "stop_name": "<str>",
+        "authorized_pickup_confirmed": <bool>   # only checked for direction="alight"
+    }
+
+    This is the Conductor App's "Scan ID cards" screen: the conductor scans
+    the STUDENT's ID card (StudentProfile.qr_token), not the bus's own QR
+    (that's the student self-boarding flow in BusBoardingScanView above).
+    Returns one of BusScanEvent.STATUS_CHOICES so the app can render the
+    matching success/error card.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from campusflow_app.models import StudentProfile
+
+        trip_id = request.data.get("trip_id")
+        raw_code = request.data.get("student_qr_token") or ""
+        direction = request.data.get("direction")
+        stop_name = request.data.get("stop_name", "")
+        authorized_pickup_confirmed = bool(request.data.get("authorized_pickup_confirmed"))
+
+        if direction not in (BusScanEvent.DIRECTION_BOARD, BusScanEvent.DIRECTION_ALIGHT):
+            return Response({"error": "direction must be 'board' or 'alight'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            trip = BusTrip.objects.select_related("route").get(pk=trip_id)
+        except (BusTrip.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if trip.ended_at is not None:
+            return Response({"error": "This trip has already ended."}, status=status.HTTP_400_BAD_REQUEST)
+
+        route = trip.route
+        is_conductor_or_driver = route is not None and request.user.id in (route.driver_id, route.conductor_id)
+        if not is_conductor_or_driver and not is_saas_or_college_admin(request.user):
+            return Response({"error": "You are not the assigned driver/conductor for this trip."}, status=status.HTTP_403_FORBIDDEN)
+
+        def record(status_value, student=None):
+            return BusScanEvent.objects.create(
+                trip=trip,
+                route=route,
+                student=student,
+                scanned_by=request.user,
+                direction=direction,
+                status=status_value,
+                stop_name=stop_name,
+                raw_code=raw_code,
+            )
+
+        # ── Resolve the student from the scanned ID card ───────────────────
+        import uuid as uuid_lib
+        try:
+            token = uuid_lib.UUID(str(raw_code))
+            profile = StudentProfile.objects.select_related("user").get(qr_token=token)
+        except (StudentProfile.DoesNotExist, ValueError, TypeError):
+            record(BusScanEvent.STATUS_UNREADABLE)
+            return Response(
+                {"status": BusScanEvent.STATUS_UNREADABLE, "message": "Could not read this ID card. Try manual entry."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        student_user = profile.user
+
+        # ── Subscription checks ────────────────────────────────────────────
+        subscription = BusSubscription.objects.filter(user=student_user, route=route).first() if route else None
+        other_route_sub = (
+            BusSubscription.objects.filter(user=student_user).exclude(route=route).first()
+            if not subscription else None
+        )
+
+        if not subscription:
+            if other_route_sub:
+                record(BusScanEvent.STATUS_WRONG_ROUTE, student=student_user)
+                return Response(
+                    {
+                        "status": BusScanEvent.STATUS_WRONG_ROUTE,
+                        "message": f"{student_user.get_full_name() or student_user.username} is subscribed to a different route: {other_route_sub.route.name}.",
+                        "student_name": student_user.get_full_name() or student_user.username,
+                        "subscribed_route": other_route_sub.route.name,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            record(BusScanEvent.STATUS_NOT_SUBSCRIBED, student=student_user)
+            return Response(
+                {"status": BusScanEvent.STATUS_NOT_SUBSCRIBED, "message": "This student is not subscribed to any bus route."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not subscription.is_valid:
+            record(BusScanEvent.STATUS_NOT_SUBSCRIBED, student=student_user)
+            return Response(
+                {"status": BusScanEvent.STATUS_NOT_SUBSCRIBED, "message": f"Subscription is {subscription.status}.", "sub_status": subscription.status},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Duplicate scan check (one board/alight per trip per student) ──
+        already = BusScanEvent.objects.filter(
+            trip=trip, student=student_user, direction=direction,
+            status__in=[BusScanEvent.STATUS_BOARDED, BusScanEvent.STATUS_ALIGHTED],
+        ).exists()
+        if already:
+            record(BusScanEvent.STATUS_ALREADY_SCANNED, student=student_user)
+            return Response(
+                {"status": BusScanEvent.STATUS_ALREADY_SCANNED, "message": "Already scanned for this trip.", "student_name": student_user.get_full_name() or student_user.username},
+                status=status.HTTP_200_OK,
+            )
+
+        # ── Alighting requires an authorized pickup confirmation ──────────
+        if direction == BusScanEvent.DIRECTION_ALIGHT and not authorized_pickup_confirmed:
+            record(BusScanEvent.STATUS_NO_AUTHORIZED_PICKUP, student=student_user)
+            return Response(
+                {
+                    "status": BusScanEvent.STATUS_NO_AUTHORIZED_PICKUP,
+                    "message": f"No authorised pickup at stop. {student_user.get_full_name() or student_user.username} stays on the bus.",
+                    "student_name": student_user.get_full_name() or student_user.username,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ── Success ─────────────────────────────────────────────────────────
+        final_status = BusScanEvent.STATUS_BOARDED if direction == BusScanEvent.DIRECTION_BOARD else BusScanEvent.STATUS_ALIGHTED
+        record(final_status, student=student_user)
+
+        class_label = " · ".join(filter(None, [profile.current_semester_year, profile.section_division]))
+        notify_guardians_of_student(
+            profile,
+            title=f"{student_user.get_full_name() or student_user.username} {'boarded' if final_status == BusScanEvent.STATUS_BOARDED else 'alighted'} the bus",
+            body=f"{stop_name} · {timezone.now().strftime('%I:%M %p')} · Route {route.name if route else ''}",
+            category=f"bus_{'boarding' if final_status == BusScanEvent.STATUS_BOARDED else 'alighting'}",
+            data={"trip_id": trip.id, "student_id": profile.id, "stop_name": stop_name},
+        )
+
+        return Response(
+            {
+                "status": final_status,
+                "message": f"{'Boarded' if final_status == BusScanEvent.STATUS_BOARDED else 'Alighted'} · {timezone.now().strftime('%I:%M %p')}",
+                "student_name": student_user.get_full_name() or student_user.username,
+                "class_label": class_label,
+                "stop_name": stop_name,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -895,12 +999,58 @@ class BusTripEndView(APIView):
 
         trip.ended_at = timezone.now()
         trip.distance_km = distance_km
-        trip.save(update_fields=["ended_at", "distance_km"])
+
+        # ── Per-trip summary + missing-student detection ───────────────────
+        from campusflow_app.models import StudentProfile
+
+        expected_count = boarded_count = missing_count = 0
+        if trip.route:
+            expected_subs = BusSubscription.objects.filter(
+                route=trip.route, status=BusSubscription.STATUS_ACTIVE
+            ).select_related("user")
+            expected_user_ids = set(expected_subs.values_list("user_id", flat=True))
+            boarded_user_ids = set(
+                BusScanEvent.objects.filter(
+                    trip=trip, direction=BusScanEvent.DIRECTION_BOARD, status=BusScanEvent.STATUS_BOARDED
+                ).values_list("student_id", flat=True)
+            )
+            missing_user_ids = expected_user_ids - boarded_user_ids
+
+            expected_count = len(expected_user_ids)
+            boarded_count = len(boarded_user_ids)
+            missing_count = len(missing_user_ids)
+
+            if missing_user_ids:
+                missing_profiles = StudentProfile.objects.filter(user_id__in=missing_user_ids).select_related("user")
+                for profile in missing_profiles:
+                    BusScanEvent.objects.create(
+                        trip=trip,
+                        route=trip.route,
+                        student=profile.user,
+                        scanned_by=None,
+                        direction=BusScanEvent.DIRECTION_BOARD,
+                        status=BusScanEvent.STATUS_MISSING,
+                    )
+                    notify_guardians_of_student(
+                        profile,
+                        title=f"{profile.user.get_full_name() or profile.user.username} did not board the bus",
+                        body=f"Route {trip.route.name} · trip ended {trip.ended_at.strftime('%I:%M %p')}",
+                        category="bus_missing",
+                        data={"trip_id": trip.id, "student_id": profile.id},
+                    )
+
+        trip.expected_count = expected_count
+        trip.boarded_count = boarded_count
+        trip.missing_count = missing_count
+        trip.save(update_fields=["ended_at", "distance_km", "expected_count", "boarded_count", "missing_count"])
 
         return Response({
             "trip_id": trip.id,
             "ended_at": trip.ended_at.isoformat(),
             "distance_km": trip.distance_km,
+            "expected_count": trip.expected_count,
+            "boarded_count": trip.boarded_count,
+            "missing_count": trip.missing_count,
         })
 
 
@@ -928,6 +1078,57 @@ class BusDriverTripStatsView(APIView):
             "distance_this_week_km": round(week_agg["distance"] or 0.0, 2),
             "trips_this_month": month_agg["count"] or 0,
             "distance_this_month_km": round(month_agg["distance"] or 0.0, 2),
+        })
+
+
+class BusTripSummaryView(APIView):
+    """
+    GET /api/bus/driver/trip/<id>/summary/
+    Powers the Conductor App's "Trip summary" screen: boarded/expected/
+    missing counts plus the missing-student list (name, class, stop) for
+    the "Missing · did not board" section with a call-parent action.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            trip = BusTrip.objects.select_related("route", "driver").get(pk=pk)
+        except BusTrip.DoesNotExist:
+            return Response({"error": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        is_conductor_or_driver = trip.route is not None and request.user.id in (trip.route.driver_id, trip.route.conductor_id)
+        if not is_conductor_or_driver and not is_saas_or_college_admin(request.user):
+            return Response({"error": "You are not authorized to view this trip."}, status=status.HTTP_403_FORBIDDEN)
+
+        missing_events = BusScanEvent.objects.filter(
+            trip=trip, status=BusScanEvent.STATUS_MISSING
+        ).select_related("student")
+
+        missing_students = []
+        for event in missing_events:
+            sub = BusSubscription.objects.filter(user=event.student, route=trip.route).first()
+            profile = getattr(event.student, "student_profile", None)
+            class_label = " · ".join(filter(None, [
+                getattr(profile, "current_semester_year", None),
+                getattr(profile, "section_division", None),
+            ])) if profile else ""
+            missing_students.append({
+                "student_id": event.student_id,
+                "name": event.student.get_full_name() or event.student.username,
+                "class_label": class_label,
+                "stop_name": sub.boarding_stop if sub else "",
+            })
+
+        return Response({
+            "trip_id": trip.id,
+            "route_name": trip.route.name if trip.route else None,
+            "trip_type": trip.trip_type,
+            "started_at": trip.started_at.isoformat(),
+            "ended_at": trip.ended_at.isoformat() if trip.ended_at else None,
+            "expected_count": trip.expected_count,
+            "boarded_count": trip.boarded_count,
+            "missing_count": trip.missing_count,
+            "missing_students": missing_students,
         })
 
 

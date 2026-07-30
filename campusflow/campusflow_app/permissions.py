@@ -52,6 +52,18 @@ def is_faculty_or_above(user):
     return group in ('Management', 'Administrator', 'Department Head', 'Faculty')
 
 
+def is_hm_or_above(user):
+    """Department Head, Administrator, Management, or SaaS Admin — NOT plain Faculty.
+    Used to gate HM-level re-approval actions (e.g. post-publish marks corrections)
+    that a regular teacher should not be able to self-approve."""
+    if not user.is_authenticated:
+        return False
+    if is_saas_admin(user):
+        return True
+    group = get_user_group(user)
+    return group in ('Management', 'Administrator', 'Department Head')
+
+
 # ─────────────────────────────────────────────
 # Permission classes (use in views)
 # ─────────────────────────────────────────────
@@ -86,6 +98,14 @@ class IsFacultyOrAbove(BasePermission):
 
     def has_permission(self, request, view):
         return is_faculty_or_above(request.user)
+
+
+class IsHMOrAbove(BasePermission):
+    """Department Head, Administrator, Management, and SaaS Admin — NOT plain Faculty."""
+    message = "Only a Head of Department or College Admin can perform this action."
+
+    def has_permission(self, request, view):
+        return is_hm_or_above(request.user)
 
 
 class IsNotStudent(BasePermission):

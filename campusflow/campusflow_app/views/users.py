@@ -1726,6 +1726,21 @@ class UserProfileView(APIView):
             # Mask Aadhaar
             profile_data["aadhaar_number"] = mask_sensitive_field(profile.aadhaar_number)
 
+        elif usergroup == 'guardian':
+            from ..models.profile import GuardianProfile
+            profile = GuardianProfile.objects.filter(user=user).first()
+            if not profile:
+                return Response({"detail": "Guardian profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            profile_data = {
+                "user": {"username": user.username, "email": user.email, "first_name": user.first_name, "last_name": user.last_name},
+                "role": usergroup, "tenant": tenant_name,
+                "guardian_id": profile.guardian_id,
+                "contact_number": profile.contact_number,
+                "alternate_phone_number": profile.alternate_phone_number,
+                "address": profile.address,
+                "status": profile.status,
+            }
+
         elif is_saas_admin(user):
             # SaaS Admin has no profile record in tenant — return basic user info
             profile_data = {
@@ -1770,6 +1785,7 @@ class UserProfileView(APIView):
             profile_data["is_bus_conductor"] = bool(assigned_route and assigned_route.conductor_id == user.id)
             profile_data["bus_route_id"] = assigned_route.id if assigned_route else None
 
+        profile_data["tenant_type"] = getattr(tenant, "tenant_type", "college")
         return Response(profile_data, status=status.HTTP_200_OK)
 
     def put(self, request):

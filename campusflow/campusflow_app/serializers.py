@@ -39,6 +39,7 @@ from .models.profile import (
     NonTeachingStaffProfile,
     StudentProfile,
     TeachingStaffProfile,
+    GuardianProfile,
 )
 from .models.schedule import Schedule
 from .models.tpo import PlacementApplication, RecruitmentDrive
@@ -214,6 +215,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 profile_data = AdministratorProfile.objects.filter(user=user).first()
             elif user_group.name == 'Department Head':
                 profile_data = DepartmentHeadProfile.objects.filter(user=user).first()
+            elif user_group.name == 'guardian':
+                profile_data = GuardianProfile.objects.filter(user=user).first()
     
             if not profile_data:
                 raise serializers.ValidationError(
@@ -312,6 +315,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'schema': getattr(tenant, 'schema_name', 'public'),
                 'code': getattr(tenant, 'code', None),
                 'logo': request.build_absolute_uri(tenant.logo.url) if getattr(tenant, 'logo', None) else None,
+                'tenant_type': getattr(tenant, 'tenant_type', 'college'),
             }
 
         if profile_data:
@@ -326,6 +330,9 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 data['profile']['locked_device_id'] = getattr(profile_data, 'locked_device_id', None)
             elif user_group.name in ['Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']:
                 data['profile']['employee_id'] = profile_data.employee_id
+            elif user_group.name == 'guardian':
+                data['profile']['guardian_id'] = profile_data.guardian_id
+                data['profile']['contact_number'] = profile_data.contact_number
 
         # --- BUS DRIVER / CONDUCTOR ADDITIONAL CHARGE ---
         # Support Staff (and any other employee) can be handed the extra charge of
@@ -485,7 +492,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         role = data.get('role')
         student_id = data.get('student_id')
         employee_id = data.get('employee_id')
-        valid_roles = ['student', 'Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']
+        valid_roles = ['student', 'Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head', 'guardian']
         if role not in valid_roles:
             raise serializers.ValidationError({"role": f"Invalid role. Must be one of: {', '.join(valid_roles)}."})
         
@@ -632,6 +639,12 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             fields['status'] = 'pending'
             DepartmentHeadProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'Department Head')
+        elif role == 'guardian':
+            fields = {k: v for k, v in profile_data.items() if hasattr(GuardianProfile, k)}
+            fields['guardian_id'] = f"GUA-{uuid.uuid4().hex[:6].upper()}"
+            fields['status'] = 'active'
+            GuardianProfile.objects.create(user=user, **fields)
+            assign_role_permissions(user, 'guardian')
         else:
             raise serializers.ValidationError({"role": "Invalid role provided."})
         return user

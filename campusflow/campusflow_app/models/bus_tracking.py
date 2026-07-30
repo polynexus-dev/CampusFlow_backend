@@ -185,6 +185,13 @@ class BusTrip(models.Model):
     "Start Active Trip" / "End Trip" in the Conductor Panel.
     Powers the driver's weekly/monthly trip-count and distance stats.
     """
+    TYPE_PICKUP = "pickup"
+    TYPE_DROP = "drop"
+    TYPE_CHOICES = [
+        (TYPE_PICKUP, "Morning Pickup"),
+        (TYPE_DROP, "Evening Drop"),
+    ]
+
     driver = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -197,9 +204,15 @@ class BusTrip(models.Model):
         blank=True,
         related_name="trips",
     )
+    trip_type = models.CharField(max_length=10, choices=TYPE_CHOICES, default=TYPE_PICKUP)
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     distance_km = models.FloatField(default=0.0)
+
+    # Per-trip summary, populated by BusTripEndView once the trip closes.
+    expected_count = models.PositiveIntegerField(default=0)
+    boarded_count = models.PositiveIntegerField(default=0)
+    missing_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-started_at"]
@@ -207,6 +220,88 @@ class BusTrip(models.Model):
     def __str__(self):
         status = "in progress" if not self.ended_at else f"{self.distance_km} km"
         return f"Trip by {self.driver.username} @ {self.started_at} ({status})"
+
+
+class BusScanEvent(models.Model):
+    """
+    One row per conductor scan of a student's ID-card QR — boarding in the
+    morning, alighting in the evening. Distinct from BusAttendance (which
+    records a STUDENT scanning the BUS's own QR to self-check-in); this is
+    the CONDUCTOR scanning the STUDENT's ID card, with a typed outcome.
+
+    A `missing` row is system-generated at trip-end for any subscribed
+    student who never got a `boarded` scan — it has no real scan behind it.
+    """
+    DIRECTION_BOARD = "board"
+    DIRECTION_ALIGHT = "alight"
+    DIRECTION_CHOICES = [
+        (DIRECTION_BOARD, "Board"),
+        (DIRECTION_ALIGHT, "Alight"),
+    ]
+
+    STATUS_BOARDED = "boarded"
+    STATUS_ALIGHTED = "alighted"
+    STATUS_WRONG_ROUTE = "wrong_route"
+    STATUS_NOT_SUBSCRIBED = "not_subscribed"
+    STATUS_ALREADY_SCANNED = "already_scanned"
+    STATUS_UNREADABLE = "unreadable"
+    STATUS_NO_AUTHORIZED_PICKUP = "no_authorized_pickup"
+    STATUS_MISSING = "missing"
+    STATUS_CHOICES = [
+        (STATUS_BOARDED, "Boarded"),
+        (STATUS_ALIGHTED, "Alighted"),
+        (STATUS_WRONG_ROUTE, "Wrong Route"),
+        (STATUS_NOT_SUBSCRIBED, "Not Subscribed"),
+        (STATUS_ALREADY_SCANNED, "Already Scanned"),
+        (STATUS_UNREADABLE, "Unreadable"),
+        (STATUS_NO_AUTHORIZED_PICKUP, "No Authorized Pickup"),
+        (STATUS_MISSING, "Missing · Did Not Board"),
+    ]
+
+    trip = models.ForeignKey(
+        BusTrip,
+        on_delete=models.CASCADE,
+        related_name="scan_events",
+    )
+    route = models.ForeignKey(
+        BusRoute,
+        on_delete=models.CASCADE,
+        related_name="scan_events",
+    )
+    student = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="bus_scan_events",
+        help_text="Null when the scanned code could not be resolved to a student (UNREADABLE).",
+    )
+    scanned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conducted_scan_events",
+        help_text="The conductor/driver who performed the scan. Null for system-generated MISSING rows.",
+    )
+    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES)
+    status = models.CharField(max_length=25, choices=STATUS_CHOICES)
+    stop_name = models.CharField(max_length=255, blank=True)
+    raw_code = models.CharField(max_length=255, blank=True, help_text="Whatever code was scanned, for audit trail.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Bus Scan Event"
+        verbose_name_plural = "Bus Scan Events"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["trip", "direction", "status"]),
+            models.Index(fields=["student", "trip"]),
+        ]
+
+    def __str__(self):
+        who = self.student.get_full_name() if self.student else "unknown"
+        return f"{who} · {self.direction} · {self.status} @ {self.created_at}"
 
 
 class BusTrail(models.Model):
