@@ -541,10 +541,10 @@ class AcademicCalendarTests(TenantTestCase):
 
     def test_academics_is_granted_without_a_subscription_or_admin_action(self):
         """
-        The calendar is foundational, so an existing tenant must see it with no
-        subscription change and no admin ticking a checkbox. This holds because
-        'academics' is in ROLE_DEFAULT_MODULES but deliberately NOT in
-        PREMIUM_MODULES, so MyAllowedModulesView re-adds it even when the
+        The calendar and curriculum are foundational, so an existing tenant must
+        see them with no subscription change and no admin ticking a checkbox.
+        This holds because both are in ROLE_DEFAULT_MODULES but deliberately NOT
+        in PREMIUM_MODULES, so MyAllowedModulesView re-adds them even when the
         persisted allowed_modules list is empty.
         """
         from .models.module_permissions import TenantModulePermission
@@ -566,6 +566,7 @@ class AcademicCalendarTests(TenantTestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('academics', response.data['allowed_modules'])
+        self.assertIn('curriculum', response.data['allowed_modules'])
 
 
 class CurriculumStructureTests(TenantTestCase):

@@ -14,10 +14,11 @@ ALL_ERP_MODULES = [
     "student", "attendance", "schedule", "leave", "payroll",
     "exams", "analytics", "announcements", "audit-logs", "assignments",
     "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation",
-    # Deliberately absent from PREMIUM_MODULES below: the academic calendar is
-    # foundational — exams and schedules are stamped with its term — so it must
-    # work without a per-tenant subscription change.
-    "academics",
+    # Deliberately absent from PREMIUM_MODULES below: the academic calendar and
+    # curriculum are foundational — exams and schedules are stamped with a term,
+    # and credits drive SGPA and graduation checks — so they must work without a
+    # per-tenant subscription change.
+    "academics", "curriculum",
 ]
 
 ROLE_DEFAULT_MODULES = {
@@ -27,7 +28,7 @@ ROLE_DEFAULT_MODULES = {
     "Department Head": [
         "dashboard", "department", "room", "staff", "student", "attendance",
         "schedule", "settings", "leave", "exams", "analytics", "announcements",
-        "assignments", "tpo", "library", "valuation", "academics"
+        "assignments", "tpo", "library", "valuation", "academics", "curriculum"
     ],
     "Faculty": [
         "dashboard", "attendance", "schedule", "settings", "leave", "exams",
