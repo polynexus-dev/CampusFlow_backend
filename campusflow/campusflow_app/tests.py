@@ -1399,6 +1399,28 @@ class AcademicBackfillTests(TenantTestCase):
             self.assertEqual(diagnostics["resolved_by_fk"], 0)
             self.assertEqual(diagnostics["unresolved_by_fk"], 2)
 
+    def test_roster_resolver_treats_empty_string_fk_as_unset(self):
+        """
+        Form fields commonly arrive as "" rather than omitted entirely (e.g. a
+        cleared frontend <select>). Q(batch_id="") against an integer column
+        would raise or silently match nothing — either way, not the same as
+        "this dimension is unfiltered," which is what an empty string from a
+        real caller (Fees.jsx's bulk-generate payload) actually means.
+        """
+        from .services.academic_roster import resolve_student_roster
+
+        with schema_context(self.tenant.schema_name):
+            self._make_student(batch_academic_year="2021-2025")
+
+            # Must not raise, and must behave exactly as if batch_id were
+            # omitted — i.e. still match via the legacy string alone.
+            qs, diagnostics = resolve_student_roster(
+                batch_id="", legacy_batch="2021-2025",
+            )
+
+            self.assertEqual(diagnostics["matched"], 1)
+            self.assertEqual(diagnostics["unresolved_by_fk"], 1)
+
     # -- verify_academic_backfill ------------------------------------------
 
     def test_verify_passes_on_a_clean_backfill(self):
@@ -1438,3 +1460,253 @@ class AcademicBackfillTests(TenantTestCase):
 
         with self.assertRaises(CommandError):
             call_command("verify_academic_backfill", tenant=self.tenant.schema_name)
+
+
+class BulkInvoiceRosterTests(TenantTestCase):
+    """
+    Covers the money path: BulkGenerateInvoicesView cut over to
+    resolve_student_roster, the auto-derivation of a legacy string from a
+    structured filter, the 409/force gate, and the concurrent-write guard now
+    backed by a real DB constraint instead of a racy .exists() check.
+    """
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            Group.objects.get_or_create(name='Management')
+            self.dept = Department.objects.create(name="Computer Science", code="CS")
+
+    def _admin_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username='fees_admin', email='fees_admin@test.com', password='pw12345!'
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def _spine(self):
+        from .models.academics import Batch, Program, Regulation
+        from .services.academics import get_default_grading_scheme
+
+        scheme = get_default_grading_scheme()
+        program = Program.objects.create(
+            name="B.Tech Computer Science", code="BTCSE", short_name="B.Tech CS",
+            department=self.dept,
+        )
+        regulation = Regulation.objects.create(
+            program=program, code="R2021", effective_from_year=2018,
+            effective_to_year=2030, grading_scheme=scheme,
+        )
+        batch = Batch.objects.create(
+            program=program, regulation=regulation, admission_year=2022, name="2022-2026",
+        )
+        return program, regulation, batch
+
+    def _make_student(self, username, **overrides):
+        defaults = dict(department=self.dept)
+        defaults.update(overrides)
+        user = User.objects.create_user(username=username, email=f"{username}@test.com")
+        return StudentProfile.objects.create(
+            user=user, student_id=f"STU-{username}", **defaults
+        )
+
+    def _make_fee_structure(self, **overrides):
+        from .models.fees import FeeCategory, FeeStructure, FeeStructureItem
+
+        structure = FeeStructure.objects.create(name="Tuition 2026", **overrides)
+        category, _ = FeeCategory.objects.get_or_create(name="Tuition Fee")
+        FeeStructureItem.objects.create(fee_structure=structure, category=category, amount=50000)
+        return structure
+
+    # -- resolver cutover: OR-fallback ---------------------------------
+
+    def test_bulk_generate_bills_both_backfilled_and_legacy_only_students(self):
+        """
+        The whole point of the cutover: a partially-backfilled tenant must not
+        silently under-bill. One student matches only via FK, one only via the
+        legacy string — both must be billed.
+        """
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch = self._spine()
+            structure = self._make_fee_structure()
+
+            backfilled = self._make_student("stu_fk", batch=batch)
+            legacy_only = self._make_student("stu_legacy", batch_academic_year="2022-2026")
+            unrelated = self._make_student("stu_other", batch_academic_year="2019-2023")
+
+        token = self._admin_token()
+        response = self.client.post(
+            reverse('fee-invoice-bulk-generate'),
+            {
+                "fee_structure_id": structure.id, "due_date": "2026-08-01",
+                "batch_id": batch.id, "force": True,
+            },
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["generated"], 2)
+
+        with schema_context(self.tenant.schema_name):
+            from .models.fees import StudentFeeInvoice
+            billed_ids = set(StudentFeeInvoice.objects.filter(fee_structure=structure)
+                              .values_list("student_id", flat=True))
+            self.assertIn(backfilled.user_id, billed_ids)
+            self.assertIn(legacy_only.user_id, billed_ids)
+            self.assertNotIn(unrelated.user_id, billed_ids)
+
+    # -- the 409/force gate ---------------------------------------------
+
+    def test_structured_filter_with_unbackfilled_students_returns_409_without_force(self):
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch = self._spine()
+            structure = self._make_fee_structure()
+            self._make_student("stu_fk2", batch=batch)
+            self._make_student("stu_legacy2", batch_academic_year="2022-2026")
+
+        token = self._admin_token()
+        response = self.client.post(
+            reverse('fee-invoice-bulk-generate'),
+            {"fee_structure_id": structure.id, "due_date": "2026-08-01", "batch_id": batch.id},
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.data["unresolved_students_in_scope"], 1)
+        self.assertEqual(response.data["matched"], 2)
+
+        with schema_context(self.tenant.schema_name):
+            from .models.fees import StudentFeeInvoice
+            self.assertEqual(StudentFeeInvoice.objects.filter(fee_structure=structure).count(), 0)
+
+    def test_force_true_proceeds_past_the_409_and_bills_everyone_matched(self):
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch = self._spine()
+            structure = self._make_fee_structure()
+            self._make_student("stu_fk3", batch=batch)
+            self._make_student("stu_legacy3", batch_academic_year="2022-2026")
+
+        token = self._admin_token()
+        response = self.client.post(
+            reverse('fee-invoice-bulk-generate'),
+            {
+                "fee_structure_id": structure.id, "due_date": "2026-08-01",
+                "batch_id": batch.id, "force": True,
+            },
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["generated"], 2)
+
+    def test_legacy_only_request_never_gated_regardless_of_backfill_state(self):
+        """
+        Today's existing frontend sends only legacy string filters. That golden
+        path must keep working with no force flag required, even though every
+        matched student is technically 'unresolved by fk' — there is no FK
+        criterion in play, so nothing is actually at risk of under-billing.
+        """
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch = self._spine()
+            structure = self._make_fee_structure()
+            self._make_student("stu_legacy4", batch_academic_year="2022-2026")
+
+        token = self._admin_token()
+        response = self.client.post(
+            reverse('fee-invoice-bulk-generate'),
+            {
+                "fee_structure_id": structure.id, "due_date": "2026-08-01",
+                "batch_academic_year": "2022-2026",
+            },
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["generated"], 1)
+
+    def test_no_students_matched_returns_400(self):
+        with schema_context(self.tenant.schema_name):
+            structure = self._make_fee_structure()
+
+        token = self._admin_token()
+        response = self.client.post(
+            reverse('fee-invoice-bulk-generate'),
+            {
+                "fee_structure_id": structure.id, "due_date": "2026-08-01",
+                "batch_academic_year": "no-such-batch",
+            },
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # -- double-invoice guard now backed by a DB constraint --------------
+
+    def test_duplicate_invoice_for_same_student_and_structure_is_rejected(self):
+        from django.db import IntegrityError, transaction as db_transaction
+        from .models.fees import StudentFeeInvoice
+
+        with schema_context(self.tenant.schema_name):
+            structure = self._make_fee_structure()
+            student = self._make_student("stu_dup")
+            StudentFeeInvoice.objects.create(
+                student=student.user, fee_structure=structure, due_date="2026-08-01",
+                total_amount=50000,
+            )
+            with self.assertRaises(IntegrityError):
+                with db_transaction.atomic():
+                    StudentFeeInvoice.objects.create(
+                        student=student.user, fee_structure=structure, due_date="2026-08-01",
+                        total_amount=50000,
+                    )
+
+    def test_re_running_bulk_generate_skips_already_invoiced_students(self):
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch = self._spine()
+            structure = self._make_fee_structure()
+            self._make_student("stu_rerun", batch=batch)
+
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        payload = {"fee_structure_id": structure.id, "due_date": "2026-08-01", "batch_id": batch.id, "force": True}
+
+        first = self.client.post(reverse('fee-invoice-bulk-generate'), payload, format='json', **auth)
+        self.assertEqual(first.data["generated"], 1)
+
+        second = self.client.post(reverse('fee-invoice-bulk-generate'), payload, format='json', **auth)
+        self.assertEqual(second.data["generated"], 0)
+        self.assertEqual(second.data["skipped"], 1)
+
+    def test_manual_ad_hoc_invoices_without_a_fee_structure_are_unrestricted(self):
+        """fee_structure is nullable for manual invoices; the uniqueness
+        constraint must not accidentally cap a student to one such invoice."""
+        from .models.fees import StudentFeeInvoice
+
+        with schema_context(self.tenant.schema_name):
+            student = self._make_student("stu_manual")
+            StudentFeeInvoice.objects.create(
+                student=student.user, fee_structure=None, due_date="2026-08-01", total_amount=1000,
+            )
+            StudentFeeInvoice.objects.create(
+                student=student.user, fee_structure=None, due_date="2026-09-01", total_amount=2000,
+            )
+            self.assertEqual(
+                StudentFeeInvoice.objects.filter(student=student.user, fee_structure__isnull=True).count(), 2
+            )
+
+    # -- FeeStructure serializer exposes the new FK fields ----------------
+
+    def test_fee_structure_api_accepts_and_returns_structured_fields(self):
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch = self._spine()
+
+        token = self._admin_token()
+        response = self.client.post(
+            reverse('fee-structure-list'),
+            {
+                "name": "Structured Fee", "department": self.dept.id,
+                "program": program.id, "batch": batch.id, "semester_number": 3,
+                "items": [],
+            },
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["program"], program.id)
+        self.assertEqual(response.data["batch_name"], "2022-2026")

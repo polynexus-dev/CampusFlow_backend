@@ -73,11 +73,16 @@ def resolve_student_roster(*, department_id=None,
                          "batch_academic_year": legacy_batch,
                          "current_semester_year": legacy_semester}[string_field]
 
-        if fk_value is None and not string_value:
+        # Falsy, not just None: form fields commonly arrive as "" rather than
+        # omitted entirely (e.g. a cleared <select>), and Q(batch_id="") would
+        # either raise or silently match nothing against an integer column —
+        # either way, not "this dimension is unfiltered," which is what an
+        # unset field is supposed to mean.
+        if not fk_value and not string_value:
             continue  # this dimension is not part of the scope at all
 
         dim_q = Q()
-        if fk_value is not None:
+        if fk_value:
             dim_q |= Q(**{fk_field: fk_value})
             fk_only_q &= Q(**{fk_field: fk_value})
         else:

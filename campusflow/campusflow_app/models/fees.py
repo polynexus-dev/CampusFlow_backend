@@ -153,6 +153,19 @@ class StudentFeeInvoice(models.Model):
     class Meta:
         verbose_name = "Student Fee Invoice"
         verbose_name_plural = "Student Fee Invoices"
+        constraints = [
+            # The double-invoice guard used to be a Python .exists() check
+            # inside a loop (views/fees.py BulkGenerateInvoicesView), which is
+            # racy under concurrent requests — two requests could both pass the
+            # check for the same student before either commits. fee_structure
+            # is nullable for ad-hoc manual invoices; Postgres treats NULLs as
+            # distinct in a unique index, so those remain unrestricted, only
+            # duplicate (student, real fee_structure) pairs are blocked.
+            models.UniqueConstraint(
+                fields=["student", "fee_structure"],
+                name="uniq_invoice_per_student_per_structure",
+            ),
+        ]
 
     def __str__(self):
         return f"Invoice {self.invoice_number} - {self.student.get_full_name()} (Dues: ₹{self.remaining_balance})"

@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework import serializers as drf_serializers
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum, Q
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -14,8 +14,10 @@ from campusflow_app.models import (
     FeeCategory, FeeStructure, FeeStructureItem,
     StudentFeeInvoice, StudentFeeInvoiceItem, FeePayment
 )
+from campusflow_app.models.academics import Batch, Program
 from campusflow_app.models.profile import StudentProfile
 from campusflow_app.permissions import IsSaaSOrCollegeAdmin, IsNotStudent
+from campusflow_app.services.academic_roster import resolve_student_roster
 
 User = get_user_model()
 
@@ -41,6 +43,13 @@ class FeeStructureItemSerializer(drf_serializers.ModelSerializer):
 class FeeStructureSerializer(drf_serializers.ModelSerializer):
     items = FeeStructureItemSerializer(many=True, required=False)
     department_name = drf_serializers.CharField(source="department.name", read_only=True)
+    # Structured targeting, alongside the three legacy CharFields below — see
+    # models/fees.py for why both forms coexist. Exposed here so an admin can
+    # actually set them; without this the FK columns from the curriculum PR
+    # were only reachable from the Django shell.
+    program_name = drf_serializers.CharField(source="program.short_name", read_only=True, default=None)
+    batch_name = drf_serializers.CharField(source="batch.name", read_only=True, default=None)
+    academic_year_ref_name = drf_serializers.CharField(source="academic_year_ref.name", read_only=True, default=None)
     total_amount = drf_serializers.SerializerMethodField()
 
     class Meta:
@@ -49,6 +58,8 @@ class FeeStructureSerializer(drf_serializers.ModelSerializer):
             "id", "name", "department", "department_name",
             "batch_academic_year", "program_enrolled_in",
             "current_semester_year", "items", "total_amount",
+            "program", "program_name", "batch", "batch_name",
+            "semester_number", "academic_year_ref", "academic_year_ref_name",
             "created_at", "updated_at"
         ]
 
@@ -77,6 +88,10 @@ class FeeStructureSerializer(drf_serializers.ModelSerializer):
         instance.batch_academic_year = validated_data.get('batch_academic_year', instance.batch_academic_year)
         instance.program_enrolled_in = validated_data.get('program_enrolled_in', instance.program_enrolled_in)
         instance.current_semester_year = validated_data.get('current_semester_year', instance.current_semester_year)
+        instance.program = validated_data.get('program', instance.program)
+        instance.batch = validated_data.get('batch', instance.batch)
+        instance.semester_number = validated_data.get('semester_number', instance.semester_number)
+        instance.academic_year_ref = validated_data.get('academic_year_ref', instance.academic_year_ref)
         instance.save()
 
         if items_data is not None:
@@ -202,10 +217,33 @@ class BulkGenerateInvoicesView(APIView):
         "fee_structure_id": 1,
         "due_date": "YYYY-MM-DD",
         "department_id": 2, (optional)
-        "batch_academic_year": "2025-2026", (optional)
-        "program_enrolled_in": "B.Tech CS", (optional)
-        "current_semester_year": "Semester 1" (optional)
+
+        # Structured targeting (preferred going forward):
+        "program_id": 5, "batch_id": 9, "semester_number": 3, "section_id": 12, (all optional)
+
+        # Legacy free-text targeting (still fully supported, unchanged):
+        "batch_academic_year": "2025-2026", "program_enrolled_in": "B.Tech CS",
+        "current_semester_year": "Semester 1", (all optional)
+
+        "force": true  # only needed if a structured filter above is given AND
+                        # some matched students have not been individually
+                        # backfilled onto that Program/Batch/Semester yet —
+                        # see the 409 response below.
     }
+
+    Roster resolution goes through resolve_student_roster (see
+    services/academic_roster.py), which matches a student if EITHER their
+    structured FK or their legacy string agrees with the criteria — nobody who
+    would have matched under the old exact-string filtering is ever excluded by
+    switching to structured criteria.
+
+    Whenever a structured filter (program_id/batch_id/semester_number) is
+    given, its equivalent legacy string is derived automatically unless the
+    caller also supplied one explicitly. Without that, a student who plainly
+    belongs to the selected Program/Batch/Semester but has not been
+    individually backfilled onto it yet — their program/batch/current_semester_number
+    are still null — would be silently skipped, reintroducing exactly the
+    partial-match under-billing this change exists to prevent.
     """
     permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
 
@@ -225,49 +263,95 @@ class BulkGenerateInvoicesView(APIView):
         except FeeStructure.DoesNotExist:
             return Response({"error": "Fee structure not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Filters to find student profiles
-        profiles_query = StudentProfile.objects.select_related("user")
-        
         dept_id = request.data.get("department_id")
-        batch = request.data.get("batch_academic_year")
-        program = request.data.get("program_enrolled_in")
-        semester = request.data.get("current_semester_year")
+        program_id = request.data.get("program_id")
+        batch_id = request.data.get("batch_id")
+        semester_number = request.data.get("semester_number")
+        section_id = request.data.get("section_id")
+        legacy_program = request.data.get("program_enrolled_in")
+        legacy_batch = request.data.get("batch_academic_year")
+        legacy_semester = request.data.get("current_semester_year")
 
-        if dept_id:
-            profiles_query = profiles_query.filter(department_id=dept_id)
-        if batch:
-            profiles_query = profiles_query.filter(batch_academic_year=batch)
-        if program:
-            profiles_query = profiles_query.filter(program_enrolled_in=program)
-        if semester:
-            profiles_query = profiles_query.filter(current_semester_year=semester)
+        any_fk_filter_given = bool(program_id or batch_id or semester_number or section_id)
 
-        if not profiles_query.exists():
+        if program_id and not legacy_program:
+            program_obj = Program.objects.filter(pk=program_id).first()
+            if program_obj:
+                legacy_program = program_obj.short_name or program_obj.code
+        if batch_id and not legacy_batch:
+            batch_obj = Batch.objects.filter(pk=batch_id).first()
+            if batch_obj:
+                legacy_batch = batch_obj.name
+        if semester_number and not legacy_semester:
+            legacy_semester = f"Semester {semester_number}"
+
+        roster_qs, diagnostics = resolve_student_roster(
+            department_id=dept_id,
+            program_id=program_id, legacy_program=legacy_program,
+            batch_id=batch_id, legacy_batch=legacy_batch,
+            semester_number=semester_number, legacy_semester=legacy_semester,
+            section_id=section_id,
+        )
+
+        if diagnostics["matched"] == 0:
             return Response(
                 {"message": "No students found matching the specified criteria."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # This gate only ever applies when a structured filter was actually
+        # given — a request using only the legacy fields (today's existing
+        # behaviour) always has every matched student "unresolved by fk" by
+        # definition, since there is no FK criterion to test against, and
+        # blocking that would break the golden path for zero safety benefit:
+        # resolve_student_roster already includes those students correctly.
+        if any_fk_filter_given and diagnostics["unresolved_by_fk"] > 0 and not request.data.get("force"):
+            return Response(
+                {
+                    "error": (
+                        f"{diagnostics['unresolved_by_fk']} of {diagnostics['matched']} matched "
+                        "students have not been individually backfilled onto the selected "
+                        "Program/Batch/Semester yet — they still only match via their legacy "
+                        "academic fields. Resend with force=true to generate for all matched "
+                        "students anyway; nobody is excluded either way, this only confirms you "
+                        "are aware some of them still need backfilling."
+                    ),
+                    "matched": diagnostics["matched"],
+                    "unresolved_students_in_scope": diagnostics["unresolved_by_fk"],
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         generated = 0
         skipped = 0
 
-        for profile in profiles_query:
-            # Prevent double invoicing for same structure/student
+        for profile in roster_qs.select_related("user"):
+            # StudentFeeInvoice.student+fee_structure is a DB-level unique
+            # constraint (see models/fees.py); the .exists() check below is
+            # just a fast, friendly pre-check — the except IntegrityError is
+            # the actual guard under concurrent requests, where two requests
+            # could both pass this check for the same student before either
+            # commits.
             if StudentFeeInvoice.objects.filter(student=profile.user, fee_structure=structure).exists():
                 skipped += 1
                 continue
 
             total_amount = sum(item.amount for item in structure.items.all())
-            
-            invoice = StudentFeeInvoice.objects.create(
-                student=profile.user,
-                fee_structure=structure,
-                due_date=due_date,
-                total_amount=total_amount,
-                discount_amount=0,
-                paid_amount=0,
-                status=StudentFeeInvoice.STATUS_UNPAID
-            )
+
+            try:
+                with transaction.atomic():
+                    invoice = StudentFeeInvoice.objects.create(
+                        student=profile.user,
+                        fee_structure=structure,
+                        due_date=due_date,
+                        total_amount=total_amount,
+                        discount_amount=0,
+                        paid_amount=0,
+                        status=StudentFeeInvoice.STATUS_UNPAID
+                    )
+            except IntegrityError:
+                skipped += 1
+                continue
 
             for item in structure.items.all():
                 StudentFeeInvoiceItem.objects.create(
