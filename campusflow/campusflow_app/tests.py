@@ -567,6 +567,7 @@ class AcademicCalendarTests(TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('academics', response.data['allowed_modules'])
         self.assertIn('curriculum', response.data['allowed_modules'])
+        self.assertIn('transcript', response.data['allowed_modules'])
 
 
 class CurriculumStructureTests(TenantTestCase):
@@ -1710,3 +1711,575 @@ class BulkInvoiceRosterTests(TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["program"], program.id)
         self.assertEqual(response.data["batch_name"], "2022-2026")
+
+
+class CreditWeightedResultTests(TenantTestCase):
+    """
+    Covers the credit engine: compute_course_award, compute_term_gradesheet,
+    compute_cgpa, publish_term_results, the publish/transcript endpoints, and
+    bootstrap_offerings_from_exams. This is the highest-novelty code in the
+    whole academic spine, so the emphasis is on the arithmetic and the
+    idempotency/frozen-once-published invariants, not just the happy path.
+    """
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            for role in ('student', 'Management', 'Department Head'):
+                Group.objects.get_or_create(name=role)
+            self.dept = Department.objects.create(name="Computer Science", code="CS")
+
+    def _admin_token(self, role='Management'):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username=f'grading_{role.lower().replace(" ", "_")}_{User.objects.count()}',
+                email=f'grading_{User.objects.count()}@test.com', password='pw12345!',
+            )
+            user.groups.add(Group.objects.get(name=role))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def _spine(self, credits=4):
+        from .models.academics import Batch, Program, Regulation
+        from .models.course import Course
+        from .services.academics import get_current_term, get_default_grading_scheme
+
+        scheme = get_default_grading_scheme()
+        program = Program.objects.create(
+            name="B.Tech Computer Science", code="BTCSE", short_name="B.Tech CS",
+            department=self.dept,
+        )
+        regulation = Regulation.objects.create(
+            program=program, code="R2021", effective_from_year=2018,
+            effective_to_year=2030, grading_scheme=scheme,
+        )
+        batch = Batch.objects.create(
+            program=program, regulation=regulation, admission_year=2022, name="2022-2026",
+        )
+        course = Course.objects.create(
+            course_code="CS301", course_name="Data Structures", department=self.dept,
+            regulation=regulation, semester_number=3, credits=credits,
+        )
+        term = get_current_term()
+        return program, regulation, batch, course, term
+
+    def _make_student(self, username, batch=None, **overrides):
+        user = User.objects.create_user(username=username, email=f"{username}@test.com")
+        return StudentProfile.objects.create(
+            user=user, student_id=f"STU-{username}", department=self.dept,
+            batch=batch, **overrides
+        )
+
+    def _make_offering(self, course, term, batch):
+        from .models.offerings import CourseOffering
+        return CourseOffering.objects.create(course=course, term=term, batch=batch)
+
+    def _register(self, student, offering, **overrides):
+        from .models.offerings import StudentCourseRegistration
+        defaults = dict(term=offering.term)
+        defaults.update(overrides)
+        return StudentCourseRegistration.objects.create(student=student, offering=offering, **defaults)
+
+    def _exam_type(self, code, name=None):
+        from .models.exam import ExamType
+        obj, _ = ExamType.objects.get_or_create(code=code, defaults={"name": name or code})
+        return obj
+
+    def _make_exam(self, course, term, exam_type, total_marks=100, passing_marks=40, published=True, **overrides):
+        from .models.exam import Exam
+        defaults = dict(
+            name=f"{course.course_code} Exam", exam_type=exam_type, department=self.dept,
+            course=course, date="2026-11-01", start_time="09:00", end_time="12:00",
+            total_marks=total_marks, passing_marks=passing_marks, term=term,
+            results_published=published,
+        )
+        defaults.update(overrides)
+        return Exam.objects.create(**defaults)
+
+    def _make_result(self, exam, student, marks):
+        from .models.result import StudentExamResult
+        return StudentExamResult.objects.create(exam=exam, student=student, marks_obtained=marks)
+
+    # -- compute_course_award ---------------------------------------------
+
+    def test_compute_course_award_from_a_single_published_exam(self):
+        from .services.grading import compute_course_award
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine(credits=4)
+            offering = self._make_offering(course, term, batch)
+            student = self._make_student("stu_award1", batch=batch)
+            registration = self._register(student, offering)
+
+            exam_type = self._exam_type("END", "End Semester")
+            exam = self._make_exam(course, term, exam_type, total_marks=100, passing_marks=40)
+            self._make_result(exam, student, marks=85)
+
+            award = compute_course_award(registration)
+
+            self.assertIsNotNone(award)
+            self.assertEqual(award.percentage, 85)
+            self.assertEqual(award.grade_letter, "A+")  # 80-89.99 band
+            self.assertEqual(award.credits, 4)
+            self.assertEqual(award.credit_points, 4 * award.grade_points)
+            self.assertTrue(award.is_pass)
+            self.assertTrue(award.counts_in_gpa)
+
+    def test_compute_course_award_returns_none_without_published_results(self):
+        from .services.grading import compute_course_award
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            offering = self._make_offering(course, term, batch)
+            student = self._make_student("stu_award2", batch=batch)
+            registration = self._register(student, offering)
+
+            exam_type = self._exam_type("END2", "End Semester")
+            exam = self._make_exam(course, term, exam_type, published=False)
+            self._make_result(exam, student, marks=85)
+
+            self.assertIsNone(compute_course_award(registration))
+
+    def test_compute_course_award_combines_multiple_exams(self):
+        from .services.grading import compute_course_award
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            offering = self._make_offering(course, term, batch)
+            student = self._make_student("stu_award3", batch=batch)
+            registration = self._register(student, offering)
+
+            mid_type = self._exam_type("MID3", "Mid Term")
+            # Must be exactly "END" (or FINAL/SEM/ESE) — the split heuristic
+            # matches an exact set of end-semester codes, not a prefix, and
+            # correctly refuses to split against an unrecognised code like
+            # "END3" (caught by this test itself on first write).
+            end_type = self._exam_type("END", "End Semester")
+            mid = self._make_exam(course, term, mid_type, total_marks=50, passing_marks=20)
+            end = self._make_exam(course, term, end_type, total_marks=100, passing_marks=40)
+            self._make_result(mid, student, marks=40)
+            self._make_result(end, student, marks=70)
+
+            award = compute_course_award(registration)
+
+            from decimal import Decimal
+
+            self.assertEqual(award.total_marks, 110)
+            self.assertEqual(award.max_marks, 150)
+            # Decimal, not float: award.percentage is computed from Decimal
+            # arithmetic throughout, and Decimal('73.33') != float 73.33 due
+            # to binary floating-point imprecision — compare like-for-like.
+            self.assertEqual(award.percentage, round(Decimal(110) / Decimal(150) * 100, 2))
+            # Exactly two component types, one unambiguously "end semester" —
+            # the split must resolve.
+            self.assertEqual(award.internal_marks, 40)
+            self.assertEqual(award.external_marks, 70)
+
+    def test_internal_external_split_not_attempted_when_ambiguous(self):
+        """Three distinct component types: don't guess which is 'external'."""
+        from .services.grading import compute_course_award
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            offering = self._make_offering(course, term, batch)
+            student = self._make_student("stu_award4", batch=batch)
+            registration = self._register(student, offering)
+
+            for i, code in enumerate(["Q1", "Q2", "END4"]):
+                et = self._exam_type(code, code)
+                exam = self._make_exam(course, term, et, total_marks=20, passing_marks=8)
+                self._make_result(exam, student, marks=15)
+
+            award = compute_course_award(registration)
+
+            self.assertIsNone(award.internal_marks)
+            self.assertIsNone(award.external_marks)
+            self.assertEqual(award.total_marks, 45)  # combined total still computed
+
+    def test_non_credit_bearing_course_award_does_not_count_in_gpa(self):
+        from .services.grading import compute_course_award
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            course.is_credit_bearing = False
+            course.save()
+            offering = self._make_offering(course, term, batch)
+            student = self._make_student("stu_award5", batch=batch)
+            registration = self._register(student, offering)
+
+            exam_type = self._exam_type("END5")
+            exam = self._make_exam(course, term, exam_type)
+            self._make_result(exam, student, marks=90)
+
+            award = compute_course_award(registration)
+            self.assertFalse(award.counts_in_gpa)
+
+    # -- compute_term_gradesheet -------------------------------------------
+
+    def test_term_gradesheet_sgpa_is_credit_weighted(self):
+        from .models.grading import CourseGradeAward
+        from .services.grading import compute_term_gradesheet
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course_a, term = self._spine(credits=4)
+            course_b = self._make_second_course(regulation, credits=2)
+            student = self._make_student("stu_sheet1", batch=batch, current_semester_number=3)
+
+            offering_a = self._make_offering(course_a, term, batch)
+            offering_b = self._make_offering(course_b, term, batch)
+            reg_a = self._register(student, offering_a)
+            reg_b = self._register(student, offering_b)
+
+            # 4 credits at 9 points, 2 credits at 7 points -> (36+14)/6 = 8.33
+            self._save_award(reg_a, grade_points=9, credits=4, is_pass=True, counts_in_gpa=True)
+            self._save_award(reg_b, grade_points=7, credits=2, is_pass=True, counts_in_gpa=True)
+
+            sheet = compute_term_gradesheet(student, term)
+
+            from decimal import Decimal
+
+            self.assertEqual(sheet.credits_registered, 6)
+            self.assertEqual(sheet.credits_earned, 6)
+            # Decimal, not float: sheet.sgpa is Decimal arithmetic throughout.
+            self.assertEqual(sheet.sgpa, round(Decimal(4 * 9 + 2 * 7) / Decimal(6), 2))
+            self.assertEqual(sheet.backlog_count, 0)
+            self.assertEqual(sheet.result_status, "pass")
+
+    def test_term_gradesheet_reports_fail_with_a_backlog(self):
+        from .services.grading import compute_term_gradesheet
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student = self._make_student("stu_sheet2", batch=batch)
+            offering = self._make_offering(course, term, batch)
+            reg = self._register(student, offering)
+            self._save_award(reg, grade_points=0, credits=4, is_pass=False, counts_in_gpa=True)
+
+            sheet = compute_term_gradesheet(student, term)
+            self.assertEqual(sheet.backlog_count, 1)
+            self.assertEqual(sheet.result_status, "fail")
+
+    def test_term_gradesheet_incomplete_with_no_awards(self):
+        from .services.grading import compute_term_gradesheet
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student = self._make_student("stu_sheet3", batch=batch)
+
+            sheet = compute_term_gradesheet(student, term)
+            self.assertEqual(sheet.result_status, "incomplete")
+            self.assertIsNone(sheet.sgpa)
+
+    # -- compute_cgpa -------------------------------------------------------
+
+    def test_cgpa_uses_latest_attempt_for_a_repeated_course(self):
+        """
+        Policy choice pinned by this test: a course with a failed first
+        attempt and a passed supplementary attempt must count the LATEST
+        attempt for grade-point math, and credits_earned must still count it
+        as earned (any passing attempt qualifies).
+        """
+        from .services.grading import compute_cgpa
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine(credits=4)
+            student = self._make_student("stu_cgpa1", batch=batch)
+            offering = self._make_offering(course, term, batch)
+
+            reg1 = self._register(student, offering, attempt_number=1)
+            self._save_award(reg1, grade_points=0, credits=4, is_pass=False,
+                              counts_in_gpa=True, attempt_number=1, published=True)
+
+            reg2 = self._register(student, offering, attempt_number=2, attempt_type="supplementary")
+            self._save_award(reg2, grade_points=6, credits=4, is_pass=True,
+                              counts_in_gpa=True, attempt_number=2, published=True)
+
+            summary = compute_cgpa(student)
+
+            self.assertEqual(summary.cgpa, 6)  # only the latest attempt's points count
+            self.assertEqual(summary.credits_earned, 4)
+            self.assertEqual(summary.active_backlog_count, 0)
+
+    def test_cgpa_only_counts_published_awards(self):
+        from .services.grading import compute_cgpa
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine(credits=4)
+            student = self._make_student("stu_cgpa2", batch=batch)
+            offering = self._make_offering(course, term, batch)
+            reg = self._register(student, offering)
+            self._save_award(reg, grade_points=8, credits=4, is_pass=True,
+                              counts_in_gpa=True, published=False)
+
+            summary = compute_cgpa(student)
+            self.assertIsNone(summary.cgpa)
+            self.assertEqual(summary.credits_earned, 0)
+
+    # -- publish_term_results: the orchestration --------------------------
+
+    def test_publish_term_results_creates_awards_and_refreshes_cgpa(self):
+        from .services.grading import publish_term_results
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine(credits=3)
+            student = self._make_student("stu_pub1", batch=batch, current_semester_number=3)
+            offering = self._make_offering(course, term, batch)
+            self._register(student, offering)
+
+            exam_type = self._exam_type("ENDPUB1")
+            exam = self._make_exam(course, term, exam_type, total_marks=100, passing_marks=40)
+            self._make_result(exam, student, marks=72)
+
+            result = publish_term_results(term)
+
+            self.assertEqual(result["awards_created"], 1)
+            self.assertEqual(result["students_affected"], 1)
+
+            from .models.grading import CourseGradeAward, StudentAcademicSummary, TermGradeSheet
+            award = CourseGradeAward.objects.get(student=student, term=term)
+            self.assertTrue(award.is_published)
+            sheet = TermGradeSheet.objects.get(student=student, term=term)
+            self.assertTrue(sheet.is_published)
+            summary = StudentAcademicSummary.objects.get(student=student)
+            self.assertIsNotNone(summary.cgpa)
+
+    def test_publish_term_results_is_safe_to_call_twice(self):
+        """
+        Re-running publish must not touch an already-published award — this is
+        the 'frozen once published' invariant. A second call with no new exam
+        results should create zero new awards.
+        """
+        from .services.grading import publish_term_results
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student = self._make_student("stu_pub2", batch=batch)
+            offering = self._make_offering(course, term, batch)
+            self._register(student, offering)
+            exam_type = self._exam_type("ENDPUB2")
+            exam = self._make_exam(course, term, exam_type)
+            self._make_result(exam, student, marks=60)
+
+            first = publish_term_results(term)
+            second = publish_term_results(term)
+
+            self.assertEqual(first["awards_created"], 1)
+            self.assertEqual(second["awards_created"], 0)
+
+            from .models.grading import CourseGradeAward
+            self.assertEqual(CourseGradeAward.objects.filter(student=student, term=term).count(), 1)
+
+    # -- HTTP: publish endpoint ---------------------------------------------
+
+    def test_publish_endpoint_requires_hod_or_above(self):
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+
+        token = self._admin_token(role='student')
+        # A plain student has no group matching IsHMOrAbove; use a raw token
+        # without adding to any privileged group to exercise the 403 path.
+        with schema_context(self.tenant.schema_name):
+            plain_user = User.objects.create_user(username='plain_user', email='plain@test.com')
+            plain_token = RefreshToken.for_user(plain_user)
+            plain_token['tenant_schema'] = self.tenant.schema_name
+
+        response = self.client.post(
+            reverse('publish-term-results', args=[term.id]),
+            HTTP_AUTHORIZATION=f'Bearer {plain_token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_publish_endpoint_404_for_unknown_term(self):
+        token = self._admin_token()
+        response = self.client.post(
+            reverse('publish-term-results', args=[999999]),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    # -- HTTP: transcript endpoint -------------------------------------------
+
+    def test_student_can_view_their_own_transcript(self):
+        from .services.grading import publish_term_results
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student = self._make_student("stu_transcript1", batch=batch, current_semester_number=3)
+            offering = self._make_offering(course, term, batch)
+            self._register(student, offering)
+            exam_type = self._exam_type("ENDT1")
+            exam = self._make_exam(course, term, exam_type)
+            self._make_result(exam, student, marks=77)
+            publish_term_results(term)
+
+            student.user.groups.add(Group.objects.get(name='student'))
+            token = RefreshToken.for_user(student.user)
+            token['tenant_schema'] = self.tenant.schema_name
+
+        response = self.client.get(
+            reverse('my-transcript'),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["terms"]), 1)
+        self.assertIsNotNone(response.data["cgpa"])
+
+    def test_student_cannot_view_another_students_transcript(self):
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student_a = self._make_student("stu_transcript_a", batch=batch)
+            student_b = self._make_student("stu_transcript_b", batch=batch)
+            student_a.user.groups.add(Group.objects.get(name='student'))
+            token = RefreshToken.for_user(student_a.user)
+            token['tenant_schema'] = self.tenant.schema_name
+
+        response = self.client.get(
+            reverse('student-transcript', args=[student_b.id]),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    # -- bootstrap_offerings_from_exams -------------------------------------
+
+    def test_bootstrap_creates_offering_and_registrations_from_exam_results(self):
+        from django.core.management import call_command
+        from .models.offerings import CourseOffering, StudentCourseRegistration
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            s1 = self._make_student("stu_boot1", batch=batch)
+            s2 = self._make_student("stu_boot2", batch=batch)
+            exam_type = self._exam_type("BOOT1")
+            exam = self._make_exam(course, term, exam_type)
+            self._make_result(exam, s1, marks=50)
+            self._make_result(exam, s2, marks=60)
+
+            call_command("bootstrap_offerings_from_exams", tenant=self.tenant.schema_name)
+
+            offering = CourseOffering.objects.get(course=course, term=term, batch=batch)
+            self.assertEqual(
+                StudentCourseRegistration.objects.filter(offering=offering).count(), 2
+            )
+
+    def test_bootstrap_skips_exam_whose_results_span_multiple_batches(self):
+        from django.core.management import call_command
+        from .models.academics import Batch
+        from .models.offerings import CourseOffering
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch_a, course, term = self._spine()
+            batch_b = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2021, name="2021-2025",
+            )
+            s1 = self._make_student("stu_boot3", batch=batch_a)
+            s2 = self._make_student("stu_boot4", batch=batch_b)
+            exam_type = self._exam_type("BOOT2")
+            exam = self._make_exam(course, term, exam_type)
+            self._make_result(exam, s1, marks=50)
+            self._make_result(exam, s2, marks=55)
+
+            call_command("bootstrap_offerings_from_exams", tenant=self.tenant.schema_name)
+
+            self.assertEqual(CourseOffering.objects.filter(course=course, term=term).count(), 0)
+
+    def test_bootstrap_dry_run_creates_nothing(self):
+        from django.core.management import call_command
+        from .models.offerings import CourseOffering
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student = self._make_student("stu_boot5", batch=batch)
+            exam_type = self._exam_type("BOOT3")
+            exam = self._make_exam(course, term, exam_type)
+            self._make_result(exam, student, marks=65)
+
+            call_command(
+                "bootstrap_offerings_from_exams", tenant=self.tenant.schema_name, dry_run=True,
+            )
+
+            self.assertEqual(CourseOffering.objects.count(), 0)
+
+    def test_bootstrap_resolves_term_from_legacy_strings_when_fk_unset(self):
+        from django.core.management import call_command
+        from .models.offerings import CourseOffering
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student = self._make_student("stu_boot6", batch=batch)
+            exam_type = self._exam_type("BOOT4")
+            # No exam.term set — only the legacy strings, matching a legacy exam
+            # created before Exam.term existed. term is passed as a keyword
+            # here (not positionally) specifically so it can be overridden to
+            # None — passing it both ways raises TypeError.
+            exam = self._make_exam(
+                course, exam_type=exam_type,
+                term=None, academic_year=term.academic_year.name,
+                semester=f"Semester {1 if term.sequence == 1 else 2}",
+            )
+            self._make_result(exam, student, marks=70)
+
+            call_command("bootstrap_offerings_from_exams", tenant=self.tenant.schema_name)
+
+            offering = CourseOffering.objects.filter(course=course, batch=batch).first()
+            self.assertIsNotNone(offering)
+            self.assertEqual(offering.term_id, term.id)
+
+    # -- recompute_academic_records ------------------------------------------
+
+    def test_recompute_requires_include_published_to_touch_a_published_award(self):
+        from django.core.management import call_command
+        from .models.grading import CourseGradeAward
+        from .services.grading import publish_term_results
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation, batch, course, term = self._spine()
+            student = self._make_student("stu_recompute1", batch=batch)
+            offering = self._make_offering(course, term, batch)
+            self._register(student, offering)
+            exam_type = self._exam_type("RECOMP1")
+            exam = self._make_exam(course, term, exam_type, total_marks=100, passing_marks=40)
+            self._make_result(exam, student, marks=50)
+            publish_term_results(term)
+
+            original = CourseGradeAward.objects.get(student=student, term=term)
+            original_grade = original.grade_letter
+
+            # A correction lands after publish: marks are revised upward.
+            from .models.result import StudentExamResult
+            StudentExamResult.objects.filter(exam=exam, student=student).update(marks_obtained=95)
+
+            call_command("recompute_academic_records", tenant=self.tenant.schema_name, term=term.id)
+            unchanged = CourseGradeAward.objects.get(student=student, term=term)
+            self.assertEqual(unchanged.grade_letter, original_grade)
+
+            call_command(
+                "recompute_academic_records", tenant=self.tenant.schema_name, term=term.id,
+                include_published=True,
+            )
+            corrected = CourseGradeAward.objects.get(student=student, term=term)
+            self.assertEqual(corrected.grade_letter, "O")  # 95% -> the 90-100 band
+            self.assertEqual(CourseGradeAward.objects.filter(student=student, term=term).count(), 1)
+
+    # -- helpers for the tests above ----------------------------------------
+
+    def _make_second_course(self, regulation, credits):
+        from .models.course import Course
+        return Course.objects.create(
+            course_code="CS302", course_name="Algorithms", department=self.dept,
+            regulation=regulation, semester_number=3, credits=credits,
+        )
+
+    def _save_award(self, registration, *, grade_points, credits, is_pass, counts_in_gpa,
+                     attempt_number=1, published=True):
+        from .models.grading import CourseGradeAward
+        from .services.academics import get_default_grading_scheme
+
+        scheme = get_default_grading_scheme()
+        return CourseGradeAward.objects.create(
+            registration=registration, student=registration.student, term=registration.term,
+            credits=credits, grade_letter="X", grade_points=grade_points,
+            credit_points=credits * grade_points, is_pass=is_pass, counts_in_gpa=counts_in_gpa,
+            grading_scheme=scheme, attempt_number=attempt_number,
+            is_published=published,
+        )

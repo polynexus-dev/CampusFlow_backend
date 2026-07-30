@@ -18,7 +18,7 @@ ALL_ERP_MODULES = [
     # curriculum are foundational — exams and schedules are stamped with a term,
     # and credits drive SGPA and graduation checks — so they must work without a
     # per-tenant subscription change.
-    "academics", "curriculum",
+    "academics", "curriculum", "transcript",
 ]
 
 ROLE_DEFAULT_MODULES = {
@@ -28,11 +28,11 @@ ROLE_DEFAULT_MODULES = {
     "Department Head": [
         "dashboard", "department", "room", "staff", "student", "attendance",
         "schedule", "settings", "leave", "exams", "analytics", "announcements",
-        "assignments", "tpo", "library", "valuation", "academics", "curriculum"
+        "assignments", "tpo", "library", "valuation", "academics", "curriculum", "transcript"
     ],
     "Faculty": [
         "dashboard", "attendance", "schedule", "settings", "leave", "exams",
-        "announcements", "analytics", "assignments", "valuation"
+        "announcements", "analytics", "assignments", "valuation", "transcript"
     ],
     "Support Staff": [
         "dashboard", "room", "settings", "leave", "announcements", "hostel",
@@ -40,7 +40,7 @@ ROLE_DEFAULT_MODULES = {
     ],
     "student": [
         "dashboard", "attendance", "schedule", "settings", "exams", "announcements",
-        "assignments", "fees", "bus-tracking", "hostel", "tpo", "library"
+        "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript"
     ]
 }
 

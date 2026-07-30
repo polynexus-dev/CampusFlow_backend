@@ -20,8 +20,12 @@ from .fraud_alert import FraudAlert
 from .device_reset import DeviceResetRequest
 
 # ── Academic Calendar & Curriculum ──
-from .grading import GradingScheme, GradeBand
 from .academics import AcademicYear, Term, Program, Regulation, Batch, Section
+from .offerings import CourseOffering, StudentCourseRegistration
+from .grading import (
+    GradingScheme, GradeBand,
+    CourseGradeAward, TermGradeSheet, StudentAcademicSummary,
+)
 
 # ── New Modules ──
 from .audit import AuditLog

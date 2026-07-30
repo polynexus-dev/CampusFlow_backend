@@ -80,6 +80,7 @@ from .views.curriculum import (
     SectionListCreateView, SectionDetailView,
     GradingSchemeListView, GradingSchemeDetailView,
 )
+from .views.grading import PublishTermResultsView, StudentTranscriptView
 from .views.paper_setting import (
     PaperBlueprintView, GeneratePaperView, ExamPaperView,
     ExamQuestionAddView, ExamQuestionReplaceView, ExamQuestionDetailView,
@@ -215,6 +216,9 @@ urlpatterns = [
     path('academics/sections/<int:pk>/', SectionDetailView.as_view(), name='section-detail'),
     path('academics/grading-schemes/', GradingSchemeListView.as_view(), name='grading-scheme-list'),
     path('academics/grading-schemes/<int:pk>/', GradingSchemeDetailView.as_view(), name='grading-scheme-detail'),
+    path('academics/terms/<int:pk>/publish-results/', PublishTermResultsView.as_view(), name='publish-term-results'),
+    path('academics/students/<int:pk>/transcript/', StudentTranscriptView.as_view(), name='student-transcript'),
+    path('academics/my-transcript/', StudentTranscriptView.as_view(), name='my-transcript'),
 
     # ── Location ──────────────────────────────────────────────────────
     # GET list (any auth) / POST create (College Admins+) / DELETE (College Admins+)
