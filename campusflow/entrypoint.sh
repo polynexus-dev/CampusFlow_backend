@@ -18,9 +18,14 @@ pip install -r requirements.txt
 # 0. Sync migrations to clear any drifted files
 python migrate_sync.py
 
-# 0.5. Make new migrations for any model changes
+# 0.5. Make new migrations for any model changes.
+#      --noinput is essential: there is no TTY here, so a model change that
+#      needs an interactive answer (a non-nullable field with no default, or a
+#      rename Django cannot infer) would otherwise hang the boot forever.
+#      With it, such a change fails loudly instead. Keep new fields nullable
+#      or defaulted so this step stays non-interactive.
 echo "🔄 Auto-generating migrations for any updated models..."
-python manage.py makemigrations
+python manage.py makemigrations --noinput
 
 
 # 1. Run shared (public) schema migrations

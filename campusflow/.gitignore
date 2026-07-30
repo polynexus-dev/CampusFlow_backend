@@ -166,9 +166,16 @@ models/insightface/
 # Staged monthly face-template fine-tune candidates (raw biometric embeddings)
 fine_tuned_embeddings/
 
-# Django Migrations
-**/migrations/*.py
-!**/migrations/__init__.py
+# Django migrations are deliberately TRACKED. They are the only reproducible
+# record of the database schema, and every tenant schema is migrated from them.
+# Ignoring them made rollback, review and reproducing a schema impossible, and
+# left migrate_sync.py deleting files it could not find in the image snapshot.
+
+# Source archives — build/backup artifacts, not source
+*.zip
+*.rar
+*.tar
+*.tar.gz
 
 # User Manual / Pilot Docs
 Docs/
