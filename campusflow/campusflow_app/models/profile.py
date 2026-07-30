@@ -149,6 +149,72 @@ class StudentProfile(models.Model):
             return self.regulation
         return self.batch.regulation if self.batch_id else None
 
+    # Fields whose value is entirely computed from the FKs above during save()
+    # — see _sync_legacy_academic_fields. Named once here so save()'s
+    # update_fields widening and the backfill command's report agree on exactly
+    # what "the legacy mirror" means.
+    LEGACY_ACADEMIC_MIRROR = (
+        "program_enrolled_in", "batch_academic_year",
+        "current_semester_year", "section_division",
+    )
+
+    def _sync_legacy_academic_fields(self, update_fields):
+        """
+        Parallel-run bridge, FK -> string only. Keeps every existing reader of
+        the four legacy CharFields (FeeStructure string matching, the bus
+        conductor's "class" label, the guardian report-card grouping) working
+        unchanged while the FKs become authoritative underneath them. The
+        reverse direction, string -> FK, is never inferred here — that is the
+        backfill_student_academics management command's job, run explicitly
+        and reviewed, never a side effect of an unrelated save().
+
+        A mirrored field is only re-derived when its FK source was actually
+        part of THIS save — update_fields is None (a full save) or the FK's
+        own name is listed in update_fields. Without that restriction,
+        views/promotion.py's existing pattern breaks: it sets
+        current_semester_year/section_division/batch_academic_year directly
+        and saves with update_fields=[exactly those three] WITHOUT touching
+        current_semester_number/batch/section at all, since promotion does not
+        yet operate on the FKs (that lands with promotion's own PR). Deriving
+        those strings unconditionally from the student's stale, unrelated FK
+        values would silently revert promotion's own write back to the
+        pre-promotion semester on the very next save.
+
+        Returns the set of legacy field names actually recomputed, so save()
+        can widen its update_fields by exactly those and nothing else.
+        """
+        sync_all = update_fields is None
+        touched = set()
+
+        if self.batch_id and (sync_all or "batch" in update_fields):
+            batch = self.batch
+            if batch.program_id:
+                label = batch.program.short_name or batch.program.code
+                self.program_enrolled_in = label[:50]
+                touched.add("program_enrolled_in")
+            self.batch_academic_year = batch.name[:50]
+            touched.add("batch_academic_year")
+
+        if self.current_semester_number and (sync_all or "current_semester_number" in update_fields):
+            self.current_semester_year = f"Semester {self.current_semester_number}"[:50]
+            touched.add("current_semester_year")
+
+        if self.section_id and (sync_all or "section" in update_fields):
+            self.section_division = self.section.name[:10]
+            touched.add("section_division")
+
+        return touched
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        touched_mirror_fields = self._sync_legacy_academic_fields(update_fields)
+        if update_fields is not None and touched_mirror_fields:
+            # Widen by exactly what was recomputed above — not the full mirror
+            # set — so a save that never touched a given FK never rewrites that
+            # FK's mirrored string either.
+            kwargs["update_fields"] = list(set(update_fields) | touched_mirror_fields)
+        super().save(*args, **kwargs)
+
 # Teaching Staff Profile Model (remains the same)
 class TeachingStaffProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='teaching_staff_profile')

@@ -1022,3 +1022,419 @@ class CurriculumStructureTests(TenantTestCase):
             format='json', **auth,
         )
         self.assertEqual(third.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class AcademicBackfillTests(TenantTestCase):
+    """
+    Covers the parallel-run cutover for the four legacy free-text StudentProfile
+    fields: the FK->string save() mirror, the backfill_student_academics
+    management command (including the cases the design specifically calls out
+    — course-name-in-program-field, ambiguous matches, mixed academic-year vs
+    batch-span formats), the roster resolver's OR-fallback, and the
+    verify_academic_backfill gate.
+    """
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            Group.objects.get_or_create(name='student')
+            self.dept = Department.objects.create(name="Computer Science", code="CS")
+
+    def _spine(self, duration_years=4):
+        from .models.academics import Batch, Program, Regulation
+        from .services.academics import get_default_grading_scheme
+
+        scheme = get_default_grading_scheme()
+        program = Program.objects.create(
+            name="B.Tech Computer Science", code="BTCSE", short_name="B.Tech CS",
+            department=self.dept, duration_years=duration_years,
+        )
+        regulation = Regulation.objects.create(
+            program=program, code="R2021", effective_from_year=2018,
+            effective_to_year=2030, grading_scheme=scheme,
+        )
+        return program, regulation
+
+    def _make_student(self, **overrides):
+        defaults = dict(
+            student_id=f"STU-{StudentProfile.objects.count() + 1}",
+            department=self.dept,
+        )
+        defaults.update(overrides)
+        user = User.objects.create_user(
+            username=f"stu{StudentProfile.objects.count() + 1}",
+            email=f"stu{StudentProfile.objects.count() + 1}@test.com",
+        )
+        return StudentProfile.objects.create(user=user, **defaults)
+
+    # -- the save() mirror ---------------------------------------------
+
+    def test_fk_to_string_mirror_populates_on_save(self):
+        from .models.academics import Batch, Section
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            batch = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2023, name="2023-2027",
+            )
+            section = Section.objects.create(batch=batch, semester_number=3, name="A")
+
+            student = self._make_student(
+                batch=batch, section=section, current_semester_number=3,
+            )
+            student.refresh_from_db()
+
+            self.assertEqual(student.program_enrolled_in, "B.Tech CS")
+            self.assertEqual(student.batch_academic_year, "2023-2027")
+            self.assertEqual(student.current_semester_year, "Semester 3")
+            self.assertEqual(student.section_division, "A")
+
+    def test_mirror_leaves_unbackfilled_strings_untouched(self):
+        """A student with no FKs set yet must not have their legacy strings
+        touched by an unrelated save() — only setting the FK should change them."""
+        with schema_context(self.tenant.schema_name):
+            student = self._make_student(
+                program_enrolled_in="Some Legacy Value", batch_academic_year="2020-2024",
+            )
+            student.locked_device_id = "device-123"
+            student.save()
+            student.refresh_from_db()
+
+            self.assertEqual(student.program_enrolled_in, "Some Legacy Value")
+            self.assertEqual(student.batch_academic_year, "2020-2024")
+
+    def test_update_fields_is_widened_when_the_fk_is_named(self):
+        """
+        A well-behaved caller that names the FK it changed in update_fields
+        must still get the mirrored string written — without widening, that
+        write would be silently dropped from the UPDATE statement.
+        """
+        from .models.academics import Batch
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            batch = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2024, name="2024-2028",
+            )
+            student = self._make_student(current_semester_number=1)
+
+            student.batch = batch
+            student.current_semester_number = 2
+            student.save(update_fields=["batch", "current_semester_number"])
+            student.refresh_from_db()
+
+            self.assertEqual(student.current_semester_year, "Semester 2")
+            self.assertEqual(student.batch_academic_year, "2024-2028")
+
+    def test_narrow_save_does_not_clobber_a_directly_set_legacy_string(self):
+        """
+        The bug this test exists to prevent: views/promotion.py sets
+        current_semester_year/section_division/batch_academic_year directly
+        and saves with update_fields naming exactly those three strings —
+        NOT current_semester_number/batch/section, since promotion does not
+        yet touch the FKs at all. If the mirror recomputed those strings
+        unconditionally from the student's stale, unrelated FK values, it
+        would silently revert promotion's write back to the pre-promotion
+        semester on this very save.
+        """
+        from .models.academics import Batch
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            batch = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2024, name="2024-2028",
+            )
+            # Already backfilled to semester 3 — this FK is now stale relative
+            # to the promotion below, which only ever touches the strings.
+            student = self._make_student(batch=batch, current_semester_number=3)
+
+            student.current_semester_year = "Semester 4"
+            student.section_division = "B"
+            student.batch_academic_year = "2024-2028"
+            student.save(update_fields=["current_semester_year", "section_division", "batch_academic_year"])
+            student.refresh_from_db()
+
+            self.assertEqual(student.current_semester_year, "Semester 4")
+            self.assertEqual(student.section_division, "B")
+            # The stale FK itself is untouched by this save, as expected —
+            # only promotion's own eventual FK-aware rewrite (a later PR)
+            # would advance it.
+            self.assertEqual(student.current_semester_number, 3)
+
+    # -- backfill: dry-run vs real ---------------------------------------
+
+    def test_backfill_dry_run_writes_nothing(self):
+        """
+        The whole point of --dry-run: it must not create a Batch or Section as
+        a side effect of resolving them, not just skip the final StudentProfile
+        update. A naive implementation that only gates the bulk_update call
+        would still leave real Batch/Section rows behind.
+        """
+        from django.core.management import call_command
+        from .models.academics import Batch, Program, Regulation, Section
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            self._make_student(
+                program_enrolled_in="B.Tech CS", batch_academic_year="2022-2026",
+                current_semester_year="Semester 5", section_division="A",
+            )
+
+            call_command(
+                "backfill_student_academics", tenant=self.tenant.schema_name, dry_run=True
+            )
+
+            student = StudentProfile.objects.get()
+            self.assertIsNone(student.batch_id)
+            self.assertIsNone(student.program_id)
+            self.assertEqual(Batch.objects.count(), 0)
+            self.assertEqual(Section.objects.count(), 0)
+
+    def test_backfill_resolves_program_batch_section_semester(self):
+        from django.core.management import call_command
+        from .models.academics import Batch
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            self._make_student(
+                program_enrolled_in="B.Tech CS", batch_academic_year="2022-2026",
+                current_semester_year="Semester 5", section_division="B",
+            )
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            student = StudentProfile.objects.get()
+            self.assertEqual(student.program_id, program.id)
+            self.assertEqual(student.current_semester_number, 5)
+            self.assertIsNotNone(student.batch_id)
+            self.assertEqual(student.batch.admission_year, 2022)
+            self.assertIsNotNone(student.section_id)
+            self.assertEqual(student.section.name, "B")
+            self.assertEqual(student.section.semester_number, 5)
+
+    def test_backfill_is_idempotent(self):
+        from django.core.management import call_command
+        from .models.academics import Batch
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            self._make_student(
+                program_enrolled_in="B.Tech CS", batch_academic_year="2022-2026",
+                current_semester_year="Semester 5", section_division="B",
+            )
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            self.assertEqual(Batch.objects.filter(program=program, admission_year=2022).count(), 1)
+
+    def test_backfill_does_not_reassign_a_student_who_already_has_a_batch(self):
+        """
+        Re-running after new Programs are created must only pick up newly
+        resolvable students, never touch one that already has a batch (which
+        may include a deliberate manual override).
+        """
+        from django.core.management import call_command
+        from .models.academics import Batch
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            existing_batch = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2019, name="2019-2023",
+            )
+            student = self._make_student(
+                batch=existing_batch, program_enrolled_in="Something Else Entirely",
+            )
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            student.refresh_from_db()
+            self.assertEqual(student.batch_id, existing_batch.id)
+
+    # -- the cases the design specifically calls out ---------------------
+
+    def test_program_field_holding_a_course_name_falls_back_to_sole_department_program(self):
+        """
+        seed_large_users.py:349 sets program_enrolled_in to a course name, not a
+        program. Must not be mapped to a Program matching that name (there is
+        none), but IS allowed to fall back to the department's only program.
+        """
+        from django.core.management import call_command
+        from .models.course import Course
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            Course.objects.create(
+                course_code="MATH101", course_name="Mathematics 101", department=self.dept,
+            )
+            self._make_student(program_enrolled_in="Mathematics 101")
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            student = StudentProfile.objects.get()
+            self.assertEqual(student.program_id, program.id)
+
+    def test_ambiguous_program_text_stays_unresolved(self):
+        """Two programs fuzzy-matching the same free text must not guess."""
+        from django.core.management import call_command
+        from .models.academics import Program
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            Program.objects.create(
+                name="B.Tech Computer Science (Honours)", code="BTCSEH",
+                short_name="B.Tech CS", department=self.dept,
+            )
+            self._make_student(program_enrolled_in="B.Tech CS")
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            student = StudentProfile.objects.get()
+            self.assertIsNone(student.program_id)
+
+    def test_academic_year_shaped_value_not_treated_as_batch_for_multi_year_program(self):
+        """
+        '2024-2025' in batch_academic_year is a 1-year span. For a 4-year
+        program that is not a valid admission cohort and must be left
+        unresolved rather than silently misfiled as a 1-year batch.
+        """
+        from django.core.management import call_command
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine(duration_years=4)
+            self._make_student(
+                program_enrolled_in="B.Tech CS", batch_academic_year="2024-2025",
+            )
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            student = StudentProfile.objects.get()
+            self.assertEqual(student.program_id, program.id)
+            self.assertIsNone(student.batch_id)
+
+    def test_academic_year_shaped_value_accepted_as_batch_for_one_year_program(self):
+        """The same shape IS a valid batch span for a genuine one-year program."""
+        from django.core.management import call_command
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine(duration_years=1)
+            self._make_student(
+                program_enrolled_in="B.Tech CS", batch_academic_year="2024-2025",
+            )
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            student = StudentProfile.objects.get()
+            self.assertIsNotNone(student.batch_id)
+            self.assertEqual(student.batch.admission_year, 2024)
+
+    def test_ambiguous_regulation_leaves_batch_unresolved(self):
+        """Two regulations both covering the admission year must not let the
+        backfill silently guess which curriculum the cohort actually followed."""
+        from django.core.management import call_command
+        from .models.academics import Regulation
+        from .services.academics import get_default_grading_scheme
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            Regulation.objects.create(
+                program=program, code="R2022", effective_from_year=2018,
+                effective_to_year=2030, grading_scheme=get_default_grading_scheme(),
+            )
+            self._make_student(
+                program_enrolled_in="B.Tech CS", batch_academic_year="2022-2026",
+            )
+
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+            student = StudentProfile.objects.get()
+            self.assertEqual(student.program_id, program.id)
+            self.assertIsNone(student.batch_id)
+
+    # -- the roster resolver ----------------------------------------------
+
+    def test_roster_resolver_ors_fk_and_legacy_string_per_dimension(self):
+        """
+        The whole point of the resolver: a partially-backfilled tenant (some
+        students carry only the FK, some only the string) must not silently
+        drop either group.
+        """
+        from .services.academic_roster import resolve_student_roster
+        from .models.academics import Batch
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            batch = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2022, name="2022-2026",
+            )
+            backfilled = self._make_student(batch=batch)
+            legacy_only = self._make_student(batch_academic_year="2022-2026")
+            unrelated = self._make_student(batch_academic_year="2019-2023")
+
+            qs, diagnostics = resolve_student_roster(
+                batch_id=batch.id, legacy_batch="2022-2026",
+            )
+
+            ids = set(qs.values_list("id", flat=True))
+            self.assertIn(backfilled.id, ids)
+            self.assertIn(legacy_only.id, ids)
+            self.assertNotIn(unrelated.id, ids)
+            self.assertEqual(diagnostics["matched"], 2)
+            self.assertEqual(diagnostics["resolved_by_fk"], 1)
+            self.assertEqual(diagnostics["unresolved_by_fk"], 1)
+
+    def test_roster_resolver_string_only_scope_reports_everyone_unresolved_by_fk(self):
+        """If the caller never supplies an FK criterion for a dimension, a
+        future FK-only query could not express that filter at all — every
+        matched student is, correctly, 'unresolved by FK'."""
+        from .services.academic_roster import resolve_student_roster
+
+        with schema_context(self.tenant.schema_name):
+            self._make_student(batch_academic_year="2021-2025")
+            self._make_student(batch_academic_year="2021-2025")
+
+            _, diagnostics = resolve_student_roster(legacy_batch="2021-2025")
+
+            self.assertEqual(diagnostics["matched"], 2)
+            self.assertEqual(diagnostics["resolved_by_fk"], 0)
+            self.assertEqual(diagnostics["unresolved_by_fk"], 2)
+
+    # -- verify_academic_backfill ------------------------------------------
+
+    def test_verify_passes_on_a_clean_backfill(self):
+        from django.core.management import call_command
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            self._make_student(
+                program_enrolled_in="B.Tech CS", batch_academic_year="2022-2026",
+                current_semester_year="Semester 5", section_division="B",
+            )
+            call_command("backfill_student_academics", tenant=self.tenant.schema_name)
+
+        # Must not raise.
+        call_command("verify_academic_backfill", tenant=self.tenant.schema_name)
+
+    def test_verify_fails_when_section_does_not_belong_to_students_batch(self):
+        """
+        Simulates data that could not arise from backfill_student_academics
+        itself (which only ever assigns a section within the batch it just
+        resolved) — proving the gate actually catches a real violation and
+        is not just trivially passing.
+        """
+        from django.core.management import CommandError, call_command
+        from .models.academics import Batch, Section
+
+        with schema_context(self.tenant.schema_name):
+            program, regulation = self._spine()
+            batch_a = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2020, name="2020-2024",
+            )
+            batch_b = Batch.objects.create(
+                program=program, regulation=regulation, admission_year=2021, name="2021-2025",
+            )
+            section_of_b = Section.objects.create(batch=batch_b, semester_number=1, name="A")
+            self._make_student(batch=batch_a, section=section_of_b)
+
+        with self.assertRaises(CommandError):
+            call_command("verify_academic_backfill", tenant=self.tenant.schema_name)
