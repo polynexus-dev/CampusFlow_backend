@@ -68,6 +68,11 @@ from .views.question_bank import (
     SyllabusTopicListCreateView, SyllabusTopicDetailView,
     QuestionBankListCreateView, QuestionDetailView,
 )
+from .views.academics import (
+    AcademicYearListCreateView, AcademicYearDetailView,
+    TermListCreateView, TermDetailView,
+    CurrentTermView, SetCurrentTermView,
+)
 from .views.paper_setting import (
     PaperBlueprintView, GeneratePaperView, ExamPaperView,
     ExamQuestionAddView, ExamQuestionReplaceView, ExamQuestionDetailView,
@@ -177,6 +182,17 @@ urlpatterns = [
     path('department/', DepartmentView.as_view(), name='DepartmentView'),
     # GET detail / POST update / DELETE one
     path('department/<int:pk>/', DepartmentDetailView.as_view(), name='DepartmentDetailView'),
+
+    # ── Academic Calendar ─────────────────────────────────────────────
+    # GET list (any auth) / POST create (College Admins + SaaS Admin)
+    path('academics/years/', AcademicYearListCreateView.as_view(), name='academic-year-list'),
+    path('academics/years/<int:pk>/', AcademicYearDetailView.as_view(), name='academic-year-detail'),
+    path('academics/terms/', TermListCreateView.as_view(), name='term-list'),
+    path('academics/terms/<int:pk>/', TermDetailView.as_view(), name='term-detail'),
+    # The resolver that replaces hardcoded semester strings. Self-provisioning,
+    # so it never 404s on a tenant that has no calendar yet.
+    path('academics/current-term/', CurrentTermView.as_view(), name='current-term'),
+    path('academics/current-term/set/', SetCurrentTermView.as_view(), name='current-term-set'),
 
     # ── Location ──────────────────────────────────────────────────────
     # GET list (any auth) / POST create (College Admins+) / DELETE (College Admins+)

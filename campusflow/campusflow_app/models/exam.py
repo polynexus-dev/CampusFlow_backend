@@ -59,6 +59,14 @@ class Exam(models.Model):
     passing_marks = models.PositiveIntegerField(default=35)
     semester = models.CharField(max_length=50, blank=True, null=True)
     academic_year = models.CharField(max_length=9, blank=True, null=True, help_text="e.g. 2025-2026")
+    # Structured replacement for the two free-text fields above. Added ahead of
+    # the code that reads it so this busy table needs only one migration, not two.
+    # Nothing reads `term` yet; the strings remain authoritative until backfilled.
+    term = models.ForeignKey(
+        "campusflow_app.Term", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="exams",
+        help_text="Academic term this exam belongs to. Supersedes semester/academic_year.",
+    )
     question_paper_url = models.CharField(max_length=500, blank=True, null=True, help_text="S3 / storage URL of the question paper PDF")
     question_structure = models.JSONField(default=dict, blank=True, help_text="Predefined structure of questions and max marks, e.g. {'Q1': 10, 'Q2': 10}")
     invigilator = models.ForeignKey(
