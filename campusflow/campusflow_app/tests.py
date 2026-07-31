@@ -2283,3 +2283,416 @@ class CreditWeightedResultTests(TenantTestCase):
             grading_scheme=scheme, attempt_number=attempt_number,
             is_published=published,
         )
+
+
+class OutcomeBasedEducationTests(TenantTestCase):
+    """
+    Covers PR-6: ProgramOutcome/CourseOutcome/POCOMapping constraints, the
+    course-outcome snapshot into Exam.question_structure at paper-sync time,
+    and the generalised StudentTopicPerformanceView loop — including the
+    independent-tagging fix (a CO-only-tagged question must not be dropped
+    just because it lacks a topic tag).
+    """
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            for role in ('student', 'Management'):
+                Group.objects.get_or_create(name=role)
+            self.dept = Department.objects.create(name="Computer Science", code="CS")
+
+    def _admin_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username=f'outcomes_admin_{User.objects.count()}',
+                email=f'outcomes_admin_{User.objects.count()}@test.com', password='pw12345!',
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def _program_and_course(self):
+        from .models.academics import Program, Regulation
+        from .models.course import Course
+        from .services.academics import get_default_grading_scheme
+
+        program = Program.objects.create(
+            name="B.Tech Computer Science", code="BTCSE", department=self.dept,
+        )
+        regulation = Regulation.objects.create(
+            program=program, code="R2021", effective_from_year=2018,
+            grading_scheme=get_default_grading_scheme(),
+        )
+        course = Course.objects.create(
+            course_code="CS301", course_name="Data Structures", department=self.dept,
+            regulation=regulation, semester_number=3, credits=4,
+        )
+        return program, course
+
+    def _student(self, username):
+        user = User.objects.create_user(username=username, email=f"{username}@test.com")
+        from .models.profile import StudentProfile as SP
+        return SP.objects.create(user=user, student_id=f"STU-{username}", department=self.dept)
+
+    def _teaching_staff(self, username):
+        user = User.objects.create_user(username=username, email=f"{username}@test.com")
+        from .models.profile import TeachingStaffProfile
+        return TeachingStaffProfile.objects.create(
+            user=user, employee_id=f"EMP-{username}", department=self.dept,
+        )
+
+    # -- model constraints --------------------------------------------------
+
+    def test_course_outcome_code_unique_per_course_not_globally(self):
+        """The same CO code ('CO1') must be reusable across different
+        courses — codes are meaningful only within their own course."""
+        from .models.outcomes import CourseOutcome
+        from .models.course import Course
+
+        with schema_context(self.tenant.schema_name):
+            program, course_a = self._program_and_course()
+            course_b = Course.objects.create(
+                course_code="CS302", course_name="Algorithms", department=self.dept,
+                regulation=course_a.regulation, semester_number=3, credits=3,
+            )
+            CourseOutcome.objects.create(course=course_a, code="CO1", statement="Understand X")
+            # Must NOT raise — same code, different course.
+            CourseOutcome.objects.create(course=course_b, code="CO1", statement="Understand Y")
+            self.assertEqual(CourseOutcome.objects.filter(code="CO1").count(), 2)
+
+    def test_course_outcome_code_rejected_within_same_course(self):
+        from django.db import IntegrityError, transaction as db_transaction
+        from .models.outcomes import CourseOutcome
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            CourseOutcome.objects.create(course=course, code="CO1", statement="Understand X")
+            with self.assertRaises(IntegrityError):
+                with db_transaction.atomic():
+                    CourseOutcome.objects.create(course=course, code="CO1", statement="Duplicate")
+
+    def test_po_co_mapping_unique_pair(self):
+        from django.db import IntegrityError, transaction as db_transaction
+        from .models.outcomes import CourseOutcome, POCOMapping, ProgramOutcome
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            co = CourseOutcome.objects.create(course=course, code="CO1", statement="X")
+            po = ProgramOutcome.objects.create(program=program, code="PO1", statement="Y")
+            POCOMapping.objects.create(course_outcome=co, program_outcome=po, strength=2)
+            with self.assertRaises(IntegrityError):
+                with db_transaction.atomic():
+                    POCOMapping.objects.create(course_outcome=co, program_outcome=po, strength=3)
+
+    # -- paper_sync snapshot resolution chain --------------------------------
+
+    def test_sync_snapshots_course_outcome_from_question_override(self):
+        from .models.question_bank import ExamQuestion, Question, SyllabusTopic
+        from .models.outcomes import CourseOutcome
+        from .models.exam import Exam, ExamType
+        from .services.paper_sync import sync_question_structure
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            topic = SyllabusTopic.objects.create(course=course, name="Unit 1")
+            co_topic = CourseOutcome.objects.create(course=course, code="CO1", statement="Topic-level")
+            co_question = CourseOutcome.objects.create(course=course, code="CO2", statement="Question override")
+            topic.course_outcome = co_topic
+            topic.save()
+
+            question = Question.objects.create(
+                course=course, topic=topic, text="Explain X", marks=10,
+                course_outcome=co_question,  # overrides the topic's CO
+            )
+            exam_type = ExamType.objects.create(name="Mid", code="SYNCMID1")
+            exam = Exam.objects.create(
+                name="Sync Test Exam", exam_type=exam_type, department=self.dept, course=course,
+                date="2026-11-01", start_time="09:00", end_time="12:00",
+            )
+            ExamQuestion.objects.create(
+                exam=exam, question=question, question_label="Q1",
+                question_text_snapshot=question.text, marks=10, topic=topic,
+            )
+
+            sync_question_structure(exam)
+            exam.refresh_from_db()
+
+            self.assertEqual(exam.question_structure["Q1"]["topic"], "Unit 1")
+            # The question's own CO wins over the topic's.
+            self.assertEqual(exam.question_structure["Q1"]["course_outcome"], "CO2")
+
+    def test_sync_falls_back_to_topic_course_outcome(self):
+        from .models.question_bank import ExamQuestion, Question, SyllabusTopic
+        from .models.outcomes import CourseOutcome
+        from .models.exam import Exam, ExamType
+        from .services.paper_sync import sync_question_structure
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            topic = SyllabusTopic.objects.create(course=course, name="Unit 2")
+            co_topic = CourseOutcome.objects.create(course=course, code="CO1", statement="Topic-level")
+            topic.course_outcome = co_topic
+            topic.save()
+
+            question = Question.objects.create(course=course, topic=topic, text="Explain Y", marks=10)
+            exam_type = ExamType.objects.create(name="Mid", code="SYNCMID2")
+            exam = Exam.objects.create(
+                name="Sync Fallback Exam", exam_type=exam_type, department=self.dept, course=course,
+                date="2026-11-01", start_time="09:00", end_time="12:00",
+            )
+            ExamQuestion.objects.create(
+                exam=exam, question=question, question_label="Q1",
+                question_text_snapshot=question.text, marks=10, topic=topic,
+            )
+
+            sync_question_structure(exam)
+            exam.refresh_from_db()
+
+            self.assertEqual(exam.question_structure["Q1"]["course_outcome"], "CO1")
+
+    def test_sync_never_guesses_when_untagged(self):
+        from .models.question_bank import ExamQuestion, Question
+        from .models.exam import Exam, ExamType
+        from .services.paper_sync import sync_question_structure
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            question = Question.objects.create(course=course, text="Untagged", marks=10)
+            exam_type = ExamType.objects.create(name="Mid", code="SYNCMID3")
+            exam = Exam.objects.create(
+                name="Untagged Exam", exam_type=exam_type, department=self.dept, course=course,
+                date="2026-11-01", start_time="09:00", end_time="12:00",
+            )
+            ExamQuestion.objects.create(
+                exam=exam, question=question, question_label="Q1",
+                question_text_snapshot=question.text, marks=10,
+            )
+
+            sync_question_structure(exam)
+            exam.refresh_from_db()
+
+            self.assertIsNone(exam.question_structure["Q1"]["course_outcome"])
+            self.assertIsNone(exam.question_structure["Q1"]["topic"])
+
+    # -- validate_question_structure accepts the new key ---------------------
+
+    def test_validate_question_structure_accepts_course_outcome_string(self):
+        from .views.exam import validate_question_structure
+
+        self.assertIsNone(validate_question_structure(
+            {"Q1": {"marks": 10, "topic": "Unit 1", "course_outcome": "CO1"}}
+        ))
+        error = validate_question_structure({"Q1": {"marks": 10, "course_outcome": 123}})
+        self.assertIsNotNone(error)
+        self.assertIn("course_outcome", error)
+
+    # -- StudentTopicPerformanceView: the generalised loop --------------------
+
+    def _evaluated_paper(self, course, student, question_structure, question_scores):
+        from .models.valuation import ScannedPaper, ValuationSession
+        from .models.exam import Exam, ExamType
+        from django.utils import timezone
+
+        exam_type = ExamType.objects.create(name="Mid", code=f"PROG{ScannedPaper.objects.count()}")
+        exam = Exam.objects.create(
+            name="Progress Exam", exam_type=exam_type, department=self.dept, course=course,
+            date="2026-11-01", start_time="09:00", end_time="12:00",
+            question_structure=question_structure,
+        )
+        evaluator = self._teaching_staff(f"eval{ScannedPaper.objects.count()}")
+        session = ValuationSession.objects.create(exam=exam, evaluator=evaluator)
+        return ScannedPaper.objects.create(
+            session=session, student=student, scanned_file_url="s3://x",
+            status="Evaluated", evaluated_at=timezone.now(), question_scores=question_scores,
+        )
+
+    def test_topic_performance_endpoint_reports_both_topics_and_course_outcomes(self):
+        from .models.outcomes import CourseOutcome
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            CourseOutcome.objects.create(
+                course=course, code="CO1", statement="X", target_attainment_percent=50,
+            )
+            student = self._student("stu_prog1")
+            self._evaluated_paper(
+                course, student,
+                question_structure={"Q1": {"marks": 10, "topic": "Unit 1", "course_outcome": "CO1"}},
+                question_scores={"Q1": 8},
+            )
+            student.user.groups.add(Group.objects.get(name='student'))
+            token = RefreshToken.for_user(student.user)
+            token['tenant_schema'] = self.tenant.schema_name
+
+        response = self.client.get(
+            reverse('analytics-student-topic-performance'),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["topics"]), 1)
+        self.assertEqual(response.data["topics"][0]["topic"], "Unit 1")
+        self.assertEqual(len(response.data["course_outcomes"]), 1)
+        co = response.data["course_outcomes"][0]
+        self.assertEqual(co["code"], "CO1")
+        self.assertEqual(co["percentage"], 80.0)
+        self.assertTrue(co["meets_target"])  # 80% >= 50% target
+
+    def test_topic_performance_includes_co_only_tagged_question_without_a_topic(self):
+        """
+        The bug an earlier draft of the loop would have had: a question
+        carrying a course_outcome but no topic must still be counted toward
+        course_outcomes, not silently dropped by the topic-untagged branch.
+        """
+        from .models.outcomes import CourseOutcome
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            CourseOutcome.objects.create(course=course, code="CO9", statement="No topic")
+            student = self._student("stu_prog2")
+            self._evaluated_paper(
+                course, student,
+                question_structure={"Q1": {"marks": 10, "topic": None, "course_outcome": "CO9"}},
+                question_scores={"Q1": 6},
+            )
+            student.user.groups.add(Group.objects.get(name='student'))
+            token = RefreshToken.for_user(student.user)
+            token['tenant_schema'] = self.tenant.schema_name
+
+        response = self.client.get(
+            reverse('analytics-student-topic-performance'),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # No topic tag at all -> topics stays empty, but course_outcomes must
+        # still have the CO-tagged entry.
+        self.assertEqual(len(response.data["topics"]), 0)
+        self.assertEqual(len(response.data["course_outcomes"]), 1)
+        self.assertEqual(response.data["course_outcomes"][0]["code"], "CO9")
+        self.assertEqual(response.data["untagged_marks_excluded"], 6)
+
+    def test_topic_performance_does_not_conflate_same_co_code_across_courses(self):
+        from .models.course import Course
+        from .models.outcomes import CourseOutcome
+
+        with schema_context(self.tenant.schema_name):
+            program, course_a = self._program_and_course()
+            course_b = Course.objects.create(
+                course_code="CS399", course_name="Other Course", department=self.dept,
+                regulation=course_a.regulation, semester_number=3, credits=3,
+            )
+            CourseOutcome.objects.create(course=course_a, code="CO1", statement="A", target_attainment_percent=90)
+            CourseOutcome.objects.create(course=course_b, code="CO1", statement="B", target_attainment_percent=10)
+            student = self._student("stu_prog3")
+            self._evaluated_paper(
+                course_a, student,
+                question_structure={"Q1": {"marks": 10, "course_outcome": "CO1"}},
+                question_scores={"Q1": 5},
+            )
+            self._evaluated_paper(
+                course_b, student,
+                question_structure={"Q1": {"marks": 10, "course_outcome": "CO1"}},
+                question_scores={"Q1": 5},
+            )
+            student.user.groups.add(Group.objects.get(name='student'))
+            token = RefreshToken.for_user(student.user)
+            token['tenant_schema'] = self.tenant.schema_name
+
+        response = self.client.get(
+            reverse('analytics-student-topic-performance'),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}', format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Two separate CO1 entries — one per course — not merged into one.
+        self.assertEqual(len(response.data["course_outcomes"]), 2)
+        targets = sorted(c["target_attainment_percent"] for c in response.data["course_outcomes"])
+        self.assertEqual(targets, [10.0, 90.0])
+
+    # -- CRUD endpoints --------------------------------------------------------
+
+    def test_create_program_outcome_and_course_outcome_and_mapping(self):
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+
+        po_res = self.client.post(
+            reverse('program-outcome-list', args=[program.id]),
+            {"code": "PO1", "statement": "Engineering knowledge"}, format='json', **auth,
+        )
+        self.assertEqual(po_res.status_code, status.HTTP_201_CREATED)
+
+        co_res = self.client.post(
+            reverse('course-outcome-list', args=[course.id]),
+            {"code": "CO1", "statement": "Apply data structures"}, format='json', **auth,
+        )
+        self.assertEqual(co_res.status_code, status.HTTP_201_CREATED)
+
+        mapping_res = self.client.post(
+            reverse('po-co-mapping-list', args=[co_res.data["id"]]),
+            {"program_outcome_id": po_res.data["id"], "strength": 3}, format='json', **auth,
+        )
+        self.assertEqual(mapping_res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(mapping_res.data["strength"], 3)
+
+    def test_mapping_rejects_program_outcome_from_a_different_program(self):
+        from .models.academics import Program
+
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        with schema_context(self.tenant.schema_name):
+            program_a, course = self._program_and_course()
+            program_b = Program.objects.create(
+                name="B.Tech Mechanical", code="BTMECH", department=self.dept,
+            )
+            from .models.outcomes import CourseOutcome, ProgramOutcome
+            co = CourseOutcome.objects.create(course=course, code="CO1", statement="X")
+            foreign_po = ProgramOutcome.objects.create(program=program_b, code="PO1", statement="Y")
+
+        response = self.client.post(
+            reverse('po-co-mapping-list', args=[co.id]),
+            {"program_outcome_id": foreign_po.id}, format='json', **auth,
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_syllabus_topic_and_question_accept_course_outcome_id(self):
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            from .models.outcomes import CourseOutcome
+            co = CourseOutcome.objects.create(course=course, code="CO1", statement="X")
+
+        topic_res = self.client.post(
+            reverse('syllabus-topic-list', args=[course.id]),
+            {"name": "Unit 1", "course_outcome_id": co.id}, format='json', **auth,
+        )
+        self.assertEqual(topic_res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(topic_res.data["course_outcome_code"], "CO1")
+
+        question_res = self.client.post(
+            reverse('question-bank-list', args=[course.id]),
+            {"text": "Explain", "marks": 5, "course_outcome_id": co.id}, format='json', **auth,
+        )
+        self.assertEqual(question_res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(question_res.data["course_outcome_code"], "CO1")
+
+    def test_question_rejects_course_outcome_from_a_different_course(self):
+        from .models.course import Course
+
+        token = self._admin_token()
+        auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+        with schema_context(self.tenant.schema_name):
+            program, course_a = self._program_and_course()
+            course_b = Course.objects.create(
+                course_code="CS404", course_name="Other", department=self.dept,
+                regulation=course_a.regulation, semester_number=4, credits=3,
+            )
+            from .models.outcomes import CourseOutcome
+            foreign_co = CourseOutcome.objects.create(course=course_b, code="CO1", statement="X")
+
+        response = self.client.post(
+            reverse('question-bank-list', args=[course_a.id]),
+            {"text": "Explain", "marks": 5, "course_outcome_id": foreign_co.id}, format='json', **auth,
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

@@ -12,6 +12,12 @@ class SyllabusTopic(models.Model):
     name = models.CharField(max_length=255)
     order = models.PositiveIntegerField(default=0)
     description = models.TextField(blank=True)
+    # The ~95% case: a syllabus unit maps to one outcome. Question/ExamQuestion
+    # carry their own override for the remainder — see models/outcomes.py.
+    course_outcome = models.ForeignKey(
+        "campusflow_app.CourseOutcome", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="syllabus_topics",
+    )
 
     class Meta:
         db_table = "syllabus_topics"
@@ -44,6 +50,12 @@ class Question(models.Model):
     text = models.TextField()
     marks = models.DecimalField(max_digits=5, decimal_places=2)
     difficulty = models.CharField(max_length=10, choices=DIFFICULTY_CHOICES, default=DIFFICULTY_MEDIUM)
+    # Direct override of topic.course_outcome — for a question that spans two
+    # units but assesses one specific outcome.
+    course_outcome = models.ForeignKey(
+        "campusflow_app.CourseOutcome", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="questions",
+    )
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="questions_created")
     is_active = models.BooleanField(
         default=True,
@@ -95,6 +107,13 @@ class ExamQuestion(models.Model):
     question_text_snapshot = models.TextField()
     marks = models.DecimalField(max_digits=5, decimal_places=2)
     topic = models.ForeignKey(SyllabusTopic, on_delete=models.SET_NULL, null=True, blank=True, related_name="exam_questions")
+    # Direct override, same reasoning as Question.course_outcome. Resolution
+    # order at sync time (services/paper_sync.py) is this -> question's ->
+    # topic's -> untagged.
+    course_outcome = models.ForeignKey(
+        "campusflow_app.CourseOutcome", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="exam_questions",
+    )
     order = models.PositiveIntegerField(default=0)
 
     class Meta:

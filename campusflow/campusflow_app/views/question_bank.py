@@ -12,11 +12,17 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import Course, SyllabusTopic, Question
+from ..models.outcomes import CourseOutcome
 from ..permissions import IsFacultyOrAbove
 
 
 def _serialize_topic(t):
-    return {"id": t.id, "course_id": t.course_id, "name": t.name, "order": t.order, "description": t.description}
+    return {
+        "id": t.id, "course_id": t.course_id, "name": t.name, "order": t.order,
+        "description": t.description,
+        "course_outcome_id": t.course_outcome_id,
+        "course_outcome_code": t.course_outcome.code if t.course_outcome_id else None,
+    }
 
 
 def _serialize_question(q):
@@ -28,9 +34,23 @@ def _serialize_question(q):
         "text": q.text,
         "marks": float(q.marks),
         "difficulty": q.difficulty,
+        "course_outcome_id": q.course_outcome_id,
+        "course_outcome_code": q.course_outcome.code if q.course_outcome_id else None,
         "is_active": q.is_active,
         "created_at": q.created_at.isoformat(),
     }
+
+
+def _resolve_course_outcome(course, co_id):
+    """Returns (course_outcome_or_None, error_or_None). A CO must belong to
+    the same course it's being attached to — mirroring how topic_id is
+    already validated below."""
+    if not co_id:
+        return None, None
+    co = CourseOutcome.objects.filter(id=co_id, course=course).first()
+    if not co:
+        return None, "Invalid course_outcome_id for this course."
+    return co, None
 
 
 class SyllabusTopicListCreateView(APIView):
@@ -56,10 +76,15 @@ class SyllabusTopicListCreateView(APIView):
         if SyllabusTopic.objects.filter(course=course, name=name).exists():
             return Response({"error": "This topic already exists for this course."}, status=status.HTTP_400_BAD_REQUEST)
 
+        course_outcome, error = _resolve_course_outcome(course, request.data.get("course_outcome_id"))
+        if error:
+            return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
+
         topic = SyllabusTopic.objects.create(
             course=course, name=name,
             order=request.data.get("order", 0),
             description=request.data.get("description", ""),
+            course_outcome=course_outcome,
         )
         return Response(_serialize_topic(topic), status=status.HTTP_201_CREATED)
 
@@ -79,6 +104,11 @@ class SyllabusTopicDetailView(APIView):
         topic.name = request.data.get("name", topic.name)
         topic.order = request.data.get("order", topic.order)
         topic.description = request.data.get("description", topic.description)
+        if "course_outcome_id" in request.data:
+            course_outcome, error = _resolve_course_outcome(topic.course, request.data.get("course_outcome_id"))
+            if error:
+                return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
+            topic.course_outcome = course_outcome
         topic.save()
         return Response(_serialize_topic(topic), status=status.HTTP_200_OK)
 
@@ -131,9 +161,14 @@ class QuestionBankListCreateView(APIView):
         except (TypeError, ValueError):
             return Response({"error": "marks must be a number."}, status=status.HTTP_400_BAD_REQUEST)
 
+        course_outcome, error = _resolve_course_outcome(course, request.data.get("course_outcome_id"))
+        if error:
+            return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
+
         question = Question.objects.create(
             course=course, topic=topic, text=text, marks=marks,
             difficulty=request.data.get("difficulty", Question.DIFFICULTY_MEDIUM),
+            course_outcome=course_outcome,
             created_by=request.user,
         )
         return Response(_serialize_question(question), status=status.HTTP_201_CREATED)
@@ -163,6 +198,11 @@ class QuestionDetailView(APIView):
         if "topic_id" in request.data:
             topic_id = request.data["topic_id"]
             question.topic = SyllabusTopic.objects.filter(id=topic_id, course=question.course).first() if topic_id else None
+        if "course_outcome_id" in request.data:
+            course_outcome, error = _resolve_course_outcome(question.course, request.data.get("course_outcome_id"))
+            if error:
+                return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
+            question.course_outcome = course_outcome
         question.save()
         return Response(_serialize_question(question), status=status.HTTP_200_OK)
 

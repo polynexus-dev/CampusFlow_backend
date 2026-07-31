@@ -20,8 +20,9 @@ def validate_question_structure(value):
     Validates the optional per-question breakdown attached to an exam.
 
     Each entry must be either a plain number (legacy shape, e.g. {"Q1": 10})
-    or an object {"marks": <number>, "topic": <string, optional>}. Returns
-    an error string, or None if valid.
+    or an object {"marks": <number>, "topic": <string, optional>,
+    "course_outcome": <string, optional>}. Returns an error string, or None
+    if valid.
     """
     if not isinstance(value, dict):
         return "question_structure must be an object mapping question keys to marks."
@@ -35,6 +36,9 @@ def validate_question_structure(value):
                 return f"question_structure['{key}'].marks must be a number."
             if 'topic' in spec and spec['topic'] is not None and not isinstance(spec['topic'], str):
                 return f"question_structure['{key}'].topic must be a string."
+            if 'course_outcome' in spec and spec['course_outcome'] is not None \
+                    and not isinstance(spec['course_outcome'], str):
+                return f"question_structure['{key}'].course_outcome must be a string."
         else:
             try:
                 float(spec)

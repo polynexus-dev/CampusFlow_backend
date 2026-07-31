@@ -26,6 +26,7 @@ from .grading import (
     GradingScheme, GradeBand,
     CourseGradeAward, TermGradeSheet, StudentAcademicSummary,
 )
+from .outcomes import ProgramOutcome, CourseOutcome, POCOMapping
 
 # ── New Modules ──
 from .audit import AuditLog

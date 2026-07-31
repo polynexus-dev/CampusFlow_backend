@@ -68,6 +68,11 @@ from .views.question_bank import (
     SyllabusTopicListCreateView, SyllabusTopicDetailView,
     QuestionBankListCreateView, QuestionDetailView,
 )
+from .views.outcomes import (
+    ProgramOutcomeListCreateView, ProgramOutcomeDetailView,
+    CourseOutcomeListCreateView, CourseOutcomeDetailView,
+    POCOMappingListCreateView, POCOMappingDetailView,
+)
 from .views.academics import (
     AcademicYearListCreateView, AcademicYearDetailView,
     TermListCreateView, TermDetailView,
@@ -353,6 +358,14 @@ urlpatterns = [
     path('syllabus-topics/<int:pk>/', SyllabusTopicDetailView.as_view(), name='syllabus-topic-detail'),
     path('courses/<int:course_id>/questions/', QuestionBankListCreateView.as_view(), name='question-bank-list'),
     path('questions/<int:pk>/', QuestionDetailView.as_view(), name='question-bank-detail'),
+
+    # ── Outcome-Based Education: PO / CO / CO-PO Matrix ────────────────
+    path('academics/programs/<int:program_id>/outcomes/', ProgramOutcomeListCreateView.as_view(), name='program-outcome-list'),
+    path('academics/program-outcomes/<int:pk>/', ProgramOutcomeDetailView.as_view(), name='program-outcome-detail'),
+    path('courses/<int:course_id>/outcomes/', CourseOutcomeListCreateView.as_view(), name='course-outcome-list'),
+    path('course-outcomes/<int:pk>/', CourseOutcomeDetailView.as_view(), name='course-outcome-detail'),
+    path('course-outcomes/<int:course_outcome_id>/po-mappings/', POCOMappingListCreateView.as_view(), name='po-co-mapping-list'),
+    path('po-mappings/<int:pk>/', POCOMappingDetailView.as_view(), name='po-co-mapping-detail'),
 
     # ── Paper Setting from Syllabus ───────────────────────────────────
     path('exams/<int:pk>/blueprint/', PaperBlueprintView.as_view(), name='exam-paper-blueprint'),
