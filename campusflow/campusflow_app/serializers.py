@@ -46,6 +46,7 @@ from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
 from .models.result import StudentExamResult
 from .models.bus_tracking import BusRoute
+from .demo_guard import is_demo_tenant
 
 
 
@@ -595,13 +596,15 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                     profile_data['status'] = 'pending_guardian'
                     profile_data['guardian_consent_given'] = False
 
+        is_demo = is_demo_tenant() or connection.schema_name == 'demo'
+
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
             password=password,
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
-            is_active=False,  # Account needs activation via OTP
+            is_active=True if is_demo else False,  # Auto-activate for demo tenant, else OTP required
         )
 
         if role == 'student':

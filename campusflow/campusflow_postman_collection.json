@@ -428,6 +428,272 @@
               "body": "{\n  \"message\": \"Biometric reset request submitted to admin.\"\n}"
             }
           ]
+        },
+        {
+          "name": "Contact Enquiry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/contact/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contact"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Student Onboard Request O T P",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/student/onboard/request-otp/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "student",
+                "onboard",
+                "request-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@college.edu.in\",\n  \"otp\": \"123456\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Student Onboard Verify Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/student/onboard/verify-password/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "student",
+                "onboard",
+                "verify-password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"student@college.edu.in\",\n  \"password\": \"SecurePassword123!\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password Request O T P",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/forgot-password/request-otp/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "forgot-password",
+                "request-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@college.edu.in\",\n  \"otp\": \"123456\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password Verify O T P",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/forgot-password/verify-otp/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "forgot-password",
+                "verify-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@college.edu.in\",\n  \"otp\": \"123456\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password Reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/forgot-password/reset/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "forgot-password",
+                "reset"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@college.edu.in\",\n  \"password\": \"NewSecurePassword123!\",\n  \"password_confirm\": \"NewSecurePassword123!\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Request Biometric Reset List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/student/request-biometric-reset/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "student",
+                "request-biometric-reset"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -578,6 +844,133 @@
               "body": "{\n  \"id\": 2,\n  \"title\": \"Hostel Water Supply Maintenance\"\n}"
             }
           ]
+        },
+        {
+          "name": "Get Announcement Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/announcements/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Announcement",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/announcements/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Announcement",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/announcements/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -931,6 +1324,132 @@
               "body": "[\n  {\n    \"id\": 2,\n    \"start_date\": \"2026-06-01\",\n    \"end_date\": \"2026-06-02\",\n    \"status\": \"approved\"\n  }\n]"
             }
           ]
+        },
+        {
+          "name": "Update Leave Type",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave/types/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave",
+                "types",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Leave Type",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave/types/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave",
+                "types",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Leave Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave/balance/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave",
+                "balance"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -1533,6 +2052,170 @@
               "body": "[\n  {\n    \"id\": 1,\n    \"day_of_week\": \"Monday\",\n    \"start_time\": \"09:00:00\",\n    \"end_time\": \"10:00:00\",\n    \"course_name\": \"Linear Algebra\"\n  }\n]"
             }
           ]
+        },
+        {
+          "name": "Get Exam Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Exam",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Exam",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/exams/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "exams",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Schedule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/schedules/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "schedules"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -1682,6 +2365,142 @@
               "body": "[\n  {\n    \"department\": \"Computer Science\",\n    \"average_gpa\": \"3.45\",\n    \"attendance\": \"84.2%\"\n  }\n]"
             }
           ]
+        },
+        {
+          "name": "Get Leave Analytics List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/leave/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "leave"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Payroll Summary List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/payroll/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "payroll"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Student Progress List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/student-progress/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "student-progress"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Student Topic Performance List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/analytics/student-topic-performance/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "analytics",
+                "student-topic-performance"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -1940,6 +2759,133 @@
               "body": "{\n  \"message\": \"Submission graded successfully.\"\n}"
             }
           ]
+        },
+        {
+          "name": "Get Assignment Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/assignments/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assignments",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Assignment",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/assignments/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assignments",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Assignment",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/assignments/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assignments",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -2592,6 +3538,431 @@
               "body": "{\n  \"assigned_route\": \"North Route\",\n  \"passenger_count\": 28,\n  \"status\": \"active\"\n}"
             }
           ]
+        },
+        {
+          "name": "Update Bus Route",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/routes/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "routes",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Partial Update Bus Route",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/routes/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "routes",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Bus Route",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/routes/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "routes",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bus Subscription Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/subscriptions/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "subscriptions",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Bus Subscription",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/subscriptions/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "subscriptions",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Partial Update Bus Subscription",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/subscriptions/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "subscriptions",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Bus Subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/subscriptions/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "subscriptions",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bus Trip Start",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/driver/trip/start/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "driver",
+                "trip",
+                "start"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bus Trip End",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/driver/trip/end/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "driver",
+                "trip",
+                "end"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bus Driver Trip Stats List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bus/driver/trip-stats/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bus",
+                "driver",
+                "trip-stats"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -3455,6 +4826,128 @@
               "body": "{\n  \"allowed_modules\": [\n    \"attendance\",\n    \"bus_tracking\",\n    \"announcements\"\n  ]\n}"
             }
           ]
+        },
+        {
+          "name": "Tenant Subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tenant/subscriptions/:tenant_id/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenant",
+                "subscriptions",
+                ":tenant_id"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "1",
+                  "description": "The tenant_id parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Role Module Permission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tenant/module-permissions/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenant",
+                "module-permissions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Custom Roles",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tenant/roles/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenant",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -8738,6 +10231,522 @@
               "body": "{\n  \"total_count\": 1,\n  \"results\": [\n    {\n      \"id\": 2,\n      \"student_id\": \"XYZ123\",\n      \"contact_number\": \"+9198765\"\n    }\n  ]\n}"
             }
           ]
+        },
+        {
+          "name": "Partial Update Active Tenant Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tenant/settings/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenant",
+                "settings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Management User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/management/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "management",
+                "user"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete All Management User Profiles",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/management/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "management",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Administrator User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/administrator/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "administrator",
+                "user"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete All Administrator User Profiles",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/administrator/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "administrator",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Teaching Staff User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/teaching-staff/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "teaching-staff",
+                "user"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete All Teaching Staff User Profiles",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/teaching-staff/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "teaching-staff",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Department Head User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hod/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hod",
+                "user"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete All Department Head User Profiles",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hod/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hod",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Non Teaching Staff User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/support-staff/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support-staff",
+                "user"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete All Non Teaching Staff User Profiles",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/support-staff/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support-staff",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Student User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/student/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "student",
+                "user"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete All Student User Profiles",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/student/user/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "student",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Salary Structure",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payroll/structures/:user_id/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payroll",
+                "structures",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "1",
+                  "description": "The user_id parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -9087,6 +11096,154 @@
               "body": "{\n  \"id\": 2,\n  \"name\": \"Block B Lecture Hall 2\",\n  \"latitude\": 12.972,\n  \"longitude\": 77.595\n}"
             }
           ]
+        },
+        {
+          "name": "Delete All Departments",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/department/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Department",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/department/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Location",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/location/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "location"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete All Locations",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/location/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "location"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -9554,6 +11711,73 @@
               "body": "[\n  {\n    \"id\": 4,\n    \"lecture\": \"Chemistry\",\n    \"reason\": \"Sensor issue\",\n    \"status\": \"pending\"\n  }\n]"
             }
           ]
+        },
+        {
+          "name": "Get Liveness Challenge List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/liveness-challenge/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "liveness-challenge"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Check Attendance List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/check/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "check"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -10565,6 +12789,51 @@
               "body": "{\n  \"code\": \"D8F3\"\n}"
             }
           ]
+        },
+        {
+          "name": "Partial Update Lecture",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/lectures/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "lectures",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -10667,6 +12936,442 @@
               "body": "{\n  \"user_id\": 3,\n  \"permissions\": [\n    \"can_mark_attendance\",\n    \"can_grade_assignment\"\n  ]\n}"
             }
           ]
+        },
+        {
+          "name": "User Permissions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/college/user-permissions/:user_id/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "college",
+                "user-permissions",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "1",
+                  "description": "The user_id parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "21. SaaS Management",
+      "item": [
+        {
+          "name": "Get Tenant Create List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/create-college/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "create-college"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Tenant Create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/create-college/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "create-college"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tenant Detail Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/colleges/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "colleges",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Tenant Detail",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/colleges/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "colleges",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Partial Update Tenant Detail",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/colleges/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "colleges",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Tenant Detail",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/colleges/:pk/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "colleges",
+                ":pk"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Saa S Invoice List List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/invoices/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "invoices"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saa S Invoice Approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/invoices/:pk/approve/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "invoices",
+                ":pk",
+                "approve"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saa S Invoice Reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Tenant-Schema",
+                "value": "{{schema}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/saas/invoices/:pk/reject/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "saas",
+                "invoices",
+                ":pk",
+                "reject"
+              ],
+              "variable": [
+                {
+                  "key": "pk",
+                  "value": "1",
+                  "description": "The pk parameter"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "response": []
         }
       ]
     }

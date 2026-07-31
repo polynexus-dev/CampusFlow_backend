@@ -174,6 +174,19 @@ class StudentRegistrationView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         new_user = serializer.save()
 
+        is_demo = is_demo_tenant() or connection.schema_name == 'demo'
+        if is_demo:
+            return Response(
+                {
+                    "message": "Registration successful! Demo account auto-activated.",
+                    "username": new_user.username,
+                    "email": new_user.email,
+                    "role": "student",
+                    "auto_activated": True
+                },
+                status=status.HTTP_201_CREATED
+            )
+
         # ── Generate & Send Activation OTP ──
         otp_code = str(random.randint(100000, 999999))
         cache.set(f"otp_{new_user.email}", otp_code, timeout=600)

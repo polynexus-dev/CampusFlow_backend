@@ -4,10 +4,11 @@ import secrets
 import numpy as np
 from celery.exceptions import TimeoutError as CeleryTimeoutError
 from django.core.cache import cache
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from datetime import timedelta
+from ..demo_guard import is_demo_tenant
 from ..models.attendance_session import AttendanceSession
 from ..models.manual_attendance_request import ManualAttendanceRequest
 from rest_framework import generics, permissions, status
@@ -232,23 +233,26 @@ class MarkAttendanceView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # ── Validate active session window ─────────────────────────────────
-        session = AttendanceSession.objects.filter(lecture=lecture).first()
-        if not session or not session.is_active:
-            return Response(
-                {"error": "Attendance window is not active. Please wait for the lecturer to start the attendance period."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # ── Validate active session window (Bypassed for Demo Tenant) ───────
+        is_demo = is_demo_tenant() or connection.schema_name == 'demo'
 
-        elapsed = timezone.now() - session.started_at
-        limit = timedelta(minutes=session.duration_minutes)
-        if elapsed > limit:
-            session.is_active = False
-            session.save()
-            return Response(
-                {"error": "Attendance window has expired. Please request manual attendance from the lecturer."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if not is_demo:
+            session = AttendanceSession.objects.filter(lecture=lecture).first()
+            if not session or not session.is_active:
+                return Response(
+                    {"error": "Attendance window is not active. Please wait for the lecturer to start the attendance period."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            elapsed = timezone.now() - session.started_at
+            limit = timedelta(minutes=session.duration_minutes)
+            if elapsed > limit:
+                session.is_active = False
+                session.save()
+                return Response(
+                    {"error": "Attendance window has expired. Please request manual attendance from the lecturer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # ── Check for duplicate attendance ─────────────────────────────────
         if Attendance.objects.filter(user=request.user, lecture=lecture).exists():
