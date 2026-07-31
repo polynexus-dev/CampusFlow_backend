@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from ..models.result import StudentExamResult
 from ..models.exam import Exam
+from ..models.offerings import CourseOffering, StudentCourseRegistration
 from ..models.profile import StudentProfile
 from ..serializers import StudentExamResultSerializer
 from ..permissions import IsFacultyOrAbove, get_user_group
@@ -52,6 +53,13 @@ class ExamClassStatsView(APIView):
     GET /api/exams/<id>/class-stats/
     Live entered-count / class-average / below-40% stats for the marks
     entry screen — computed from whatever's entered so far, published or not.
+
+    total_students_in_department is the original, department-wide count — its
+    name is part of the response contract, so it is kept exactly as it was.
+    enrolled_count is the actual course roster size, additive alongside it:
+    null when no CourseOffering exists yet for this exam's (course, term),
+    since "the roster isn't tracked" and "the roster is zero" are different
+    facts a marks-entry screen needs to tell apart.
     """
     permission_classes = [IsAuthenticated, IsFacultyOrAbove]
 
@@ -65,6 +73,16 @@ class ExamClassStatsView(APIView):
         total_students = StudentProfile.objects.filter(department=exam.department).count()
         entered_count = results.count()
 
+        enrolled_count = None
+        if exam.term_id:
+            offering_ids = CourseOffering.objects.filter(
+                course_id=exam.course_id, term_id=exam.term_id,
+            ).values_list("id", flat=True)
+            if offering_ids:
+                enrolled_count = StudentCourseRegistration.objects.filter(
+                    offering_id__in=offering_ids, status=StudentCourseRegistration.STATUS_REGISTERED,
+                ).count()
+
         marks = [float(r.marks_obtained) for r in results]
         class_average = round(sum(marks) / len(marks), 2) if marks else 0.0
 
@@ -75,6 +93,7 @@ class ExamClassStatsView(APIView):
             "exam_id": exam.id,
             "entered_count": entered_count,
             "total_students_in_department": total_students,
+            "enrolled_count": enrolled_count,
             "class_average": class_average,
             "below_40_count": len(below_40),
             "below_40_students": [

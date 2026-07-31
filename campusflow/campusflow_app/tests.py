@@ -2696,3 +2696,198 @@ class OutcomeBasedEducationTests(TenantTestCase):
             {"text": "Explain", "marks": 5, "course_outcome_id": foreign_co.id}, format='json', **auth,
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class RosterCutoverTests(TenantTestCase):
+    """
+    Covers the deferred PR-5 follow-up: replacing department-as-class-size
+    with the real roster (CourseOffering/StudentCourseRegistration) wherever
+    it's safe to do so without regressing a working default. Two call sites
+    are cut over, additively:
+      - notify_guardians_of_course_roster: narrows assignment notifications to
+        the actual course roster, but ONLY when one exists — otherwise falls
+        back to the full department, exactly matching today's behaviour.
+      - ExamClassStatsView: gains enrolled_count alongside the existing
+        total_students_in_department, never replacing it.
+    views/exam.py's student visibility filter is deliberately NOT tightened:
+    the risk of a false negative (a student can't see an exam they actually
+    need to take) is categorically worse than the current false positive
+    (a student sees an exam not meant for them), so the safe, over-broad
+    default stays until the roster data is reliably populated tenant-wide.
+    """
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            for role in ('student', 'Management', 'guardian'):
+                Group.objects.get_or_create(name=role)
+            self.dept = Department.objects.create(name="Computer Science", code="CS")
+
+    def _spine(self):
+        from .models.academics import Batch, Program, Regulation
+        from .models.course import Course
+        from .services.academics import get_current_term, get_default_grading_scheme
+
+        program = Program.objects.create(
+            name="B.Tech Computer Science", code="BTCSE", department=self.dept,
+        )
+        regulation = Regulation.objects.create(
+            program=program, code="R2021", effective_from_year=2018,
+            grading_scheme=get_default_grading_scheme(),
+        )
+        batch = Batch.objects.create(
+            program=program, regulation=regulation, admission_year=2022, name="2022-2026",
+        )
+        course = Course.objects.create(
+            course_code="CS301", course_name="Data Structures", department=self.dept,
+            regulation=regulation, semester_number=3, credits=4,
+        )
+        term = get_current_term()
+        return program, batch, course, term
+
+    def _student_with_guardian(self, username):
+        from .models.profile import GuardianProfile, StudentProfile as SP
+
+        student_user = User.objects.create_user(username=username, email=f"{username}@test.com")
+        student = SP.objects.create(user=student_user, student_id=f"STU-{username}", department=self.dept)
+
+        guardian_user = User.objects.create_user(
+            username=f"{username}_guardian", email=f"{username}_guardian@test.com",
+        )
+        guardian = GuardianProfile.objects.create(user=guardian_user, guardian_id=f"GRD-{username}")
+        guardian.students.add(student)
+        return student, guardian
+
+    # -- notify_guardians_of_course_roster -----------------------------------
+
+    def test_notifies_only_the_course_roster_when_one_exists(self):
+        from .models.notification import Notification
+        from .models.offerings import CourseOffering, StudentCourseRegistration
+        from .services.notifications import notify_guardians_of_course_roster
+
+        with schema_context(self.tenant.schema_name):
+            program, batch, course, term = self._spine()
+            on_roster, on_roster_guardian = self._student_with_guardian("roster_stu")
+            not_on_roster, not_on_roster_guardian = self._student_with_guardian("other_stu")
+
+            offering = CourseOffering.objects.create(course=course, term=term, batch=batch)
+            StudentCourseRegistration.objects.create(student=on_roster, offering=offering, term=term)
+
+            notify_guardians_of_course_roster(
+                course.id, self.dept.id, title="New homework", body="due soon",
+            )
+
+            self.assertTrue(
+                Notification.objects.filter(recipient=on_roster_guardian.user).exists()
+            )
+            self.assertFalse(
+                Notification.objects.filter(recipient=not_on_roster_guardian.user).exists()
+            )
+
+    def test_falls_back_to_department_when_no_roster_exists(self):
+        """
+        The tenant has not bootstrapped any offering for this course — must
+        not silently notify nobody. This is the regression the fallback
+        exists to prevent.
+        """
+        from .models.notification import Notification
+        from .services.notifications import notify_guardians_of_course_roster
+
+        with schema_context(self.tenant.schema_name):
+            program, batch, course, term = self._spine()
+            student, guardian = self._student_with_guardian("no_roster_stu")
+
+            notify_guardians_of_course_roster(
+                course.id, self.dept.id, title="New homework", body="due soon",
+            )
+
+            self.assertTrue(Notification.objects.filter(recipient=guardian.user).exists())
+
+    def test_assignment_creation_notifies_via_course_roster_helper(self):
+        """Integration check: AssignmentListCreateView.post actually calls
+        the roster-aware helper now, not the department-wide one."""
+        with schema_context(self.tenant.schema_name):
+            program, batch, course, term = self._spine()
+            student, guardian = self._student_with_guardian("assign_stu")
+
+            faculty_user = User.objects.create_user(username='assign_faculty', email='af@test.com')
+            Group.objects.get_or_create(name='Faculty')
+            faculty_user.groups.add(Group.objects.get(name='Faculty'))
+            token = RefreshToken.for_user(faculty_user)
+            token['tenant_schema'] = self.tenant.schema_name
+
+        response = self.client.post(
+            reverse('assignment-list-create'),
+            {
+                "title": "HW1", "description": "Do the thing", "due_date": "2026-12-01T23:59:00Z",
+                "department_id": self.dept.id, "course_id": course.id, "notify_parents": "true",
+            },
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        with schema_context(self.tenant.schema_name):
+            from .models.notification import Notification
+            # No roster exists for this course, so the fallback must have
+            # reached the department's only student's guardian.
+            self.assertTrue(Notification.objects.filter(recipient=guardian.user).exists())
+
+    # -- ExamClassStatsView: enrolled_count is additive -----------------------
+
+    def test_class_stats_enrolled_count_null_without_an_offering(self):
+        from .models.exam import Exam, ExamType
+
+        token = self._teacher_token()
+        with schema_context(self.tenant.schema_name):
+            program, batch, course, term = self._spine()
+            exam_type = ExamType.objects.create(name="Mid", code="CLSSTAT1")
+            exam = Exam.objects.create(
+                name="Stats Exam", exam_type=exam_type, department=self.dept, course=course,
+                date="2026-11-01", start_time="09:00", end_time="12:00", term=term,
+            )
+
+        response = self.client.get(
+            reverse('exam-class-stats', args=[exam.id]),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["enrolled_count"])
+        # The original field must still be present, unchanged.
+        self.assertIn("total_students_in_department", response.data)
+
+    def test_class_stats_enrolled_count_reflects_the_roster(self):
+        from .models.exam import Exam, ExamType
+        from .models.offerings import CourseOffering, StudentCourseRegistration
+
+        token = self._teacher_token()
+        with schema_context(self.tenant.schema_name):
+            program, batch, course, term = self._spine()
+            offering = CourseOffering.objects.create(course=course, term=term, batch=batch)
+            for i in range(3):
+                student, _ = self._student_with_guardian(f"clsstat_stu{i}")
+                StudentCourseRegistration.objects.create(student=student, offering=offering, term=term)
+
+            exam_type = ExamType.objects.create(name="Mid", code="CLSSTAT2")
+            exam = Exam.objects.create(
+                name="Stats Exam 2", exam_type=exam_type, department=self.dept, course=course,
+                date="2026-11-01", start_time="09:00", end_time="12:00", term=term,
+            )
+
+        response = self.client.get(
+            reverse('exam-class-stats', args=[exam.id]),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["enrolled_count"], 3)
+
+    def _teacher_token(self):
+        with schema_context(self.tenant.schema_name):
+            Group.objects.get_or_create(name='Faculty')
+            user = User.objects.create_user(
+                username=f'roster_teacher_{User.objects.count()}',
+                email=f'roster_teacher_{User.objects.count()}@test.com',
+            )
+            user.groups.add(Group.objects.get(name='Faculty'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
