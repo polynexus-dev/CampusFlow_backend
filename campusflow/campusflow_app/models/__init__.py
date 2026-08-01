@@ -49,5 +49,8 @@ from .inventory import InventoryCategory, InventoryItem, Supplier, InventoryTran
 from .valuation import ValuationSession, ScannedPaper
 from .result import StudentExamResult
 
+# ── Compliance & Accreditation ──
+from .compliance import ComplianceCertificateType, ComplianceCertificate
+
 
 

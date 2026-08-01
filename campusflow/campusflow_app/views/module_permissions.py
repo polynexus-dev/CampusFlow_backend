@@ -13,7 +13,8 @@ ALL_ERP_MODULES = [
     "management", "administrator", "department", "room", "staff",
     "student", "attendance", "schedule", "leave", "payroll",
     "exams", "analytics", "announcements", "audit-logs", "assignments",
-    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation"
+    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation",
+    "compliance-center"
 ]
 
 ROLE_DEFAULT_MODULES = {
@@ -131,7 +132,8 @@ class RoleModulePermissionView(APIView):
         subscribed_lower_map = {m.lower().replace(" ", "-"): m for m in subscribed}
         PREMIUM_MODULES = {
             "attendance", "leave", "payroll", "exams", "assignments",
-            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements"
+            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
+            "compliance-center"
         }
 
         for role in roles:
@@ -190,7 +192,8 @@ class RoleModulePermissionView(APIView):
         
         PREMIUM_MODULES = {
             "attendance", "leave", "payroll", "exams", "assignments",
-            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements"
+            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
+            "compliance-center"
         }
         
         # Get existing permission object
@@ -269,7 +272,8 @@ class MyAllowedModulesView(APIView):
         
         PREMIUM_MODULES = {
             "attendance", "leave", "payroll", "exams", "assignments",
-            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements"
+            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
+            "compliance-center"
         }
         
         final_modules = []

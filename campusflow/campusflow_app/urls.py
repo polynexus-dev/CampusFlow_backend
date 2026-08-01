@@ -83,6 +83,7 @@ from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
 from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from .views.valuation import ValuationSessionViewSet, ScannedPaperViewSet
 from .views.result import StudentExamResultViewSet
+from .views.compliance import ComplianceCertificateTypeViewSet, ComplianceCertificateViewSet
 from .views.progress import StudentProgressView, StudentTopicPerformanceView
 from .views.contact import ContactEnquiryView
 
@@ -334,6 +335,12 @@ urlpatterns = [
     # Student Exam Results
     path('exam-results/', StudentExamResultViewSet.as_view({'get': 'list', 'post': 'create'}), name='studentexamresult-list'),
     path('exam-results/<int:pk>/', StudentExamResultViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='studentexamresult-detail'),
+
+    # Compliance & Accreditation — Certificate & License Vault
+    path('compliance-certificate-types/', ComplianceCertificateTypeViewSet.as_view({'get': 'list', 'post': 'create'}), name='compliancecertificatetype-list'),
+    path('compliance-certificate-types/<int:pk>/', ComplianceCertificateTypeViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='compliancecertificatetype-detail'),
+    path('compliance-certificates/', ComplianceCertificateViewSet.as_view({'get': 'list', 'post': 'create'}), name='compliancecertificate-list'),
+    path('compliance-certificates/<int:pk>/', ComplianceCertificateViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='compliancecertificate-detail'),
 
 ]
 

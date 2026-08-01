@@ -45,6 +45,7 @@ from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
 from .models.result import StudentExamResult
 from .models.bus_tracking import BusRoute
+from .models.compliance import ComplianceCertificateType, ComplianceCertificate
 from .demo_guard import is_demo_tenant
 
 
@@ -984,5 +985,28 @@ class StudentExamResultSerializer(serializers.ModelSerializer):
         if exam and marks is not None and marks > exam.total_marks:
             raise serializers.ValidationError("Marks obtained cannot exceed exam total marks.")
         return attrs
+
+
+# ── Compliance & Accreditation Serializers ──
+class ComplianceCertificateTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ComplianceCertificateType
+        fields = '__all__'
+
+
+class ComplianceCertificateSerializer(serializers.ModelSerializer):
+    certificate_type_name = serializers.CharField(source='certificate_type.name', read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField()
+    status = serializers.ReadOnlyField()
+
+    class Meta:
+        model = ComplianceCertificate
+        fields = '__all__'
+        read_only_fields = ('uploaded_by',)
+
+    def get_uploaded_by_name(self, obj):
+        if not obj.uploaded_by:
+            return None
+        return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
 
 
