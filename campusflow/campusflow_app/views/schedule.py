@@ -3,10 +3,13 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
+from django.utils import timezone
 
 from ..models.schedule import Schedule
+from ..models.lecture import Lecture
+from ..models.attendance import Attendance
 from ..serializers import ScheduleSerializer
-from ..permissions import get_user_group, is_saas_admin
+from ..permissions import get_user_group, is_saas_admin, IsFacultyOrAbove
 from ..utils.tenant_utils import ensure_tenant_schema
 
 
@@ -91,3 +94,37 @@ class ScheduleListView(APIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TeacherTodayScheduleView(APIView):
+    """
+    GET /api/schedule/today/
+    The requesting faculty member's Lectures scheduled for today, with an
+    attendance-marked count so the Teacher App's timetable screen can show
+    "attendance pending" the way the design does.
+    """
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+
+    def get(self, request):
+        ensure_tenant_schema(request)
+
+        today = timezone.localdate()
+        lectures = Lecture.objects.filter(
+            faculty=request.user, start_time__date=today
+        ).select_related("classroom").order_by("start_time")
+
+        periods = []
+        for lecture in lectures:
+            marked_count = Attendance.objects.filter(lecture=lecture).count()
+            periods.append({
+                "id": lecture.id,
+                "name": lecture.name,
+                "subject": lecture.subject,
+                "classroom": lecture.classroom.name if lecture.classroom else None,
+                "start_time": lecture.start_time.isoformat(),
+                "end_time": lecture.end_time.isoformat(),
+                "attendance_marked_count": marked_count,
+                "attendance_pending": marked_count == 0,
+            })
+
+        return Response({"date": today.isoformat(), "periods": periods}, status=status.HTTP_200_OK)

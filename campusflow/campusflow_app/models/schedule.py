@@ -18,6 +18,14 @@ class Schedule(models.Model):
     end_time = models.TimeField()
     semester = models.CharField(max_length=50)
     academic_year = models.CharField(max_length=9) # e.g., "2024-2025"
+    # Structured replacement for the two free-text fields above. Added ahead of
+    # the code that reads it so this busy table needs only one migration, not two.
+    # Nothing reads `term` yet; the strings remain authoritative until backfilled.
+    term = models.ForeignKey(
+        "campusflow_app.Term", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="schedules",
+        help_text="Academic term this schedule belongs to. Supersedes semester/academic_year.",
+    )
     substitute_faculty = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                        related_name='substituted_classes',
                                        help_text="The faculty currently assigned if different from original scheduled faculty.")

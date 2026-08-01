@@ -26,6 +26,10 @@ class Attendance(models.Model):
         default='face_geofence',
         help_text="The method used to verify attendance."
     )
+    is_half_day = models.BooleanField(
+        default=False,
+        help_text="True if this record was approved as a half-day via an attendance correction request.",
+    )
 
     class Meta:
         verbose_name = "Attendance"

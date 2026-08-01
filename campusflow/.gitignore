@@ -166,9 +166,22 @@ models/insightface/
 # Staged monthly face-template fine-tune candidates (raw biometric embeddings)
 fine_tuned_embeddings/
 
-# Django Migrations
-**/migrations/*.py
-!**/migrations/__init__.py
+# Uploaded bank receipts. These are tenant user uploads written at runtime —
+# the billing cron test generates them too, so they accumulate on every test
+# run. NOTE: 7 of these were already tracked before this rule was added and
+# are still in the index; they should be untracked separately.
+billing_receipts/*.pdf
+
+# Django migrations are deliberately TRACKED. They are the only reproducible
+# record of the database schema, and every tenant schema is migrated from them.
+# Ignoring them made rollback, review and reproducing a schema impossible, and
+# left migrate_sync.py deleting files it could not find in the image snapshot.
+
+# Source archives — build/backup artifacts, not source
+*.zip
+*.rar
+*.tar
+*.tar.gz
 
 # User Manual / Pilot Docs
 Docs/

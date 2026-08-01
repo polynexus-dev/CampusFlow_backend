@@ -24,6 +24,19 @@ class Tenant(TenantMixin):
                    "can't be broken or hijacked."
     )
     timezone = models.CharField(max_length=100, default='Asia/Kolkata', help_text="e.g. Asia/Kolkata")
+    
+    TENANT_TYPE_COLLEGE = 'college'
+    TENANT_TYPE_SCHOOL = 'school'
+    TENANT_TYPE_CHOICES = [
+        (TENANT_TYPE_COLLEGE, 'College'),
+        (TENANT_TYPE_SCHOOL, 'School'),
+    ]
+    tenant_type = models.CharField(
+        max_length=20,
+        choices=TENANT_TYPE_CHOICES,
+        default=TENANT_TYPE_COLLEGE,
+        help_text="The type of institution: College or School"
+    )
     subscribed_modules = models.JSONField(
         default=list,
         blank=True,

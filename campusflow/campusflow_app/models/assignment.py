@@ -26,6 +26,10 @@ class Assignment(models.Model):
         upload_to='assignments/attachments/', null=True, blank=True,
         help_text="Optional instruction document or template."
     )
+    notify_parents = models.BooleanField(
+        default=False,
+        help_text="If true, a notification is sent to the guardians of every student in this assignment's department when created.",
+    )
     created_by = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='assignments_created',
         help_text="Faculty member who posted this assignment."

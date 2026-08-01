@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from ..models.outcomes import CourseOutcome
 from ..models.result import StudentExamResult
 from ..models.submission import AssignmentSubmission
 from ..models.valuation import ScannedPaper
@@ -171,11 +172,16 @@ class StudentTopicPerformanceView(APIView):
     GET: Topic/skill-level strengths & weaknesses for a single student,
     derived from question-wise marks captured during blind valuation
     (ScannedPaper.question_scores) matched against each exam's
-    question_structure (which optionally tags a question with a topic).
+    question_structure (which optionally tags a question with a topic and,
+    since the outcomes PR, a course outcome — see services/paper_sync.py).
 
-    Only questions tagged with a topic contribute — untagged/legacy
-    questions are counted separately so the response is honest about how
-    much of the student's grading data actually has topic coverage.
+    Only questions tagged with a topic contribute to `topics` — untagged/
+    legacy questions are counted separately so the response is honest about
+    how much of the student's grading data actually has topic coverage. The
+    same loop, unchanged, also accumulates by course outcome into
+    `course_outcomes`: this is the generalisation the CO-attainment engine
+    needed, arrived at by adding one grouping key to an existing pass over
+    the data rather than writing a second one.
     """
     permission_classes = [IsAuthenticated]
 
@@ -191,6 +197,10 @@ class StudentTopicPerformanceView(APIView):
         )
 
         topics = {}
+        # Keyed by (course_id, co_code): a CO code is only unique within its
+        # course (models/outcomes.py), so "CO1" in one course and "CO1" in
+        # another must not be accumulated together.
+        course_outcomes = {}
         untagged_marks_excluded = 0
         exams_considered = 0
 
@@ -217,9 +227,11 @@ class StudentTopicPerformanceView(APIView):
 
                 if isinstance(spec, dict):
                     topic = spec.get('topic')
+                    co_code = spec.get('course_outcome')
                     max_marks = spec.get('marks')
                 else:
                     topic = None
+                    co_code = None
                     max_marks = spec
 
                 # An explicit max_marks captured alongside the score itself
@@ -232,21 +244,40 @@ class StudentTopicPerformanceView(APIView):
                 except (TypeError, ValueError):
                     continue
 
+                # Topic and course-outcome tagging are independent — a
+                # question missing one may still carry the other, so neither
+                # check may gate the other's accumulation (an earlier draft
+                # of this loop had a `continue` here that would have silently
+                # dropped CO-only-tagged questions from course_outcomes).
                 if not topic:
                     untagged_marks_excluded += obtained
-                    continue
+                else:
+                    entry = topics.setdefault(topic, {
+                        "topic": topic,
+                        "obtained": 0.0,
+                        "max_marks": 0.0,
+                        "question_count": 0,
+                        "exam_ids": set(),
+                    })
+                    entry["obtained"] += obtained
+                    entry["max_marks"] += max_marks
+                    entry["question_count"] += 1
+                    entry["exam_ids"].add(paper.session.exam_id)
 
-                entry = topics.setdefault(topic, {
-                    "topic": topic,
-                    "obtained": 0.0,
-                    "max_marks": 0.0,
-                    "question_count": 0,
-                    "exam_ids": set(),
-                })
-                entry["obtained"] += obtained
-                entry["max_marks"] += max_marks
-                entry["question_count"] += 1
-                entry["exam_ids"].add(paper.session.exam_id)
+                if co_code:
+                    co_key = (paper.session.exam.course_id, co_code)
+                    co_entry = course_outcomes.setdefault(co_key, {
+                        "course_id": paper.session.exam.course_id,
+                        "code": co_code,
+                        "obtained": 0.0,
+                        "max_marks": 0.0,
+                        "question_count": 0,
+                        "exam_ids": set(),
+                    })
+                    co_entry["obtained"] += obtained
+                    co_entry["max_marks"] += max_marks
+                    co_entry["question_count"] += 1
+                    co_entry["exam_ids"].add(paper.session.exam_id)
 
         topic_list = [
             {
@@ -262,12 +293,47 @@ class StudentTopicPerformanceView(APIView):
         ]
         topic_list.sort(key=lambda t: t["percentage"], reverse=True)
 
+        # CO definitions are looked up once, in bulk, across every course
+        # touched by this student's papers — not per-question inside the loop
+        # above, which would turn this into an N+1 over the same handful of
+        # courses.
+        co_course_ids = {c["course_id"] for c in course_outcomes.values()}
+        co_definitions = {
+            (co.course_id, co.code): co
+            for co in CourseOutcome.objects.filter(course_id__in=co_course_ids)
+        } if co_course_ids else {}
+
+        course_outcome_list = []
+        for c in course_outcomes.values():
+            if not c["max_marks"]:
+                continue
+            percentage = round((c["obtained"] / c["max_marks"]) * 100, 2)
+            definition = co_definitions.get((c["course_id"], c["code"]))
+            course_outcome_list.append({
+                "course_id": c["course_id"],
+                "code": c["code"],
+                "statement": definition.statement if definition else None,
+                "percentage": percentage,
+                "obtained": c["obtained"],
+                "max_marks": c["max_marks"],
+                "question_count": c["question_count"],
+                "exam_count": len(c["exam_ids"]),
+                "target_attainment_percent": (
+                    float(definition.target_attainment_percent) if definition else None
+                ),
+                "meets_target": (
+                    percentage >= float(definition.target_attainment_percent) if definition else None
+                ),
+            })
+        course_outcome_list.sort(key=lambda c: c["percentage"], reverse=True)
+
         return Response({
             "student_id": profile.student_id,
             "student_name": profile.user.get_full_name() or profile.user.username,
             "topics": topic_list,
             "strengths": topic_list[:3],
             "areas_to_improve": sorted(topic_list, key=lambda t: t["percentage"])[:3],
+            "course_outcomes": course_outcome_list,
             "exams_considered": exams_considered,
             "untagged_marks_excluded": untagged_marks_excluded,
         }, status=status.HTTP_200_OK)

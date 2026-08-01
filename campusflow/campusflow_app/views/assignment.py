@@ -1,3 +1,4 @@
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -9,6 +10,7 @@ from ..models.course import Course
 from ..permissions import IsFacultyOrAbove, get_user_group, is_college_admin
 from ..utils.tenant_utils import ensure_tenant_schema
 from ..utils.file_validation import validate_attachment
+from ..services.notifications import notify_guardians_of_course_roster
 
 class AssignmentListCreateView(APIView):
     """
@@ -65,13 +67,25 @@ class AssignmentListCreateView(APIView):
 
         title = request.data.get('title', '').strip()
         description = request.data.get('description', '').strip()
-        due_date = request.data.get('due_date')
+        due_date_raw = request.data.get('due_date')
         dept_id = request.data.get('department_id')
         course_id = request.data.get('course_id')
         attachment = request.FILES.get('attachment')
+        notify_parents = str(request.data.get('notify_parents', False)).lower() in ('true', '1')
 
-        if not title or not description or not due_date or not dept_id or not course_id:
+        if not title or not description or not due_date_raw or not dept_id or not course_id:
             return Response({"error": "title, description, due_date, department_id, and course_id are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # This view is multipart/form-only (parser_classes below), so
+        # due_date always arrives as a raw string — DateTimeField does not
+        # parse it until the DB round-trip on save(), leaving the in-memory
+        # value a plain string in the meantime. assignment.due_date.strftime()
+        # a few lines down would otherwise crash on every notify_parents=True
+        # request (AttributeError: 'str' object has no attribute 'strftime').
+        due_date = parse_datetime(due_date_raw)
+        if due_date is None:
+            return Response({"error": "due_date must be a valid ISO-8601 datetime."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         attachment_error = validate_attachment(attachment)
         if attachment_error:
@@ -90,8 +104,18 @@ class AssignmentListCreateView(APIView):
             course=course,
             due_date=due_date,
             attachment=attachment,
+            notify_parents=notify_parents,
             created_by=request.user
         )
+
+        if notify_parents:
+            notify_guardians_of_course_roster(
+                course.id, dept.id,
+                title=f"New homework: {title}",
+                body=f"{course.course_name} · due {assignment.due_date.strftime('%Y-%m-%d %H:%M')}",
+                category="homework",
+                data={"assignment_id": assignment.id},
+            )
 
         return Response({
             "message": "Assignment created successfully.",

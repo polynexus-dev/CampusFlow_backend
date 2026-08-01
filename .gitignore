@@ -1,0 +1,18 @@
+# Repo-root ignores. The main ignore file is campusflow/.gitignore, which only
+# covers paths inside campusflow/ — these patterns catch artifacts dropped at
+# the repository root.
+
+# Source/backup archives. campusflow.zip here is 1.1 GB; committing an archive
+# of the repo into the repo is unrecoverable without a history rewrite.
+*.zip
+*.rar
+*.tar
+*.tar.gz
+*.7z
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/

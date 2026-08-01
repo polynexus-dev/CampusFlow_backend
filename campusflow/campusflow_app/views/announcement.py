@@ -16,6 +16,7 @@ from ..permissions import (
     IsCollegeAdmin, IsFacultyOrAbove,
     get_user_group, is_saas_admin, is_college_admin
 )
+from ..services.notifications import notify_guardians_of_department
 
 
 class AnnouncementListCreateView(APIView):
@@ -83,6 +84,7 @@ class AnnouncementListCreateView(APIView):
         target_dept_ids = request.data.get('target_departments', [])
         is_pinned = request.data.get('is_pinned', False)
         expires_at = request.data.get('expires_at', None)
+        notify_parents = str(request.data.get('notify_parents', False)).lower() in ('true', '1')
 
         if not title or not content:
             return Response(
@@ -98,12 +100,23 @@ class AnnouncementListCreateView(APIView):
             target_roles=target_roles,
             is_pinned=is_pinned,
             expires_at=expires_at,
+            notify_parents=notify_parents,
         )
 
         if target_dept_ids:
             from ..models.department import Department
             departments = Department.objects.filter(id__in=target_dept_ids)
             announcement.target_departments.set(departments)
+
+        if notify_parents:
+            for dept_id in announcement.target_departments.values_list('id', flat=True):
+                notify_guardians_of_department(
+                    dept_id,
+                    title=f"Announcement: {title}",
+                    body=content,
+                    category="announcement",
+                    data={"announcement_id": announcement.id},
+                )
 
         return Response(
             {"message": "Announcement created successfully.", "id": announcement.id},
