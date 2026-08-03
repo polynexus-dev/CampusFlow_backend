@@ -46,7 +46,15 @@ from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
 from .models.result import StudentExamResult
 from .models.bus_tracking import BusRoute
-from .models.compliance import ComplianceCertificateType, ComplianceCertificate
+from .models.compliance import (
+    ComplianceCertificateType, ComplianceCertificate,
+    AccreditationCriterion, EvidenceItem,
+)
+from .models.finance import (
+    FinancialYear, IncomeCategory, IncomeEntry, ExpenseCategory, ExpenseEntry, FixedAsset,
+)
+from .models.audit_portal import AuditorProfile, AuditEngagement, AuditorAccessLog
+from .models.scholarship import StateScholarshipScheme, StudentScholarshipRecord
 from .demo_guard import is_demo_tenant
 
 
@@ -219,7 +227,9 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 profile_data = DepartmentHeadProfile.objects.filter(user=user).first()
             elif user_group.name == 'guardian':
                 profile_data = GuardianProfile.objects.filter(user=user).first()
-    
+            elif user_group.name == 'CA':
+                profile_data = AuditorProfile.objects.filter(user=user).first()
+
             if not profile_data:
                 raise serializers.ValidationError(
                     f"User '{username}' with role '{user_group.name}' does not have an associated profile.",
@@ -1021,5 +1031,187 @@ class ComplianceCertificateSerializer(serializers.ModelSerializer):
         if not obj.uploaded_by:
             return None
         return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+
+
+class AccreditationCriterionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AccreditationCriterion
+        fields = '__all__'
+
+
+class EvidenceItemSerializer(serializers.ModelSerializer):
+    criterion_code = serializers.CharField(source='criterion.code', read_only=True)
+    criterion_title = serializers.CharField(source='criterion.title', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True, default=None)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField()
+    signed_off_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EvidenceItem
+        fields = '__all__'
+        read_only_fields = ('uploaded_by', 'status', 'submitted_at', 'signed_off_by', 'signed_off_at')
+
+    def get_uploaded_by_name(self, obj):
+        return obj.uploaded_by.get_full_name() or obj.uploaded_by.username if obj.uploaded_by else None
+
+    def get_signed_off_by_name(self, obj):
+        return obj.signed_off_by.get_full_name() or obj.signed_off_by.username if obj.signed_off_by else None
+
+
+# ── Financial Year & Ledger Serializers ──
+class FinancialYearSerializer(serializers.ModelSerializer):
+    opening_balance = serializers.ReadOnlyField()
+    total_receipts = serializers.SerializerMethodField()
+    total_payments = serializers.SerializerMethodField()
+    closing_balance = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FinancialYear
+        fields = '__all__'
+        read_only_fields = ('is_locked', 'locked_at', 'locked_by')
+
+    def get_total_receipts(self, obj):
+        return obj.total_receipts()
+
+    def get_total_payments(self, obj):
+        return obj.total_payments()
+
+    def get_closing_balance(self, obj):
+        return obj.closing_balance()
+
+
+class IncomeCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IncomeCategory
+        fields = '__all__'
+
+
+class IncomeEntrySerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IncomeEntry
+        fields = '__all__'
+        read_only_fields = ('recorded_by',)
+
+    def get_recorded_by_name(self, obj):
+        return obj.recorded_by.get_full_name() or obj.recorded_by.username if obj.recorded_by else None
+
+    def validate_financial_year(self, value):
+        if value.is_locked:
+            raise serializers.ValidationError(f"Financial year {value.label} is locked — closed years are append-only.")
+        return value
+
+
+class ExpenseCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpenseCategory
+        fields = '__all__'
+
+
+class ExpenseEntrySerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True, default=None)
+    vendor_name = serializers.CharField(source='vendor.name', read_only=True, default=None)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ExpenseEntry
+        fields = '__all__'
+        read_only_fields = ('recorded_by',)
+
+    def get_recorded_by_name(self, obj):
+        return obj.recorded_by.get_full_name() or obj.recorded_by.username if obj.recorded_by else None
+
+    def validate_financial_year(self, value):
+        if value.is_locked:
+            raise serializers.ValidationError(f"Financial year {value.label} is locked — closed years are append-only.")
+        return value
+
+
+class FixedAssetSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True, default=None)
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True, default=None)
+    current_written_down_value = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FixedAsset
+        fields = '__all__'
+
+    def get_current_written_down_value(self, obj):
+        return obj.written_down_value(datetime.date.today())
+
+    def validate_purchase_date(self, value):
+        from .models.finance import get_locked_financial_year_for_date
+        locked_fy = get_locked_financial_year_for_date(value)
+        if locked_fy:
+            raise serializers.ValidationError(f"Financial year {locked_fy.label} is locked — closed years are append-only.")
+        return value
+
+
+# ── CA Role & Audit Portal Serializers ──
+class AuditorProfileSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    email = serializers.CharField(source='user.email', read_only=True)
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditorProfile
+        fields = '__all__'
+        read_only_fields = ('user', 'invited_by')
+
+    def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+
+class AuditEngagementSerializer(serializers.ModelSerializer):
+    auditor_name = serializers.SerializerMethodField()
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    is_active = serializers.ReadOnlyField()
+
+    class Meta:
+        model = AuditEngagement
+        fields = '__all__'
+        read_only_fields = ('granted_by', 'revoked_at', 'revoked_by')
+
+    def get_auditor_name(self, obj):
+        return obj.auditor.firm_name or obj.auditor.user.get_full_name()
+
+
+class AuditorAccessLogSerializer(serializers.ModelSerializer):
+    auditor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditorAccessLog
+        fields = '__all__'
+
+    def get_auditor_name(self, obj):
+        return obj.auditor.firm_name or obj.auditor.user.get_full_name()
+
+
+# ── State Scholarship Reconciliation Serializers ──
+class StateScholarshipSchemeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StateScholarshipScheme
+        fields = '__all__'
+
+
+class StudentScholarshipRecordSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    scheme_name = serializers.CharField(source='scheme.name', read_only=True)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    reconciliation_gap = serializers.ReadOnlyField()
+
+    class Meta:
+        model = StudentScholarshipRecord
+        fields = '__all__'
+        read_only_fields = ('recorded_by',)
+
+    def get_student_name(self, obj):
+        return obj.student.get_full_name() or obj.student.username
 
 

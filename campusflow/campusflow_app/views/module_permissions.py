@@ -14,13 +14,35 @@ ALL_ERP_MODULES = [
     "student", "attendance", "schedule", "leave", "payroll",
     "exams", "analytics", "announcements", "audit-logs", "assignments",
     "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation",
-    "compliance-center",
+    "compliance-center", "ledger", "audit-portal",
     # Deliberately absent from PREMIUM_MODULES below: the academic calendar and
     # curriculum are foundational — exams and schedules are stamped with a term,
     # and credits drive SGPA and graduation checks — so they must work without a
     # per-tenant subscription change.
     "academics", "curriculum", "transcript",
 ]
+
+# Single shared definition — this used to be defined three times inline
+# (list/get, post, MyAllowedModulesView.get), which is exactly the kind of
+# thing that drifts out of sync when one call site gets a new module and the
+# others don't. "audit-portal" deliberately lives here too, even though only
+# the `CA` group can ever hold it (see RESTRICTED_ROLES below) — being
+# premium-gated and being role-restricted are independent checks.
+PREMIUM_MODULES = {
+    "attendance", "leave", "payroll", "exams", "assignments",
+    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
+    "compliance-center", "ledger", "audit-portal",
+}
+
+# Modules that only their one designated role may ever be granted, regardless
+# of what a College Admin submits via RoleModulePermissionView. `audit-portal`
+# is the CA's entire module namespace (see Docs/compliance_and_audit_portal_plan.md
+# §1.1) — the CA is simply never granted fees/payroll/inventory, so nothing
+# needs a partial-write check; the flip side is that no *other* role should
+# ever be handed audit-portal either, even by an Admin's mistake.
+RESTRICTED_ROLE_MODULES = {
+    "audit-portal": "CA",
+}
 
 ROLE_DEFAULT_MODULES = {
     "SaaS Admin": ["dashboard", "settings"],
@@ -42,7 +64,13 @@ ROLE_DEFAULT_MODULES = {
     "student": [
         "dashboard", "attendance", "schedule", "settings", "exams", "announcements",
         "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript"
-    ]
+    ],
+    # CA is deliberately never given anything beyond its own read-only report
+    # namespace — no fees/payroll/inventory, so there's nothing to accidentally
+    # expose. Web-only by convention (same boundary as Management/Administrator
+    # in Docs/mobile_app_scope.md); there is no mobile-auth gate to also update
+    # yet, so this is the one place that boundary currently lives.
+    "CA": ["dashboard", "settings", "audit-portal"],
 }
 
 
@@ -135,11 +163,6 @@ class RoleModulePermissionView(APIView):
         data = []
 
         subscribed_lower_map = {m.lower().replace(" ", "-"): m for m in subscribed}
-        PREMIUM_MODULES = {
-            "attendance", "leave", "payroll", "exams", "assignments",
-            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
-            "compliance-center"
-        }
 
         for role in roles:
             perm, _ = TenantModulePermission.objects.get_or_create(group_name=role)
@@ -194,13 +217,7 @@ class RoleModulePermissionView(APIView):
         tenant = connection.tenant
         subscribed = getattr(tenant, 'subscribed_modules', None) or []
         subscribed_lower_map = {m.lower().replace(" ", "-"): m for m in subscribed}
-        
-        PREMIUM_MODULES = {
-            "attendance", "leave", "payroll", "exams", "assignments",
-            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
-            "compliance-center"
-        }
-        
+
         # Get existing permission object
         perm, _ = TenantModulePermission.objects.get_or_create(group_name=group_name)
         existing_allowed = perm.allowed_modules
@@ -214,9 +231,15 @@ class RoleModulePermissionView(APIView):
             if m_norm not in PREMIUM_MODULES:
                 new_allowed.append(m)
                 
-        # Add the validated premium modules sent from frontend
+        # Add the validated premium modules sent from frontend — except a
+        # RESTRICTED_ROLE_MODULES entry, which only its one designated role
+        # (e.g. `audit-portal` -> only `CA`) may ever hold, no matter what's
+        # submitted here.
         for m in allowed_modules:
             m_norm = m.lower().replace(" ", "-")
+            restricted_to = RESTRICTED_ROLE_MODULES.get(m_norm)
+            if restricted_to and group_name != restricted_to:
+                continue
             if m_norm in subscribed_lower_map:
                 new_allowed.append(subscribed_lower_map[m_norm])
 
@@ -274,13 +297,7 @@ class MyAllowedModulesView(APIView):
 
         # Intersect to find final list (case-insensitive, returning lowercase/dash-separated form)
         subscribed_lower = {m.lower().replace(" ", "-") for m in subscribed}
-        
-        PREMIUM_MODULES = {
-            "attendance", "leave", "payroll", "exams", "assignments",
-            "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
-            "compliance-center"
-        }
-        
+
         final_modules = []
         
         # 1. Process database allowed list

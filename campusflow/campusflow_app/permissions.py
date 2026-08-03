@@ -15,7 +15,7 @@ Role hierarchy (highest → lowest):
 """
 
 from rest_framework.permissions import BasePermission
-from django.db import connection
+from django.db import connection, models
 
 
 def get_user_group(user):
@@ -215,6 +215,46 @@ class CanManageLocation(BasePermission):
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return True
         return is_saas_or_college_admin(request.user)
+
+
+class IsActiveAuditor(BasePermission):
+    """
+    Gates the CA / statutory-auditor audit-portal reports. Being in the `CA`
+    group is not enough on its own — the request must also carry a
+    `financial_year` (id or label) that matches an AuditEngagement for this
+    user which is currently active (not revoked, inside its access window).
+    Views using this should read `request.auditor_engagement` (set here) to
+    avoid re-resolving the same engagement twice.
+    """
+    message = "No active audit engagement for this financial year."
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        if get_user_group(request.user) != 'CA':
+            return False
+
+        from campusflow_app.models.audit_portal import AuditorProfile
+
+        try:
+            auditor = request.user.auditor_profile
+        except AuditorProfile.DoesNotExist:
+            return False
+        if auditor.status != AuditorProfile.STATUS_ACTIVE:
+            return False
+
+        fy_param = request.query_params.get('financial_year') or request.data.get('financial_year')
+        engagements = auditor.engagements.select_related('financial_year')
+        if fy_param:
+            engagements = engagements.filter(
+                models.Q(financial_year_id=fy_param) | models.Q(financial_year__label=fy_param)
+            )
+
+        for engagement in engagements:
+            if engagement.is_active:
+                request.auditor_engagement = engagement
+                return True
+        return False
 
 
 class CanGenerateQR(BasePermission):

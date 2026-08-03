@@ -72,6 +72,7 @@ from .views.outcomes import (
     ProgramOutcomeListCreateView, ProgramOutcomeDetailView,
     CourseOutcomeListCreateView, CourseOutcomeDetailView,
     POCOMappingListCreateView, POCOMappingDetailView,
+    CourseOutcomeAttainmentView, ProgramOutcomeAttainmentView,
 )
 from .views.academics import (
     AcademicYearListCreateView, AcademicYearDetailView,
@@ -130,7 +131,23 @@ from .views.result import StudentExamResultViewSet, ExamClassStatsView, ExamPubl
 from .views.result_correction import (
     ResultCorrectionRequestCreateView, HMCorrectionRequestListView, HMCorrectionRequestActionView,
 )
-from .views.compliance import ComplianceCertificateTypeViewSet, ComplianceCertificateViewSet
+from .views.compliance import (
+    ComplianceCertificateTypeViewSet, ComplianceCertificateViewSet,
+    AISHEAnnualReturnView, AICTEDisclosureView, NAACExtendedProfileView,
+    AccreditationCriterionViewSet, EvidenceItemViewSet,
+    SubmitEvidenceItemView, SignOffEvidenceItemView, SSRExportView,
+)
+from .views.finance import (
+    FinancialYearViewSet, CloseFinancialYearView,
+    IncomeCategoryViewSet, IncomeEntryViewSet,
+    ExpenseCategoryViewSet, ExpenseEntryViewSet, FixedAssetViewSet,
+)
+from .views.audit_portal import (
+    InviteAuditorView, AuditEngagementListView, RevokeAuditEngagementView, MyAuditEngagementsView,
+    ReceiptsPaymentsStatementView, IncomeExpenditureStatementView, FixedAssetRegisterView,
+    PayrollStatutorySummaryView, FeeReconciliationView, VendorLedgerView, DocumentVaultExportView,
+)
+from .views.scholarship import StateScholarshipSchemeViewSet, StudentScholarshipRecordViewSet
 from .views.progress import StudentProgressView, StudentTopicPerformanceView
 from .views.contact import ContactEnquiryView
 from .views.guardian import (
@@ -367,6 +384,8 @@ urlpatterns = [
     path('course-outcomes/<int:pk>/', CourseOutcomeDetailView.as_view(), name='course-outcome-detail'),
     path('course-outcomes/<int:course_outcome_id>/po-mappings/', POCOMappingListCreateView.as_view(), name='po-co-mapping-list'),
     path('po-mappings/<int:pk>/', POCOMappingDetailView.as_view(), name='po-co-mapping-detail'),
+    path('courses/<int:course_id>/outcome-attainment/', CourseOutcomeAttainmentView.as_view(), name='course-outcome-attainment'),
+    path('academics/programs/<int:program_id>/outcome-attainment/', ProgramOutcomeAttainmentView.as_view(), name='program-outcome-attainment'),
 
     # ── Paper Setting from Syllabus ───────────────────────────────────
     path('exams/<int:pk>/blueprint/', PaperBlueprintView.as_view(), name='exam-paper-blueprint'),
@@ -489,11 +508,61 @@ urlpatterns = [
     path('parent/children/<int:student_id>/exams/', ParentChildExamsView.as_view(), name='parent-child-exams'),
     path('parent/children/<int:student_id>/assignments/', ParentChildAssignmentsView.as_view(), name='parent-child-assignments'),
 
-    # Compliance & Accreditation — Certificate & License Vault
+    # Compliance & Accreditation — Certificate & License Vault (P1)
     path('compliance-certificate-types/', ComplianceCertificateTypeViewSet.as_view({'get': 'list', 'post': 'create'}), name='compliancecertificatetype-list'),
     path('compliance-certificate-types/<int:pk>/', ComplianceCertificateTypeViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='compliancecertificatetype-detail'),
     path('compliance-certificates/', ComplianceCertificateViewSet.as_view({'get': 'list', 'post': 'create'}), name='compliancecertificate-list'),
     path('compliance-certificates/<int:pk>/', ComplianceCertificateViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='compliancecertificate-detail'),
+
+    # Financial Year & Ledger Foundation (P2)
+    path('financial-years/', FinancialYearViewSet.as_view({'get': 'list', 'post': 'create'}), name='financialyear-list'),
+    path('financial-years/<int:pk>/', FinancialYearViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='financialyear-detail'),
+    path('financial-years/<int:pk>/close/', CloseFinancialYearView.as_view(), name='financialyear-close'),
+    path('income-categories/', IncomeCategoryViewSet.as_view({'get': 'list', 'post': 'create'}), name='incomecategory-list'),
+    path('income-categories/<int:pk>/', IncomeCategoryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='incomecategory-detail'),
+    path('income-entries/', IncomeEntryViewSet.as_view({'get': 'list', 'post': 'create'}), name='incomeentry-list'),
+    path('income-entries/<int:pk>/', IncomeEntryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='incomeentry-detail'),
+    path('expense-categories/', ExpenseCategoryViewSet.as_view({'get': 'list', 'post': 'create'}), name='expensecategory-list'),
+    path('expense-categories/<int:pk>/', ExpenseCategoryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='expensecategory-detail'),
+    path('expense-entries/', ExpenseEntryViewSet.as_view({'get': 'list', 'post': 'create'}), name='expenseentry-list'),
+    path('expense-entries/<int:pk>/', ExpenseEntryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='expenseentry-detail'),
+    path('fixed-assets/', FixedAssetViewSet.as_view({'get': 'list', 'post': 'create'}), name='fixedasset-list'),
+    path('fixed-assets/<int:pk>/', FixedAssetViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='fixedasset-detail'),
+
+    # CA Role & Access Control (P3)
+    path('audit-portal/invite-auditor/', InviteAuditorView.as_view(), name='audit-portal-invite-auditor'),
+    path('audit-portal/engagements/', AuditEngagementListView.as_view(), name='audit-portal-engagement-list'),
+    path('audit-portal/engagements/<int:pk>/revoke/', RevokeAuditEngagementView.as_view(), name='audit-portal-engagement-revoke'),
+    path('audit-portal/my-engagements/', MyAuditEngagementsView.as_view(), name='audit-portal-my-engagements'),
+
+    # CA Audit Portal — the reports themselves (P4)
+    path('audit-portal/reports/receipts-payments/', ReceiptsPaymentsStatementView.as_view(), name='audit-portal-receipts-payments'),
+    path('audit-portal/reports/income-expenditure/', IncomeExpenditureStatementView.as_view(), name='audit-portal-income-expenditure'),
+    path('audit-portal/reports/fixed-asset-register/', FixedAssetRegisterView.as_view(), name='audit-portal-fixed-asset-register'),
+    path('audit-portal/reports/payroll-statutory-summary/', PayrollStatutorySummaryView.as_view(), name='audit-portal-payroll-statutory-summary'),
+    path('audit-portal/reports/fee-reconciliation/', FeeReconciliationView.as_view(), name='audit-portal-fee-reconciliation'),
+    path('audit-portal/reports/vendor-ledger/', VendorLedgerView.as_view(), name='audit-portal-vendor-ledger'),
+    path('audit-portal/document-vault/', DocumentVaultExportView.as_view(), name='audit-portal-document-vault'),
+
+    # Accreditation Reporting — Quick Wins (P5)
+    path('compliance-center/reports/aishe-annual-return/', AISHEAnnualReturnView.as_view(), name='compliance-center-aishe'),
+    path('compliance-center/reports/aicte-disclosure/', AICTEDisclosureView.as_view(), name='compliance-center-aicte'),
+    path('compliance-center/reports/naac-extended-profile/', NAACExtendedProfileView.as_view(), name='compliance-center-naac-profile'),
+
+    # NAAC SSR/AQAR Evidence Workspace (P6)
+    path('accreditation-criteria/', AccreditationCriterionViewSet.as_view({'get': 'list', 'post': 'create'}), name='accreditationcriterion-list'),
+    path('accreditation-criteria/<int:pk>/', AccreditationCriterionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='accreditationcriterion-detail'),
+    path('evidence-items/', EvidenceItemViewSet.as_view({'get': 'list', 'post': 'create'}), name='evidenceitem-list'),
+    path('evidence-items/<int:pk>/', EvidenceItemViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='evidenceitem-detail'),
+    path('evidence-items/<int:pk>/submit/', SubmitEvidenceItemView.as_view(), name='evidenceitem-submit'),
+    path('evidence-items/<int:pk>/sign-off/', SignOffEvidenceItemView.as_view(), name='evidenceitem-sign-off'),
+    path('compliance-center/ssr-export/', SSRExportView.as_view(), name='compliance-center-ssr-export'),
+
+    # State scholarship reconciliation (missing-module addition)
+    path('scholarship-schemes/', StateScholarshipSchemeViewSet.as_view({'get': 'list', 'post': 'create'}), name='scholarshipscheme-list'),
+    path('scholarship-schemes/<int:pk>/', StateScholarshipSchemeViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='scholarshipscheme-detail'),
+    path('scholarship-records/', StudentScholarshipRecordViewSet.as_view({'get': 'list', 'post': 'create'}), name='scholarshiprecord-list'),
+    path('scholarship-records/<int:pk>/', StudentScholarshipRecordViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='scholarshiprecord-detail'),
 
 ]
 

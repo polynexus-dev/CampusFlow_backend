@@ -8,7 +8,15 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("campusflow_app", "0012_studentexamresult"),
+        # Was "0012_studentexamresult" — that migration (and 0009/0010/0011 in
+        # this same branch) turned out to be a fully duplicate parallel history
+        # of 0009/0010/0011/0012/0014-0015 in the other branch (verified
+        # field-for-field identical), created when two branches both ran
+        # makemigrations independently off 0008 and were merged in git without
+        # reconciling migrations. Those duplicates were deleted; this branch
+        # now grafts directly onto the branch that's actually applied to real
+        # tenant data, right after it adds the Certificate & License Vault.
+        ("campusflow_app", "0016_compliancecertificatetype_compliancecertificate"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

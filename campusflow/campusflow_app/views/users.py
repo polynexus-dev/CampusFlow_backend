@@ -1754,6 +1754,20 @@ class UserProfileView(APIView):
                 "status": profile.status,
             }
 
+        elif usergroup == 'CA':
+            from ..models.audit_portal import AuditorProfile
+            profile = AuditorProfile.objects.filter(user=user).first()
+            if not profile:
+                return Response({"detail": "Auditor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            profile_data = {
+                "user": {"username": user.username, "email": user.email, "first_name": user.first_name, "last_name": user.last_name},
+                "role": usergroup, "tenant": tenant_name,
+                "firm_name": profile.firm_name,
+                "icai_membership_number": profile.icai_membership_number,
+                "contact_number": profile.contact_number,
+                "status": profile.status,
+            }
+
         elif is_saas_admin(user):
             # SaaS Admin has no profile record in tenant — return basic user info
             profile_data = {
@@ -1846,6 +1860,7 @@ def get_user_profile_by_user(user):
     if group == 'Management': return getattr(user, 'management_profile', None)
     if group == 'Administrator': return getattr(user, 'administrator_profile', None)
     if group == 'Department Head': return getattr(user, 'department_head_profile', None)
+    if group == 'CA': return getattr(user, 'auditor_profile', None)
     return None
 
 def helper_update_employee_profile(profile, request, profile_field_names):

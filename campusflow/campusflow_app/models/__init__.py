@@ -71,7 +71,21 @@ from .parent_link_request import ParentLinkRequest
 from .question_bank import SyllabusTopic, Question, PaperBlueprintTopic, ExamQuestion
 
 # ── Compliance & Accreditation ──
-from .compliance import ComplianceCertificateType, ComplianceCertificate
+from .compliance import (
+    ComplianceCertificateType, ComplianceCertificate,
+    AccreditationCriterion, EvidenceItem,
+)
+
+# ── Financial Year & Ledger Foundation ──
+from .finance import (
+    FinancialYear, IncomeCategory, IncomeEntry, ExpenseCategory, ExpenseEntry, FixedAsset,
+)
+
+# ── CA Role & Audit Portal ──
+from .audit_portal import AuditorProfile, AuditEngagement, AuditorAccessLog
+
+# ── State Scholarship Reconciliation ──
+from .scholarship import StateScholarshipScheme, StudentScholarshipRecord
 
 
 

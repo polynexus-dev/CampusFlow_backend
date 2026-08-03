@@ -6,7 +6,12 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("tenants", "0011_tenant_cashfree_app_id_tenant_cashfree_secret_key_and_more"),
+        # Was "0011_tenant_cashfree_app_id_tenant_cashfree_secret_key_and_more"
+        # — that migration was a fully duplicate parallel history of
+        # 0009-0011+0013 in the other (applied) branch, deleted for the same
+        # reason as in 0010_alter_invoice_bank_receipt.py above. This is the
+        # one genuinely new field from that branch.
+        ("tenants", "0010_alter_invoice_bank_receipt"),
     ]
 
     operations = [

@@ -125,6 +125,15 @@ class GeneratePayslipView(APIView):
         if not user_id or not month or not year:
             return Response({"error": "user_id, month, and year are required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        from datetime import date
+        from ..models.finance import get_locked_financial_year_for_date
+        locked_fy = get_locked_financial_year_for_date(date(year, month, 15))
+        if locked_fy:
+            return Response(
+                {"error": f"Financial year {locked_fy.label} is locked. Payslips cannot be generated for a closed year."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             target_user = User.objects.exclude(groups__name='student').get(id=user_id)
         except User.DoesNotExist:
@@ -218,6 +227,15 @@ class BulkPayslipGenerationView(APIView):
 
         if not month or not year:
             return Response({"error": "month and year are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from datetime import date
+        from ..models.finance import get_locked_financial_year_for_date
+        locked_fy = get_locked_financial_year_for_date(date(year, month, 15))
+        if locked_fy:
+            return Response(
+                {"error": f"Financial year {locked_fy.label} is locked. Payslips cannot be generated for a closed year."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         staff = User.objects.exclude(groups__name='student').exclude(is_superuser=True)
         generated = 0

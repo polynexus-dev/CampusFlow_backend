@@ -2891,3 +2891,749 @@ class RosterCutoverTests(TenantTestCase):
             token = RefreshToken.for_user(user)
             token['tenant_schema'] = self.tenant.schema_name
         return token
+
+
+class LedgerFoundationTests(TenantTestCase):
+    """P2: FinancialYear / IncomeEntry / ExpenseEntry / FixedAsset, and the
+    lock-guard that makes a closed financial year append-only."""
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            Group.objects.get_or_create(name='Management')
+
+    def _admin_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username=f'ledger_admin_{User.objects.count()}',
+                email=f'ledger_admin_{User.objects.count()}@test.com', password='pw12345!',
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def test_fixed_asset_wdv_depreciates_over_a_year(self):
+        from decimal import Decimal
+        from .models.finance import FixedAsset
+
+        with schema_context(self.tenant.schema_name):
+            asset = FixedAsset.objects.create(
+                name="Projector", category="IT Equipment", purchase_date=datetime.date(2024, 4, 1),
+                purchase_cost=Decimal("100000.00"), depreciation_method=FixedAsset.METHOD_WDV,
+                depreciation_rate_percent=Decimal("20.00"),
+            )
+            wdv_at_purchase = asset.written_down_value(datetime.date(2024, 4, 1))
+            wdv_one_year_later = asset.written_down_value(datetime.date(2025, 4, 1))
+            self.assertEqual(wdv_at_purchase, Decimal("100000.00"))
+            # 20% reducing balance for 1 year -> ~80000; allow for the 365.25-day approximation.
+            self.assertAlmostEqual(float(wdv_one_year_later), 80000.0, delta=500)
+            self.assertLess(wdv_one_year_later, wdv_at_purchase)
+
+    def test_fixed_asset_reads_disposal_value_after_disposal_date(self):
+        from decimal import Decimal
+        from .models.finance import FixedAsset
+
+        with schema_context(self.tenant.schema_name):
+            asset = FixedAsset.objects.create(
+                name="Old Bus", category="Vehicle", purchase_date=datetime.date(2020, 4, 1),
+                purchase_cost=Decimal("500000.00"), disposed_date=datetime.date(2025, 6, 1),
+                disposal_value=Decimal("50000.00"),
+            )
+            self.assertEqual(asset.written_down_value(datetime.date(2026, 1, 1)), Decimal("50000.00"))
+
+    def test_financial_year_totals_include_income_and_expense_entries(self):
+        from decimal import Decimal
+        from .models.finance import FinancialYear, IncomeCategory, IncomeEntry, ExpenseCategory, ExpenseEntry
+
+        with schema_context(self.tenant.schema_name):
+            fy = FinancialYear.objects.create(
+                label="2025-2026", start_date=datetime.date(2025, 4, 1), end_date=datetime.date(2026, 3, 31),
+                opening_cash_balance=Decimal("1000.00"), opening_bank_balance=Decimal("2000.00"),
+            )
+            income_cat = IncomeCategory.objects.create(name="Donation")
+            IncomeEntry.objects.create(
+                category=income_cat, financial_year=fy, amount=Decimal("5000.00"),
+                received_date=datetime.date(2025, 6, 1),
+            )
+            expense_cat = ExpenseCategory.objects.create(name="Rent")
+            ExpenseEntry.objects.create(
+                category=expense_cat, financial_year=fy, amount=Decimal("3000.00"),
+                payment_date=datetime.date(2025, 7, 1),
+            )
+            self.assertEqual(fy.opening_balance, Decimal("3000.00"))
+            self.assertEqual(fy.total_receipts(), Decimal("5000.00"))
+            self.assertEqual(fy.total_payments(), Decimal("3000.00"))
+            self.assertEqual(fy.closing_balance(), Decimal("5000.00"))
+
+    def test_close_and_carry_forward_locks_year_and_sets_next_opening_balance(self):
+        from decimal import Decimal
+        from .models.finance import FinancialYear
+
+        with schema_context(self.tenant.schema_name):
+            fy = FinancialYear.objects.create(
+                label="2024-2025", start_date=datetime.date(2024, 4, 1), end_date=datetime.date(2025, 3, 31),
+                opening_cash_balance=Decimal("1000.00"),
+            )
+            next_fy = FinancialYear.objects.create(
+                label="2025-2026", start_date=datetime.date(2025, 4, 1), end_date=datetime.date(2026, 3, 31),
+            )
+            fy.close_and_carry_forward(next_fy)
+            fy.refresh_from_db()
+            next_fy.refresh_from_db()
+            self.assertTrue(fy.is_locked)
+            self.assertIsNotNone(fy.locked_at)
+            self.assertEqual(next_fy.opening_bank_balance, Decimal("1000.00"))
+
+    def test_locked_financial_year_blocks_new_fee_payment(self):
+        from decimal import Decimal
+        from django.utils import timezone
+        from .models.finance import FinancialYear
+        from .models.fees import StudentFeeInvoice
+
+        with schema_context(self.tenant.schema_name):
+            today = timezone.now().date()
+            FinancialYear.objects.create(
+                label="Locked FY", start_date=today - datetime.timedelta(days=30),
+                end_date=today + datetime.timedelta(days=30), is_locked=True,
+            )
+            student = User.objects.create_user(username="fee_stu_locked", email="fee_stu_locked@test.com")
+            invoice = StudentFeeInvoice.objects.create(
+                student=student, due_date=timezone.now().date(), total_amount=Decimal("5000.00"),
+            )
+            token = self._admin_token()
+
+        response = self.client.post(
+            reverse('fee-invoice-pay', args=[invoice.id]),
+            {"amount_paid": 1000, "payment_method": "cash"}, format='json',
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("locked", response.data["error"].lower())
+
+    def test_income_entry_serializer_rejects_locked_financial_year(self):
+        from .models.finance import FinancialYear, IncomeCategory
+
+        with schema_context(self.tenant.schema_name):
+            fy = FinancialYear.objects.create(
+                label="2024-2025", start_date=datetime.date(2024, 4, 1), end_date=datetime.date(2025, 3, 31),
+                is_locked=True,
+            )
+            category = IncomeCategory.objects.create(name="Grant")
+            token = self._admin_token()
+
+        response = self.client.post(
+            reverse('incomeentry-list'),
+            {"category": category.id, "financial_year": fy.id, "amount": 1000, "received_date": "2024-06-01"},
+            format='json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class CAAuditPortalTests(TenantTestCase):
+    """P3/P4: the CA role's access gate (AuditEngagement/IsActiveAuditor),
+    the RESTRICTED_ROLE_MODULES guard on audit-portal, and the report
+    endpoints themselves."""
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            for role in ('Management', 'Faculty', 'CA'):
+                Group.objects.get_or_create(name=role)
+
+    def _admin_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username=f'ca_admin_{User.objects.count()}',
+                email=f'ca_admin_{User.objects.count()}@test.com', password='pw12345!',
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def _financial_year(self):
+        from .models.finance import FinancialYear
+        return FinancialYear.objects.create(
+            label=f"FY-{FinancialYear.objects.count()}",
+            start_date=datetime.date(2025, 4, 1), end_date=datetime.date(2026, 3, 31),
+        )
+
+    def _auditor(self, fy, access_start, access_end, revoked=False):
+        from django.utils import timezone
+        from .models.audit_portal import AuditorProfile, AuditEngagement
+
+        user = User.objects.create_user(
+            username=f'ca_user_{User.objects.count()}', email=f'ca_user_{User.objects.count()}@test.com',
+        )
+        user.groups.add(Group.objects.get(name='CA'))
+        profile = AuditorProfile.objects.create(user=user, firm_name="Test & Co.")
+        engagement = AuditEngagement.objects.create(
+            auditor=profile, financial_year=fy, access_start=access_start, access_end=access_end,
+            revoked_at=timezone.now() if revoked else None,
+        )
+        token = RefreshToken.for_user(user)
+        token['tenant_schema'] = self.tenant.schema_name
+        return profile, engagement, token
+
+    def test_invite_auditor_creates_profile_group_and_engagement(self):
+        from .models.audit_portal import AuditorProfile, AuditEngagement
+
+        with schema_context(self.tenant.schema_name):
+            fy = self._financial_year()
+            token = self._admin_token()
+
+        response = self.client.post(
+            reverse('audit-portal-invite-auditor'),
+            {
+                "email": "auditor@camail.example", "firm_name": "ABC & Associates",
+                "icai_membership_number": "123456", "financial_year_id": fy.id,
+                "access_start": "2025-04-01", "access_end": "2026-06-30",
+            },
+            format='json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        with schema_context(self.tenant.schema_name):
+            self.assertTrue(AuditorProfile.objects.filter(user__email="auditor@camail.example").exists())
+            self.assertTrue(User.objects.get(email="auditor@camail.example").groups.filter(name='CA').exists())
+            self.assertEqual(AuditEngagement.objects.filter(financial_year=fy).count(), 1)
+
+    def test_ca_user_can_actually_log_in_and_fetch_their_profile(self):
+        """
+        Regression test: the shared login serializer and UserProfileView both
+        hardcode a role->profile mapping for every other role. Without a 'CA'
+        branch in each, a CA account is created successfully by
+        InviteAuditorView but can never actually log in (login serializer
+        raises "does not have an associated profile") or, if that's patched
+        without also patching UserProfileView, gets a 400 "User group not
+        recognized" on the very next request after login. Exercises the real
+        /login/ and /user/ endpoints — not RefreshToken.for_user(), which
+        would silently skip this whole code path.
+        """
+        from .models.audit_portal import AuditorProfile
+
+        with schema_context(self.tenant.schema_name):
+            ca_user = User.objects.create_user(
+                username='ca_login_test', email='ca_login_test@example.com', password='pw12345!',
+            )
+            ca_user.groups.add(Group.objects.get(name='CA'))
+            AuditorProfile.objects.create(user=ca_user, firm_name="Login Test & Co.")
+
+        login_response = self.client.post(
+            reverse('token_obtain_pair'),
+            {"username": "ca_login_test", "password": "pw12345!"}, format='json',
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(login_response.data["roleName"], "CA")
+        access_token = login_response.data["access"]
+
+        profile_response = self.client.get(
+            reverse('user_profile'), HTTP_AUTHORIZATION=f'Bearer {access_token}',
+        )
+        self.assertEqual(profile_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(profile_response.data["role"], "CA")
+        self.assertEqual(profile_response.data["firm_name"], "Login Test & Co.")
+
+    def test_active_engagement_can_view_receipts_payments_report(self):
+        with schema_context(self.tenant.schema_name):
+            fy = self._financial_year()
+            today = datetime.date.today()
+            _, engagement, token = self._auditor(
+                fy, today - datetime.timedelta(days=1), today + datetime.timedelta(days=30),
+            )
+
+        response = self.client.get(
+            reverse('audit-portal-receipts-payments') + f"?financial_year={fy.id}",
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["financial_year"], fy.label)
+        with schema_context(self.tenant.schema_name):
+            from .models.audit_portal import AuditorAccessLog
+            self.assertTrue(AuditorAccessLog.objects.filter(engagement=engagement, report_type="receipts_payments").exists())
+
+    def test_expired_engagement_is_denied(self):
+        with schema_context(self.tenant.schema_name):
+            fy = self._financial_year()
+            today = datetime.date.today()
+            _, _, token = self._auditor(
+                fy, today - datetime.timedelta(days=60), today - datetime.timedelta(days=30),
+            )
+
+        response = self.client.get(
+            reverse('audit-portal-receipts-payments') + f"?financial_year={fy.id}",
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_revoked_engagement_is_denied(self):
+        with schema_context(self.tenant.schema_name):
+            fy = self._financial_year()
+            today = datetime.date.today()
+            _, _, token = self._auditor(
+                fy, today - datetime.timedelta(days=1), today + datetime.timedelta(days=30), revoked=True,
+            )
+
+        response = self.client.get(
+            reverse('audit-portal-receipts-payments') + f"?financial_year={fy.id}",
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_engagement_for_a_different_financial_year_is_denied(self):
+        with schema_context(self.tenant.schema_name):
+            fy = self._financial_year()
+            other_fy = self._financial_year()
+            today = datetime.date.today()
+            _, _, token = self._auditor(
+                fy, today - datetime.timedelta(days=1), today + datetime.timedelta(days=30),
+            )
+
+        response = self.client.get(
+            reverse('audit-portal-receipts-payments') + f"?financial_year={other_fy.id}",
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_xlsx_export_returns_spreadsheet_content_type(self):
+        with schema_context(self.tenant.schema_name):
+            fy = self._financial_year()
+            today = datetime.date.today()
+            _, _, token = self._auditor(
+                fy, today - datetime.timedelta(days=1), today + datetime.timedelta(days=30),
+            )
+
+        response = self.client.get(
+            reverse('audit-portal-receipts-payments') + f"?financial_year={fy.id}&export=xlsx",
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def test_only_ca_group_may_ever_be_granted_audit_portal_module(self):
+        """RESTRICTED_ROLE_MODULES: an Admin trying to hand `audit-portal` to
+        any role other than CA must have it silently stripped, even if the
+        tenant has the module subscribed.
+
+        Posted via raw json.dumps rather than format='json' — Django's plain
+        test Client (unlike DRF's APIClient) doesn't actually serialize
+        list-valued fields as JSON under format='json', it falls back to
+        multipart encoding, which turns allowed_modules into a single string
+        instead of a list by the time the view sees it.
+        """
+        import json as _json
+
+        with schema_context(self.tenant.schema_name):
+            self.tenant.subscribed_modules = ['audit-portal']
+            self.tenant.save()
+            token = self._admin_token()
+
+        response = self.client.post(
+            reverse('role-module-permissions'),
+            data=_json.dumps({"group_name": "Faculty", "allowed_modules": ["audit-portal"]}),
+            content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("audit-portal", response.data["allowed_modules"])
+
+        response = self.client.post(
+            reverse('role-module-permissions'),
+            data=_json.dumps({"group_name": "CA", "allowed_modules": ["audit-portal"]}),
+            content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("audit-portal", response.data["allowed_modules"])
+
+    def test_my_engagements_lists_only_the_calling_auditors_own_engagements(self):
+        with schema_context(self.tenant.schema_name):
+            fy = self._financial_year()
+            today = datetime.date.today()
+            _, engagement, token = self._auditor(
+                fy, today - datetime.timedelta(days=1), today + datetime.timedelta(days=30),
+            )
+
+        response = self.client.get(
+            reverse('audit-portal-my-engagements'), HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["engagements"]), 1)
+        self.assertEqual(response.data["engagements"][0]["financial_year_label"], fy.label)
+        self.assertTrue(response.data["engagements"][0]["is_active"])
+
+    def test_my_engagements_rejects_non_ca_accounts(self):
+        with schema_context(self.tenant.schema_name):
+            token = self._admin_token()
+
+        response = self.client.get(
+            reverse('audit-portal-my-engagements'), HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class AccreditationReportingTests(TenantTestCase):
+    """P5: AISHE / AICTE / NAAC quick-win reports — pure reporting over
+    existing StudentProfile/TeachingStaffProfile/Program fields."""
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            Group.objects.get_or_create(name='Management')
+            self.dept = Department.objects.create(name="Mechanical", code="MECH")
+
+    def _admin_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username=f'accred_admin_{User.objects.count()}',
+                email=f'accred_admin_{User.objects.count()}@test.com', password='pw12345!',
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def test_aishe_annual_return_counts_students_by_category(self):
+        with schema_context(self.tenant.schema_name):
+            for i, category in enumerate(["OBC", "OBC", "SC", "General"]):
+                u = User.objects.create_user(username=f"aishe_stu{i}", email=f"aishe_stu{i}@test.com")
+                StudentProfile.objects.create(
+                    user=u, student_id=f"AISHE-{i}", department=self.dept, category=category,
+                )
+            token = self._admin_token()
+
+        response = self.client.get(
+            reverse('compliance-center-aishe'), HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total_students"], 4)
+        by_category = {r["category"]: r["count"] for r in response.data["enrolment_by_category"]}
+        self.assertEqual(by_category["OBC"], 2)
+
+    def test_aicte_disclosure_computes_student_faculty_ratio(self):
+        from .models.profile import TeachingStaffProfile
+
+        with schema_context(self.tenant.schema_name):
+            for i in range(10):
+                u = User.objects.create_user(username=f"aicte_stu{i}", email=f"aicte_stu{i}@test.com")
+                StudentProfile.objects.create(user=u, student_id=f"AICTE-{i}", department=self.dept)
+            faculty_user = User.objects.create_user(username="aicte_fac1", email="aicte_fac1@test.com")
+            TeachingStaffProfile.objects.create(
+                user=faculty_user, employee_id="FAC-1", department=self.dept, designation="Assistant Professor",
+            )
+            token = self._admin_token()
+
+        response = self.client.get(
+            reverse('compliance-center-aicte'), HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total_students"], 10)
+        self.assertEqual(response.data["total_faculty"], 1)
+        self.assertEqual(response.data["student_faculty_ratio"], 10.0)
+
+    def test_aishe_xlsx_export_returns_spreadsheet(self):
+        with schema_context(self.tenant.schema_name):
+            token = self._admin_token()
+
+        response = self.client.get(
+            reverse('compliance-center-aishe') + "?export=xlsx",
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+
+class EvidenceWorkspaceTests(TenantTestCase):
+    """P6: NAAC SSR/AQAR Evidence Workspace — Draft -> Submitted -> Signed Off,
+    and reusing a Phase 1 ComplianceCertificate instead of re-uploading."""
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            for role in ('Faculty', 'Department Head'):
+                Group.objects.get_or_create(name=role)
+            self.dept = Department.objects.create(name="Civil", code="CIV")
+
+    def _token_for(self, role):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username=f'evidence_{role.replace(" ", "")}_{User.objects.count()}',
+                email=f'evidence_{User.objects.count()}@test.com',
+            )
+            user.groups.add(Group.objects.get(name=role))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def _criterion_and_year(self):
+        from .models.compliance import AccreditationCriterion
+        from .models.finance import FinancialYear
+
+        criterion = AccreditationCriterion.objects.create(
+            body=AccreditationCriterion.BODY_NAAC, code="1.1", title="Curricular Planning",
+        )
+        fy = FinancialYear.objects.create(
+            label=f"AY-{FinancialYear.objects.count()}",
+            start_date=datetime.date(2025, 6, 1), end_date=datetime.date(2026, 5, 31),
+        )
+        return criterion, fy
+
+    def test_submit_then_sign_off_workflow(self):
+        from .models.compliance import EvidenceItem
+
+        with schema_context(self.tenant.schema_name):
+            criterion, fy = self._criterion_and_year()
+            item = EvidenceItem.objects.create(
+                criterion=criterion, department=self.dept, financial_year=fy,
+                description="Board of Studies minutes",
+            )
+            faculty_token = self._token_for('Faculty')
+            hod_token = self._token_for('Department Head')
+
+        submit_res = self.client.post(
+            reverse('evidenceitem-submit', args=[item.id]),
+            HTTP_AUTHORIZATION=f'Bearer {faculty_token.access_token}',
+        )
+        self.assertEqual(submit_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(submit_res.data["evidence"]["status"], EvidenceItem.STATUS_SUBMITTED)
+
+        # A plain Faculty member cannot sign off their own submission.
+        denied_res = self.client.post(
+            reverse('evidenceitem-sign-off', args=[item.id]),
+            HTTP_AUTHORIZATION=f'Bearer {faculty_token.access_token}',
+        )
+        self.assertEqual(denied_res.status_code, status.HTTP_403_FORBIDDEN)
+
+        signoff_res = self.client.post(
+            reverse('evidenceitem-sign-off', args=[item.id]),
+            HTTP_AUTHORIZATION=f'Bearer {hod_token.access_token}',
+        )
+        self.assertEqual(signoff_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(signoff_res.data["evidence"]["status"], EvidenceItem.STATUS_SIGNED_OFF)
+
+    def test_cannot_submit_an_already_submitted_item(self):
+        from .models.compliance import EvidenceItem
+
+        with schema_context(self.tenant.schema_name):
+            criterion, fy = self._criterion_and_year()
+            item = EvidenceItem.objects.create(
+                criterion=criterion, financial_year=fy, status=EvidenceItem.STATUS_SUBMITTED,
+            )
+            token = self._token_for('Faculty')
+
+        response = self.client.post(
+            reverse('evidenceitem-submit', args=[item.id]),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_evidence_item_can_reuse_an_existing_compliance_certificate(self):
+        from .models.compliance import EvidenceItem, ComplianceCertificateType, ComplianceCertificate
+
+        with schema_context(self.tenant.schema_name):
+            criterion, fy = self._criterion_and_year()
+            cert_type = ComplianceCertificateType.objects.create(name="Fire Safety NOC")
+            cert = ComplianceCertificate.objects.create(certificate_type=cert_type)
+            item = EvidenceItem.objects.create(
+                criterion=criterion, financial_year=fy, linked_certificate=cert,
+                description="Reused Fire NOC as evidence for infra criterion",
+            )
+            self.assertEqual(item.linked_certificate_id, cert.id)
+
+
+class StateComplianceAndScholarshipTests(TenantTestCase):
+    """Missing-module additions: state-varying certificate catalog and
+    state scholarship reconciliation, next to the Fees module."""
+
+    def test_seed_command_creates_state_varying_certificate_types(self):
+        from django.core.management import call_command
+        from .models.compliance import ComplianceCertificateType
+
+        with schema_context(self.tenant.schema_name):
+            call_command('seed_compliance_certificate_types')
+            professional_tax = ComplianceCertificateType.objects.filter(
+                name__icontains="Professional Tax",
+            ).first()
+            self.assertIsNotNone(professional_tax)
+            self.assertTrue(professional_tax.varies_by_state)
+            # Safe to re-run — second call must not create duplicates.
+            call_command('seed_compliance_certificate_types')
+            self.assertEqual(
+                ComplianceCertificateType.objects.filter(name__icontains="Professional Tax").count(), 1,
+            )
+
+    def test_seed_command_creates_naac_and_nba_criteria(self):
+        from django.core.management import call_command
+        from .models.compliance import AccreditationCriterion
+
+        with schema_context(self.tenant.schema_name):
+            call_command('seed_accreditation_criteria')
+            self.assertTrue(AccreditationCriterion.objects.filter(body='NAAC', code='1.1').exists())
+            self.assertTrue(AccreditationCriterion.objects.filter(body='NBA', code='3').exists())
+
+    def test_scholarship_record_reconciliation_gap(self):
+        from decimal import Decimal
+        from .models.finance import FinancialYear
+        from .models.scholarship import StateScholarshipScheme, StudentScholarshipRecord
+
+        with schema_context(self.tenant.schema_name):
+            fy = FinancialYear.objects.create(
+                label="2025-2026", start_date=datetime.date(2025, 4, 1), end_date=datetime.date(2026, 3, 31),
+            )
+            scheme = StateScholarshipScheme.objects.create(name="Maharashtra EBC Scholarship", state="Maharashtra")
+            student = User.objects.create_user(username="scholar1", email="scholar1@test.com")
+            record = StudentScholarshipRecord.objects.create(
+                student=student, scheme=scheme, financial_year=fy,
+                sanctioned_amount=Decimal("20000.00"), disbursed_amount=Decimal("12000.00"),
+            )
+            self.assertEqual(record.reconciliation_gap, Decimal("8000.00"))
+
+
+class NBAAttainmentRollupTests(TenantTestCase):
+    """P7 completion: class-level CO attainment and its roll-up to PO
+    attainment via the CO-PO correlation matrix — the piece the original
+    plan flagged as genuinely new work and the one this session added."""
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            for role in ('Management',):
+                Group.objects.get_or_create(name=role)
+            self.dept = Department.objects.create(name="Electronics", code="ECE")
+
+    def _admin_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username=f'nba_admin_{User.objects.count()}',
+                email=f'nba_admin_{User.objects.count()}@test.com', password='pw12345!',
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def _program_and_course(self):
+        from .models.academics import Program, Regulation
+        from .models.course import Course
+        from .services.academics import get_default_grading_scheme
+
+        program = Program.objects.create(name="B.Tech Electronics", code="BTECE", department=self.dept)
+        regulation = Regulation.objects.create(
+            program=program, code="R2021NBA", effective_from_year=2018,
+            grading_scheme=get_default_grading_scheme(),
+        )
+        course = Course.objects.create(
+            course_code="EC301", course_name="Signals & Systems", department=self.dept,
+            regulation=regulation, semester_number=3, credits=4,
+        )
+        return program, course
+
+    def _evaluated_paper(self, course, student, co_code, obtained, max_marks=10):
+        from .models.valuation import ScannedPaper, ValuationSession
+        from .models.exam import Exam, ExamType
+        from .models.profile import TeachingStaffProfile
+        from django.utils import timezone
+
+        exam_type = ExamType.objects.create(name="Mid", code=f"NBA{ScannedPaper.objects.count()}")
+        exam = Exam.objects.create(
+            name="NBA Attainment Exam", exam_type=exam_type, department=self.dept, course=course,
+            date="2026-11-01", start_time="09:00", end_time="12:00",
+            question_structure={"Q1": {"marks": max_marks, "course_outcome": co_code}},
+        )
+        evaluator_user = User.objects.create_user(
+            username=f"nba_eval{ScannedPaper.objects.count()}", email=f"nba_eval{ScannedPaper.objects.count()}@test.com",
+        )
+        evaluator = TeachingStaffProfile.objects.create(
+            user=evaluator_user, employee_id=f"NBAEMP-{ScannedPaper.objects.count()}", department=self.dept,
+        )
+        session = ValuationSession.objects.create(exam=exam, evaluator=evaluator)
+        return ScannedPaper.objects.create(
+            session=session, student=student, scanned_file_url="s3://x",
+            status="Evaluated", evaluated_at=timezone.now(), question_scores={"Q1": obtained},
+        )
+
+    def _student(self, username):
+        user = User.objects.create_user(username=username, email=f"{username}@test.com")
+        return StudentProfile.objects.create(user=user, student_id=f"NBA-{username}", department=self.dept)
+
+    def test_class_level_co_attainment_and_po_rollup(self):
+        from .models.outcomes import CourseOutcome, ProgramOutcome, POCOMapping
+        from .services.outcome_attainment import (
+            compute_course_outcome_class_attainment, compute_program_outcome_attainment,
+        )
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            co1 = CourseOutcome.objects.create(
+                course=course, code="CO1", statement="Analyse signals",
+                target_attainment_percent=50, target_student_percent=60,
+            )
+            co2 = CourseOutcome.objects.create(
+                course=course, code="CO2", statement="Design systems",
+                target_attainment_percent=50, target_student_percent=60,
+            )
+            po1 = ProgramOutcome.objects.create(program=program, code="PO1", statement="Engineering knowledge")
+            POCOMapping.objects.create(course_outcome=co1, program_outcome=po1, strength=3)
+            POCOMapping.objects.create(course_outcome=co2, program_outcome=po1, strength=1)
+
+            # CO1: 2 of 3 students clear the 50% per-student threshold (80%, 80%, 40%).
+            s1, s2, s3 = self._student("nba_s1"), self._student("nba_s2"), self._student("nba_s3")
+            self._evaluated_paper(course, s1, "CO1", obtained=8)
+            self._evaluated_paper(course, s2, "CO1", obtained=8)
+            self._evaluated_paper(course, s3, "CO1", obtained=4)
+            # CO2: none of the 3 students clear 50% (40% each).
+            self._evaluated_paper(course, s1, "CO2", obtained=4)
+            self._evaluated_paper(course, s2, "CO2", obtained=4)
+            self._evaluated_paper(course, s3, "CO2", obtained=4)
+
+            co_results = compute_course_outcome_class_attainment(course.id)
+            co1_result = next(r for r in co_results if r["code"] == "CO1")
+            co2_result = next(r for r in co_results if r["code"] == "CO2")
+
+            self.assertEqual(co1_result["students_considered"], 3)
+            self.assertEqual(co1_result["students_meeting_target"], 2)
+            self.assertAlmostEqual(co1_result["class_percent_meeting_target"], 66.67, delta=0.1)
+            self.assertTrue(co1_result["attained"])  # 66.67% >= 60% target_student_percent
+
+            self.assertEqual(co2_result["students_meeting_target"], 0)
+            self.assertEqual(co2_result["class_percent_meeting_target"], 0.0)
+            self.assertFalse(co2_result["attained"])
+
+            po_results = compute_program_outcome_attainment(program.id)
+            po1_result = next(r for r in po_results if r["code"] == "PO1")
+            # Weighted by strength: (66.67*3 + 0*1) / (3+1) = 50.0
+            self.assertAlmostEqual(po1_result["attainment_percent"], 50.0, delta=0.1)
+            self.assertEqual(len(po1_result["contributing_course_outcomes"]), 2)
+
+    def test_program_outcome_attainment_endpoint_and_csv_export(self):
+        from .models.outcomes import CourseOutcome, ProgramOutcome, POCOMapping
+
+        with schema_context(self.tenant.schema_name):
+            program, course = self._program_and_course()
+            co1 = CourseOutcome.objects.create(
+                course=course, code="CO1", statement="X", target_attainment_percent=50, target_student_percent=50,
+            )
+            po1 = ProgramOutcome.objects.create(program=program, code="PO1", statement="Y")
+            POCOMapping.objects.create(course_outcome=co1, program_outcome=po1, strength=2)
+            student = self._student("nba_endpoint_stu")
+            self._evaluated_paper(course, student, "CO1", obtained=9)
+            token = self._admin_token()
+
+        response = self.client.get(
+            reverse('program-outcome-attainment', args=[program.id]),
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        po1_data = next(r for r in response.data["program_outcomes"] if r["code"] == "PO1")
+        self.assertEqual(po1_data["attainment_percent"], 100.0)
+
+        csv_response = self.client.get(
+            reverse('program-outcome-attainment', args=[program.id]) + "?export=csv",
+            HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(csv_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(csv_response["Content-Type"], "text/csv")

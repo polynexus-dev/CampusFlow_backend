@@ -393,6 +393,14 @@ class RecordFeePaymentView(APIView):
         if amount_paid <= 0:
             return Response({"error": "amount_paid must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
 
+        from campusflow_app.models.finance import get_locked_financial_year_for_date
+        locked_fy = get_locked_financial_year_for_date(timezone.now().date())
+        if locked_fy:
+            return Response(
+                {"error": f"Financial year {locked_fy.label} is locked. New fee payments cannot be recorded against a closed year."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         valid_methods = [c[0] for c in FeePayment.METHOD_CHOICES]
         if method not in valid_methods:
             return Response({"error": f"Invalid payment method. Must be one of: {', '.join(valid_methods)}"}, status=status.HTTP_400_BAD_REQUEST)

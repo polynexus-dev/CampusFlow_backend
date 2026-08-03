@@ -8,8 +8,12 @@ user, writes need Faculty or above (the same bar as the question bank these
 outcomes tag into).
 """
 
+import csv
+import io
+
 from django.db import IntegrityError
 from django.db.models import ProtectedError
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -18,7 +22,10 @@ from rest_framework.views import APIView
 from ..models.academics import Program
 from ..models.course import Course
 from ..models.outcomes import CourseOutcome, POCOMapping, ProgramOutcome
-from ..permissions import IsFacultyOrAbove
+from ..permissions import IsFacultyOrAbove, IsHMOrAbove
+from ..services.outcome_attainment import (
+    compute_course_outcome_class_attainment, compute_program_outcome_attainment,
+)
 
 
 def _to_int(value, default=None):
@@ -331,3 +338,66 @@ class POCOMappingDetailView(_AdminWriteMixin, APIView):
             return Response({"error": "Mapping not found."}, status=status.HTTP_404_NOT_FOUND)
         mapping.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CourseOutcomeAttainmentView(APIView):
+    """
+    GET /api/courses/<course_id>/outcome-attainment/
+    Class-level CO attainment for one course — every student who sat an exam
+    for this course, rolled up per CourseOutcome. Restricted to Faculty+ (this
+    is aggregate class performance data, not an individual student's own
+    record — a different sensitivity bar than StudentTopicPerformanceView).
+    """
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+
+    def get(self, request, course_id):
+        course = Course.objects.filter(pk=course_id).first()
+        if not course:
+            return Response({"error": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        results = compute_course_outcome_class_attainment(course_id)
+        return Response({
+            "course_id": course.id,
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "course_outcomes": results,
+        })
+
+
+class ProgramOutcomeAttainmentView(APIView):
+    """
+    GET /api/academics/programs/<program_id>/outcome-attainment/[?format=csv]
+    The core NBA SAR output: every ProgramOutcome's attainment %, rolled up
+    from class-level CO attainment via the CO-PO correlation matrix. Gated at
+    HM-or-above — this is IQAC/HOD-facing accreditation data, the same bar as
+    other cross-student aggregate reports in this codebase.
+    """
+    permission_classes = [IsAuthenticated, IsHMOrAbove]
+
+    def get(self, request, program_id):
+        program = Program.objects.filter(pk=program_id).first()
+        if not program:
+            return Response({"error": "Program not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        results = compute_program_outcome_attainment(program_id)
+
+        if (request.query_params.get("export") or "").lower() == "csv":
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
+            writer.writerow(["PO/PSO/PEO Code", "Kind", "Statement", "Attainment %", "Contributing Course Outcomes"])
+            for po in results:
+                contributing = "; ".join(
+                    f"{c['course_code']} {c['course_outcome_code']} (strength {c['correlation_strength']}, {c['attainment_value']}%)"
+                    for c in po["contributing_course_outcomes"]
+                )
+                writer.writerow([po["code"], po["kind"], po["statement"], po["attainment_percent"], contributing])
+            response = HttpResponse(buffer.getvalue(), content_type="text/csv")
+            response["Content-Disposition"] = f'attachment; filename="sar_po_attainment_{program.code}.csv"'
+            return response
+
+        return Response({
+            "program_id": program.id,
+            "program_code": program.code,
+            "program_name": program.name,
+            "program_outcomes": results,
+        })

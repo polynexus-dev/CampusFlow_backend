@@ -6,7 +6,17 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("tenants", "0009_tenant_billing_cycle_tenant_subscription_end_date_and_more"),
+        # Was "0009_tenant_billing_cycle_tenant_subscription_end_date_and_more"
+        # — that migration was a fully duplicate parallel history of
+        # 0009-0011+0013 in the other branch (two branches independently ran
+        # makemigrations off 0008 and were merged in git without reconciling
+        # migrations), verified field-for-field identical except that its
+        # Invoice.bank_receipt was already a FileField, whereas the applied
+        # branch's 0012 left it as an ImageField. That duplicate was deleted;
+        # this migration (the one genuinely-needed piece of that branch) now
+        # grafts directly onto the branch actually applied to the real
+        # database, right after it adds Invoice (as an ImageField) and is_demo.
+        ("tenants", "0013_tenant_is_demo"),
     ]
 
     operations = [
