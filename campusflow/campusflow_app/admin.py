@@ -11,6 +11,7 @@ from .models.face_embedding import FaceEmbedding, FaceEmbeddingSample
 from .models.attendance_log import FaceAttendanceLog
 from .models.fraud_alert import FraudAlert
 from .models.device_reset import DeviceResetRequest
+from .models.ai_grading import AIGradingSuggestion
 
 
 # Register your models here.
@@ -29,4 +30,5 @@ admin.site.register(FaceEmbeddingSample)
 admin.site.register(FaceAttendanceLog)
 admin.site.register(FraudAlert)
 admin.site.register(DeviceResetRequest)
+admin.site.register(AIGradingSuggestion)
 

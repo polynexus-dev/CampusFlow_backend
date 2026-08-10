@@ -347,6 +347,16 @@ CELERY_TASK_TIME_LIMIT = int(os.environ.get("CELERY_TASK_TIME_LIMIT", 20))
 # instead. Keep below CELERY_TASK_TIME_LIMIT.
 FACE_PIPELINE_TASK_TIMEOUT = int(os.environ.get("FACE_PIPELINE_TASK_TIMEOUT", 15))
 
+# ============================================================
+# AI-ASSISTED VALUATION (Claude vision grading — see
+# campusflow_app/ai_grading.py and run_ai_grading_suggestion task)
+# ============================================================
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+AI_GRADING_MODEL = os.environ.get("AI_GRADING_MODEL", "claude-opus-5")
+# Scanned answer-sheet images are fetched server-side and capped before
+# being base64-encoded and sent to the grading model.
+AI_GRADING_MAX_IMAGE_BYTES = int(os.environ.get("AI_GRADING_MAX_IMAGE_BYTES", 10 * 1024 * 1024))
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/

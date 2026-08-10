@@ -61,6 +61,7 @@ from .tpo import RecruitmentDrive, PlacementApplication
 from .library import Book, BookCopy, BookIssue
 from .inventory import InventoryCategory, InventoryItem, Supplier, InventoryTransaction
 from .valuation import ValuationSession, ScannedPaper
+from .ai_grading import AIGradingSuggestion
 from .result import StudentExamResult
 from .result_correction import ResultCorrectionRequest
 from .consent import StudentConsent

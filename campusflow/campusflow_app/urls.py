@@ -126,7 +126,11 @@ from .views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationView
 from .views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
 from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
 from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
-from .views.valuation import ValuationSessionViewSet, ScannedPaperViewSet
+from .views.valuation import (
+    ValuationSessionViewSet, ScannedPaperViewSet,
+    ScannedPaperAISuggestView, ScannedPaperAISuggestionListView,
+    AIGradingSuggestionApplyView, AIGradingSuggestionRejectView,
+)
 from .views.result import StudentExamResultViewSet, ExamClassStatsView, ExamPublishResultsView
 from .views.result_correction import (
     ResultCorrectionRequestCreateView, HMCorrectionRequestListView, HMCorrectionRequestActionView,
@@ -490,6 +494,10 @@ urlpatterns = [
     path('valuation-sessions/<int:pk>/', ValuationSessionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='valuationsession-detail'),
     path('scanned-papers/', ScannedPaperViewSet.as_view({'get': 'list', 'post': 'create'}), name='scannedpaper-list'),
     path('scanned-papers/<int:pk>/', ScannedPaperViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='scannedpaper-detail'),
+    path('scanned-papers/<int:pk>/ai-suggest/', ScannedPaperAISuggestView.as_view(), name='scannedpaper-ai-suggest'),
+    path('scanned-papers/<int:pk>/ai-suggestions/', ScannedPaperAISuggestionListView.as_view(), name='scannedpaper-ai-suggestions'),
+    path('ai-suggestions/<int:pk>/apply/', AIGradingSuggestionApplyView.as_view(), name='ai-suggestion-apply'),
+    path('ai-suggestions/<int:pk>/reject/', AIGradingSuggestionRejectView.as_view(), name='ai-suggestion-reject'),
 
     # Student Exam Results
     path('exam-results/', StudentExamResultViewSet.as_view({'get': 'list', 'post': 'create'}), name='studentexamresult-list'),

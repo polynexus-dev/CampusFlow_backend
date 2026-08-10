@@ -44,6 +44,7 @@ from .models.profile import (
 from .models.schedule import Schedule
 from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
+from .models.ai_grading import AIGradingSuggestion
 from .models.result import StudentExamResult
 from .models.bus_tracking import BusRoute
 from .models.compliance import (
@@ -976,6 +977,26 @@ class ScannedPaperSerializer(serializers.ModelSerializer):
             if self.instance.session.status == 'Completed':
                 raise serializers.ValidationError("Cannot modify paper evaluation. The valuation session is completed/locked.")
         return attrs
+
+
+class AIGradingSuggestionSerializer(serializers.ModelSerializer):
+    requested_by_name = serializers.SerializerMethodField()
+    applied_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AIGradingSuggestion
+        fields = '__all__'
+        read_only_fields = [
+            'scanned_paper', 'requested_by', 'requested_at', 'model_used',
+            'question_scores_suggested', 'overall_confidence', 'overall_notes',
+            'status', 'error_message', 'applied_at', 'applied_by',
+        ]
+
+    def get_requested_by_name(self, obj):
+        return obj.requested_by.get_full_name() or obj.requested_by.username if obj.requested_by else None
+
+    def get_applied_by_name(self, obj):
+        return obj.applied_by.get_full_name() or obj.applied_by.username if obj.applied_by else None
 
 
 # ── Student Exam Results ──

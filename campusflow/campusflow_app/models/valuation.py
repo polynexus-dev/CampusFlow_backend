@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from .exam import Exam
 from .profile import TeachingStaffProfile, StudentProfile
@@ -37,6 +38,11 @@ class ScannedPaper(models.Model):
     # New fields for college valuation requirements
     mask_code = models.CharField(max_length=50, unique=True, blank=True, null=True, help_text="Anonymous code for blind evaluation")
     question_scores = models.JSONField(default=dict, blank=True, help_text="Breakdown of marks by question (e.g. {'Q1': 10, 'Q2': 8})")
+    evaluated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="+",
+        help_text="Who last set this paper to Evaluated — manually, or by applying an AI grading suggestion.",
+    )
 
     def save(self, *args, **kwargs):
         if not self.mask_code:

@@ -13,7 +13,7 @@ ALL_ERP_MODULES = [
     "management", "administrator", "department", "room", "staff",
     "student", "attendance", "schedule", "leave", "payroll",
     "exams", "analytics", "announcements", "audit-logs", "assignments",
-    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation",
+    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "ai-valuation",
     "compliance-center", "ledger", "audit-portal",
     # Deliberately absent from PREMIUM_MODULES below: the academic calendar and
     # curriculum are foundational — exams and schedules are stamped with a term,
@@ -30,7 +30,7 @@ ALL_ERP_MODULES = [
 # premium-gated and being role-restricted are independent checks.
 PREMIUM_MODULES = {
     "attendance", "leave", "payroll", "exams", "assignments",
-    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "announcements",
+    "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "ai-valuation", "announcements",
     "compliance-center", "ledger", "audit-portal",
 }
 
@@ -51,11 +51,11 @@ ROLE_DEFAULT_MODULES = {
     "Department Head": [
         "dashboard", "department", "room", "staff", "student", "attendance",
         "schedule", "settings", "leave", "exams", "analytics", "announcements",
-        "assignments", "tpo", "library", "valuation", "academics", "curriculum", "transcript"
+        "assignments", "tpo", "library", "valuation", "ai-valuation", "academics", "curriculum", "transcript"
     ],
     "Faculty": [
         "dashboard", "attendance", "schedule", "settings", "leave", "exams",
-        "announcements", "analytics", "assignments", "valuation", "transcript"
+        "announcements", "analytics", "assignments", "valuation", "ai-valuation", "transcript"
     ],
     "Support Staff": [
         "dashboard", "room", "settings", "leave", "announcements", "hostel",

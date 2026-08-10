@@ -69,6 +69,11 @@ class Exam(models.Model):
     )
     question_paper_url = models.CharField(max_length=500, blank=True, null=True, help_text="S3 / storage URL of the question paper PDF")
     question_structure = models.JSONField(default=dict, blank=True, help_text="Predefined structure of questions and max marks, e.g. {'Q1': 10, 'Q2': 10}")
+    answer_key = models.JSONField(
+        default=dict, blank=True,
+        help_text="Optional per-question model answer / rubric used for AI-assisted grading, "
+                   "e.g. {'Q1': {'max_marks': 10, 'rubric': 'Award full marks if...'}}",
+    )
     invigilator = models.ForeignKey(
         User, on_delete=models.SET_NULL,
         null=True, blank=True,
