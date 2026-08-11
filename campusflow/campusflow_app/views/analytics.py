@@ -23,7 +23,9 @@ from ..models.profile import (
     StudentProfile, TeachingStaffProfile, NonTeachingStaffProfile,
     ManagementProfile, AdministratorProfile, DepartmentHeadProfile
 )
+from ..models.risk_score import StudentRiskScore
 from ..permissions import IsCollegeAdmin, IsFacultyOrAbove, get_user_group, is_college_admin
+from ..serializers import StudentRiskScoreSerializer
 
 
 class OverviewKPIView(APIView):
@@ -253,3 +255,28 @@ class PayrollSummaryView(APIView):
                 })
 
         return Response(monthly_data, status=status.HTTP_200_OK)
+
+
+class AtRiskStudentsView(APIView):
+    """
+    GET: Cached dropout/at-risk scores (see services/risk_scoring.py and the
+    recompute_risk_scores management command — this endpoint only reads the
+    precomputed StudentRiskScore table, it never scores on request).
+    Optional ?department_id=&tier= filters.
+    """
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+
+    def get(self, request):
+        scores = StudentRiskScore.objects.select_related(
+            'student__user', 'student__department',
+        ).order_by('-risk_score')
+
+        department_id = request.query_params.get('department_id')
+        if department_id:
+            scores = scores.filter(student__department_id=department_id)
+
+        tier = request.query_params.get('tier')
+        if tier:
+            scores = scores.filter(risk_tier=tier)
+
+        return Response(StudentRiskScoreSerializer(scores, many=True).data, status=status.HTTP_200_OK)

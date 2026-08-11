@@ -51,12 +51,20 @@ from .views.payroll import (
 from .views.exam import ExamTypeListCreateView, ExamListCreateView, ExamDetailView
 from .views.course import CourseListCreateView, CourseDetailView
 from .views.schedule import ScheduleListView, TeacherTodayScheduleView
+from .views.timetable_generation import (
+    GenerateTimetableView, TimetableGenerationRunViewSet,
+    ApplyTimetableGenerationRunView, DiscardTimetableGenerationRunView,
+)
 from .views.attendance_correction import (
     GuardianCreateCorrectionRequestView, TeacherCorrectionRequestListView,
     TeacherCorrectionRequestActionView,
 )
 from .views.quick_create import QuickCreatePostView
 from .views.enrollment import AdminEnrollStudentView, StudentConsentGrantView, EnrollmentStatsView
+from .views.admissions import (
+    LeadViewSet, LeadActivityViewSet, LeadMarkContactedView, LeadSubmitApplicationView,
+    LeadAdmitView, LeadCloseView, LeadConvertToStudentView,
+)
 from .views.face_registration_queue import (
     FaceRegistrationQueueView, FaceRegistrationCaptureView, FaceRegistrationRetakeView,
 )
@@ -96,7 +104,7 @@ from .views.assignment import AssignmentListCreateView, AssignmentDetailView
 from .views.submission import SubmissionListCreateView, SubmissionGradeView
 from .views.analytics import (
     OverviewKPIView, AttendanceTrendsView, DepartmentPerformanceView,
-    LeaveAnalyticsView, PayrollSummaryView
+    LeaveAnalyticsView, PayrollSummaryView, AtRiskStudentsView
 )
 from .views.bus_tracking import (
     BusRouteListCreateView, BusRouteDetailView,
@@ -140,6 +148,8 @@ from .views.compliance import (
     AISHEAnnualReturnView, AICTEDisclosureView, NAACExtendedProfileView,
     AccreditationCriterionViewSet, EvidenceItemViewSet,
     SubmitEvidenceItemView, SignOffEvidenceItemView, SSRExportView,
+    CriterionNarrativeDraftRequestView, AccreditationNarrativeDraftViewSet,
+    NarrativeDraftApplyView, NarrativeDraftRejectView,
 )
 from .views.finance import (
     FinancialYearViewSet, CloseFinancialYearView,
@@ -335,6 +345,13 @@ urlpatterns = [
     path('schedules/', ScheduleListView.as_view(), name='schedule-list'),
     path('schedule/today/', TeacherTodayScheduleView.as_view(), name='schedule-today'),
 
+    # Timetable generation (OR-Tools CP-SAT)
+    path('timetable/generate/', GenerateTimetableView.as_view(), name='timetable-generate'),
+    path('timetable-generation-runs/', TimetableGenerationRunViewSet.as_view({'get': 'list'}), name='timetablegenerationrun-list'),
+    path('timetable-generation-runs/<int:pk>/', TimetableGenerationRunViewSet.as_view({'get': 'retrieve'}), name='timetablegenerationrun-detail'),
+    path('timetable-generation-runs/<int:pk>/apply/', ApplyTimetableGenerationRunView.as_view(), name='timetablegenerationrun-apply'),
+    path('timetable-generation-runs/<int:pk>/discard/', DiscardTimetableGenerationRunView.as_view(), name='timetablegenerationrun-discard'),
+
     # ── Attendance Correction Requests ───────────────────────────────
     path('attendance/corrections/', GuardianCreateCorrectionRequestView.as_view(), name='attendance-correction-create'),
     path('attendance/corrections/list/', TeacherCorrectionRequestListView.as_view(), name='attendance-correction-list'),
@@ -348,6 +365,7 @@ urlpatterns = [
     path('analytics/payroll/', PayrollSummaryView.as_view(), name='analytics-payroll'),
     path('analytics/student-progress/', StudentProgressView.as_view(), name='analytics-student-progress'),
     path('analytics/student-topic-performance/', StudentTopicPerformanceView.as_view(), name='analytics-student-topic-performance'),
+    path('analytics/at-risk-students/', AtRiskStudentsView.as_view(), name='analytics-at-risk-students'),
 
     # ── Assignments ──────────────────────────────────────────────────
     path('assignments/', AssignmentListCreateView.as_view(), name='assignment-list-create'),
@@ -360,6 +378,17 @@ urlpatterns = [
     path('students/enroll/', AdminEnrollStudentView.as_view(), name='admin-enroll-student'),
     path('students/enrollment-stats/', EnrollmentStatsView.as_view(), name='enrollment-stats'),
     path('consents/<int:pk>/grant/', StudentConsentGrantView.as_view(), name='consent-grant'),
+
+    # Admissions / CRM
+    path('leads/', LeadViewSet.as_view({'get': 'list', 'post': 'create'}), name='lead-list'),
+    path('leads/<int:pk>/', LeadViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='lead-detail'),
+    path('lead-activities/', LeadActivityViewSet.as_view({'get': 'list', 'post': 'create'}), name='leadactivity-list'),
+    path('lead-activities/<int:pk>/', LeadActivityViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='leadactivity-detail'),
+    path('leads/<int:pk>/mark-contacted/', LeadMarkContactedView.as_view(), name='lead-mark-contacted'),
+    path('leads/<int:pk>/submit-application/', LeadSubmitApplicationView.as_view(), name='lead-submit-application'),
+    path('leads/<int:pk>/admit/', LeadAdmitView.as_view(), name='lead-admit'),
+    path('leads/<int:pk>/close/', LeadCloseView.as_view(), name='lead-close'),
+    path('leads/<int:pk>/convert/', LeadConvertToStudentView.as_view(), name='lead-convert'),
 
     # ── Face Registration Queue (Admin) ──────────────────────────────
     path('face-registration/queue/', FaceRegistrationQueueView.as_view(), name='face-registration-queue'),
@@ -565,6 +594,11 @@ urlpatterns = [
     path('evidence-items/<int:pk>/submit/', SubmitEvidenceItemView.as_view(), name='evidenceitem-submit'),
     path('evidence-items/<int:pk>/sign-off/', SignOffEvidenceItemView.as_view(), name='evidenceitem-sign-off'),
     path('compliance-center/ssr-export/', SSRExportView.as_view(), name='compliance-center-ssr-export'),
+    path('accreditation-criteria/<int:pk>/narrative-draft/', CriterionNarrativeDraftRequestView.as_view(), name='accreditationcriterion-narrative-draft'),
+    path('narrative-drafts/', AccreditationNarrativeDraftViewSet.as_view({'get': 'list'}), name='narrativedraft-list'),
+    path('narrative-drafts/<int:pk>/', AccreditationNarrativeDraftViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'}), name='narrativedraft-detail'),
+    path('narrative-drafts/<int:pk>/apply/', NarrativeDraftApplyView.as_view(), name='narrativedraft-apply'),
+    path('narrative-drafts/<int:pk>/reject/', NarrativeDraftRejectView.as_view(), name='narrativedraft-reject'),
 
     # State scholarship reconciliation (missing-module addition)
     path('scholarship-schemes/', StateScholarshipSchemeViewSet.as_view({'get': 'list', 'post': 'create'}), name='scholarshipscheme-list'),

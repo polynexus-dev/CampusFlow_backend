@@ -62,8 +62,8 @@ ua-parser-builtins==202605
 # ── Task Queue (offloads face-recognition CPU inference off the request cycle) ─
 celery==5.4.0
 
-# ── AI-Assisted Grading (Claude vision + structured outputs) ────────────────
-anthropic>=0.40
+# ── Scheduling / Constraint Solver (automatic timetable generation) ─────────
+ortools>=9.9
 
 # ── Observability ────────────────────────────────────────────────────────────
 sentry-sdk==2.20.0

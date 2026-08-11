@@ -45,6 +45,10 @@ from .models.schedule import Schedule
 from .models.tpo import PlacementApplication, RecruitmentDrive
 from .models.valuation import ScannedPaper, ValuationSession
 from .models.ai_grading import AIGradingSuggestion
+from .models.risk_score import StudentRiskScore
+from .models.accreditation_narrative import AccreditationNarrativeDraft
+from .models.admissions import Lead, LeadActivity
+from .models.timetable_generation import TimetableGenerationRun
 from .models.result import StudentExamResult
 from .models.bus_tracking import BusRoute
 from .models.compliance import (
@@ -997,6 +1001,106 @@ class AIGradingSuggestionSerializer(serializers.ModelSerializer):
 
     def get_applied_by_name(self, obj):
         return obj.applied_by.get_full_name() or obj.applied_by.username if obj.applied_by else None
+
+
+class StudentRiskScoreSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_number = serializers.CharField(source='student.student_id', read_only=True)
+    department_name = serializers.CharField(source='student.department.name', read_only=True, default=None)
+
+    class Meta:
+        model = StudentRiskScore
+        fields = [
+            'id', 'student', 'student_name', 'student_number', 'department_name',
+            'computed_at', 'risk_score', 'risk_tier', 'attendance_rate',
+            'fee_overdue_amount', 'exam_trend_score', 'assignment_submission_rate', 'notes',
+        ]
+
+    def get_student_name(self, obj):
+        if not obj.student or not obj.student.user:
+            return "Unknown Student"
+        return obj.student.user.get_full_name() or obj.student.user.username
+
+
+class AccreditationNarrativeDraftSerializer(serializers.ModelSerializer):
+    criterion_code = serializers.CharField(source='criterion.code', read_only=True)
+    criterion_title = serializers.CharField(source='criterion.title', read_only=True)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    requested_by_name = serializers.SerializerMethodField()
+    applied_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AccreditationNarrativeDraft
+        fields = '__all__'
+        # narrative_text/caveats stay writable — editing the AI's prose draft
+        # before applying it is the expected normal path, not an exception
+        # (see AccreditationNarrativeDraft's docstring).
+        read_only_fields = [
+            'criterion', 'financial_year', 'requested_by', 'requested_at', 'model_used',
+            'status', 'error_message', 'applied_at', 'applied_by',
+        ]
+
+    def get_requested_by_name(self, obj):
+        return obj.requested_by.get_full_name() or obj.requested_by.username if obj.requested_by else None
+
+    def get_applied_by_name(self, obj):
+        return obj.applied_by.get_full_name() or obj.applied_by.username if obj.applied_by else None
+
+
+class LeadActivitySerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LeadActivity
+        fields = '__all__'
+        read_only_fields = ['created_by']
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() or obj.created_by.username if obj.created_by else None
+
+
+class LeadSerializer(serializers.ModelSerializer):
+    interested_department_name = serializers.CharField(source='interested_department.name', read_only=True, default=None)
+    interested_program_name = serializers.CharField(source='interested_program.name', read_only=True, default=None)
+    assigned_to_name = serializers.SerializerMethodField()
+    activity_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Lead
+        fields = '__all__'
+        read_only_fields = [
+            'status', 'priority_score', 'priority_tier', 'priority_computed_at',
+            'converted_student', 'close_reason', 'created_by',
+            'contacted_at', 'admitted_at', 'enrolled_at', 'closed_at',
+        ]
+
+    def get_assigned_to_name(self, obj):
+        return obj.assigned_to.get_full_name() or obj.assigned_to.username if obj.assigned_to else None
+
+    def get_activity_count(self, obj):
+        return obj.activities.count()
+
+
+class TimetableGenerationRunSerializer(serializers.ModelSerializer):
+    term_name = serializers.CharField(source='term.name', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True, default=None)
+    requested_by_name = serializers.SerializerMethodField()
+    draft_schedule_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TimetableGenerationRun
+        fields = '__all__'
+        read_only_fields = [
+            'term', 'department', 'requested_by', 'requested_at', 'status',
+            'solve_time_seconds', 'unscheduled_offerings', 'error_message',
+            'applied_at', 'applied_by',
+        ]
+
+    def get_requested_by_name(self, obj):
+        return obj.requested_by.get_full_name() or obj.requested_by.username if obj.requested_by else None
+
+    def get_draft_schedule_count(self, obj):
+        return obj.draft_schedules.count()
 
 
 # ── Student Exam Results ──

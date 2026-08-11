@@ -7,6 +7,11 @@ class Classroom(models.Model):
     # polygon = gis_models.PolygonField(
     #     srid=4326, help_text="Classroom boundary by four (lat, lon) corners")
     code = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    capacity = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Seating capacity. Optional — used by timetable generation to enforce room-fit "
+                   "against a section's size; a classroom with no capacity set skips that check.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     # ── ADVANCED GEOFENCING (Bounding Box) ──

@@ -125,17 +125,18 @@ def run_face_pipeline(photo_b64: str, photo_prev_b64: str | None, challenge_type
     }
 
 
-@shared_task(name="campusflow_app.run_ai_grading_suggestion", time_limit=90, soft_time_limit=75)
+@shared_task(name="campusflow_app.run_ai_grading_suggestion", time_limit=300, soft_time_limit=270)
 def run_ai_grading_suggestion(schema_name: str, suggestion_id: int) -> None:
     """
-    Fetches a ScannedPaper's scanned image, grades it via Claude, and writes
-    the result onto the AIGradingSuggestion row. Unlike run_face_pipeline,
-    this task does need DB + tenant-schema access (it reads the exam's
-    rubric and writes the suggestion), so it wraps its body in
-    schema_context — the same per-tenant pattern used by the
+    Fetches a ScannedPaper's scanned image, grades it via a local Ollama
+    vision model, and writes the result onto the AIGradingSuggestion row.
+    Unlike run_face_pipeline, this task does need DB + tenant-schema access
+    (it reads the exam's rubric and writes the suggestion), so it wraps its
+    body in schema_context — the same per-tenant pattern used by the
     fine_tune_face_embeddings management command. Its own time_limit is
-    higher than CELERY_TASK_TIME_LIMIT because LLM round-trips run longer
-    than the local ONNX inference the default budgets for.
+    much higher than CELERY_TASK_TIME_LIMIT because CPU-bound local LLM
+    inference on a scanned image runs far longer than the local ONNX
+    inference the default budgets for.
 
     Never raises — any failure is recorded on the suggestion row as
     status="failed" so the caller (which fired this with .delay(), not
@@ -157,9 +158,9 @@ def run_ai_grading_suggestion(schema_name: str, suggestion_id: int) -> None:
         exam = paper.session.exam
 
         try:
-            image_bytes, media_type = fetch_scanned_image(paper.scanned_file_url)
+            image_bytes, _media_type = fetch_scanned_image(paper.scanned_file_url)
             result = grade_scanned_paper(
-                image_bytes, media_type, exam.question_structure, exam.answer_key,
+                image_bytes, exam.question_structure, exam.answer_key,
             )
         except AIGradingError as e:
             suggestion.status = "failed"
@@ -189,3 +190,126 @@ def run_ai_grading_suggestion(schema_name: str, suggestion_id: int) -> None:
         suggestion.save(update_fields=[
             "question_scores_suggested", "overall_confidence", "overall_notes", "model_used",
         ])
+
+
+@shared_task(name="campusflow_app.run_accreditation_narrative_draft", time_limit=240, soft_time_limit=210)
+def run_accreditation_narrative_draft(schema_name: str, draft_id: int) -> None:
+    """
+    Drafts an SSR/AQAR criterion narrative via a local Ollama text model and
+    writes it onto the AccreditationNarrativeDraft row. Same shape as
+    run_ai_grading_suggestion: schema_context-wrapped (Celery workers have
+    no ambient tenant context), never raises (the caller polls via
+    .delay(), not .get()), and a higher time_limit than the file-level
+    Celery default since local CPU prose generation runs far longer than
+    the local ONNX inference the default budgets for.
+    """
+    from .ai_narrative import NarrativeDraftError, build_criterion_narrative
+    from .models.accreditation_narrative import AccreditationNarrativeDraft
+
+    with schema_context(schema_name):
+        try:
+            draft = AccreditationNarrativeDraft.objects.select_related(
+                "criterion", "financial_year",
+            ).get(pk=draft_id)
+        except AccreditationNarrativeDraft.DoesNotExist:
+            logger.error("run_accreditation_narrative_draft: draft %s not found in schema %s", draft_id, schema_name)
+            return
+
+        try:
+            result = build_criterion_narrative(draft.criterion, draft.financial_year)
+        except NarrativeDraftError as e:
+            draft.status = "failed"
+            draft.error_message = str(e)
+            draft.save(update_fields=["status", "error_message"])
+            return
+        except Exception as e:  # noqa: BLE001 - last-resort guard so a bug here always lands as a visible failed draft
+            logger.exception("run_accreditation_narrative_draft: unexpected error drafting %s", draft_id)
+            draft.status = "failed"
+            draft.error_message = f"Unexpected error: {e}"
+            draft.save(update_fields=["status", "error_message"])
+            return
+
+        draft.narrative_text = result.get("narrative", "")
+        draft.caveats = result.get("caveats", "")
+        draft.model_used = getattr(settings, "AI_GRADING_MODEL", "")
+        draft.save(update_fields=["narrative_text", "caveats", "model_used"])
+
+
+@shared_task(name="campusflow_app.run_generate_timetable", time_limit=90, soft_time_limit=80)
+def run_generate_timetable(schema_name: str, run_id: int) -> None:
+    """
+    Solves the timetabling CSP for one TimetableGenerationRun via CP-SAT
+    (services/timetable_generation.py) and writes the result as draft
+    Schedule rows (is_draft=True) linked to the run — never live rows.
+    Same shape as the other tasks in this file: schema_context-wrapped,
+    fetch-or-log-and-return, never raises past the task boundary. The task's
+    own time_limit (90s) sits above the solver's internal search budget
+    (TIMETABLE_SOLVER_TIME_LIMIT_SECONDS, default 60s) to leave headroom for
+    the DB writes.
+    """
+    import datetime
+    import time
+
+    from .models.offerings import CourseOffering
+    from .models.schedule import Schedule
+    from .models.timetable_generation import TimetableGenerationRun
+    from .services.timetable_generation import TimetableInfeasibleError, generate_timetable
+
+    def add_one_hour(start_time):
+        # Every v1 slot is exactly 1 hour (see TIMETABLE_SLOT_START_TIMES) —
+        # combine with a throwaway date so the stdlib handles any edge case,
+        # then discard the date again.
+        return (datetime.datetime.combine(datetime.date.today(), start_time)
+                + datetime.timedelta(hours=1)).time()
+
+    with schema_context(schema_name):
+        try:
+            run = TimetableGenerationRun.objects.select_related("term", "department").get(pk=run_id)
+        except TimetableGenerationRun.DoesNotExist:
+            logger.error("run_generate_timetable: run %s not found in schema %s", run_id, schema_name)
+            return
+
+        started = time.monotonic()
+        try:
+            placements = generate_timetable(run.term, department=run.department)
+        except TimetableInfeasibleError as e:
+            run.status = "infeasible"
+            run.solve_time_seconds = time.monotonic() - started
+            run.unscheduled_offerings = e.unscheduled_offering_ids
+            run.save(update_fields=["status", "solve_time_seconds", "unscheduled_offerings"])
+            return
+        except Exception as e:  # noqa: BLE001 - last-resort guard so a bug here always lands as a visible failed run
+            logger.exception("run_generate_timetable: unexpected error solving run %s", run_id)
+            run.status = "failed"
+            run.error_message = f"Unexpected error: {e}"
+            run.save(update_fields=["status", "error_message"])
+            return
+
+        solve_time = time.monotonic() - started
+        course_id_by_offering = dict(
+            CourseOffering.objects.filter(
+                id__in={p["offering_id"] for p in placements},
+            ).values_list("id", "course_id")
+        )
+        draft_rows = [
+            Schedule(
+                course_id=course_id_by_offering[placement["offering_id"]],
+                faculty_id=placement["faculty_id"],
+                classroom_id=placement["classroom_id"],
+                day_of_week=placement["day_of_week"],
+                start_time=placement["start_time"],
+                end_time=add_one_hour(placement["start_time"]),
+                semester=run.term.name,
+                academic_year=run.term.academic_year.name,
+                term=run.term,
+                course_offering_id=placement["offering_id"],
+                is_draft=True,
+                generation_run=run,
+            )
+            for placement in placements
+        ]
+        Schedule.objects.bulk_create(draft_rows)
+
+        run.status = "completed"
+        run.solve_time_seconds = solve_time
+        run.save(update_fields=["status", "solve_time_seconds"])

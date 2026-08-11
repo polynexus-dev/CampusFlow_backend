@@ -348,14 +348,48 @@ CELERY_TASK_TIME_LIMIT = int(os.environ.get("CELERY_TASK_TIME_LIMIT", 20))
 FACE_PIPELINE_TASK_TIMEOUT = int(os.environ.get("FACE_PIPELINE_TASK_TIMEOUT", 15))
 
 # ============================================================
-# AI-ASSISTED VALUATION (Claude vision grading — see
-# campusflow_app/ai_grading.py and run_ai_grading_suggestion task)
+# AI-ASSISTED VALUATION (local Ollama vision grading — nothing about a
+# scanned paper leaves this machine. See campusflow_app/ai_grading.py and
+# the run_ai_grading_suggestion task. Requires `ollama serve` running and
+# `ollama pull <model>` done for AI_GRADING_MODEL beforehand. When Django
+# runs inside docker-compose, "localhost" is the web/celery_worker
+# container itself, not the Windows host running Ollama — override
+# OLLAMA_BASE_URL to http://host.docker.internal:11434 in that case.)
 # ============================================================
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-AI_GRADING_MODEL = os.environ.get("AI_GRADING_MODEL", "claude-opus-5")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+AI_GRADING_MODEL = os.environ.get("AI_GRADING_MODEL", "qwen2.5vl:3b")
+# Local CPU vision inference is much slower than a hosted API — generous vs.
+# the old Claude timeout on purpose.
+AI_GRADING_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AI_GRADING_REQUEST_TIMEOUT_SECONDS", 240))
+# Default Ollama context (2048) is too small once a vision-token image plus
+# the rubric/question-structure prompt and JSON-schema output are counted.
+AI_GRADING_NUM_CTX = int(os.environ.get("AI_GRADING_NUM_CTX", 8192))
 # Scanned answer-sheet images are fetched server-side and capped before
 # being base64-encoded and sent to the grading model.
 AI_GRADING_MAX_IMAGE_BYTES = int(os.environ.get("AI_GRADING_MAX_IMAGE_BYTES", 10 * 1024 * 1024))
+
+# ============================================================
+# ACCREDITATION NARRATIVE DRAFTING (local Ollama text model — see
+# campusflow_app/ai_narrative.py and the run_accreditation_narrative_draft
+# task). Shares OLLAMA_BASE_URL with AI-assisted valuation above.
+# ============================================================
+AI_NARRATIVE_MODEL = os.environ.get("AI_NARRATIVE_MODEL", "llama3.2:3b")
+AI_NARRATIVE_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AI_NARRATIVE_REQUEST_TIMEOUT_SECONDS", 180))
+AI_NARRATIVE_NUM_CTX = int(os.environ.get("AI_NARRATIVE_NUM_CTX", 8192))
+
+# ============================================================
+# TIMETABLE GENERATION (OR-Tools CP-SAT — see
+# campusflow_app/services/timetable_generation.py). A fixed, institution-wide
+# weekly slot grid for v1, not a per-institution calendar configuration UI.
+# ============================================================
+TIMETABLE_WORKING_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+# One hour each, skipping a 13:00 lunch break.
+TIMETABLE_SLOT_START_TIMES = [
+    datetime.time(hour) for hour in (9, 10, 11, 12, 14, 15, 16)
+]
+# Hard cap on a single solve — CP-SAT's own search budget, not the Celery
+# task's time_limit (which wraps this plus the DB writes with headroom).
+TIMETABLE_SOLVER_TIME_LIMIT_SECONDS = int(os.environ.get("TIMETABLE_SOLVER_TIME_LIMIT_SECONDS", 60))
 
 
 # Static files (CSS, JavaScript, Images)

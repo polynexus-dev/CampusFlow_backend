@@ -29,6 +29,25 @@ class Schedule(models.Model):
     substitute_faculty = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                        related_name='substituted_classes',
                                        help_text="The faculty currently assigned if different from original scheduled faculty.")
+    # The three fields below back automatic timetable generation
+    # (services/timetable_generation.py). Additive/nullable, same posture as
+    # `term` above — existing manually-created rows are unaffected
+    # (course_offering/generation_run null, is_draft defaults False i.e. "live").
+    course_offering = models.ForeignKey(
+        "campusflow_app.CourseOffering", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="schedules",
+        help_text="Set when this row was produced by (or reconciled against) timetable generation, "
+                   "which schedules against CourseOffering rather than bare Course.",
+    )
+    is_draft = models.BooleanField(
+        default=False,
+        help_text="True for a row produced by an unreviewed TimetableGenerationRun. Draft rows are "
+                   "excluded from normal schedule views until the run is applied.",
+    )
+    generation_run = models.ForeignKey(
+        "campusflow_app.TimetableGenerationRun", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="draft_schedules",
+    )
 
     class Meta:
         verbose_name = "Schedule"

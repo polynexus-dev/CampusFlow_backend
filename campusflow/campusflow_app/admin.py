@@ -12,6 +12,10 @@ from .models.attendance_log import FaceAttendanceLog
 from .models.fraud_alert import FraudAlert
 from .models.device_reset import DeviceResetRequest
 from .models.ai_grading import AIGradingSuggestion
+from .models.risk_score import StudentRiskScore
+from .models.accreditation_narrative import AccreditationNarrativeDraft
+from .models.admissions import Lead, LeadActivity
+from .models.timetable_generation import TimetableGenerationRun
 
 
 # Register your models here.
@@ -31,4 +35,9 @@ admin.site.register(FaceAttendanceLog)
 admin.site.register(FraudAlert)
 admin.site.register(DeviceResetRequest)
 admin.site.register(AIGradingSuggestion)
+admin.site.register(StudentRiskScore)
+admin.site.register(AccreditationNarrativeDraft)
+admin.site.register(Lead)
+admin.site.register(LeadActivity)
+admin.site.register(TimetableGenerationRun)
 

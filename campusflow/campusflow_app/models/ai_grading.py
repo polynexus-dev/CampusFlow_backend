@@ -13,7 +13,7 @@ class AIGradingSuggestion(models.Model):
       1. Evaluator triggers POST /scanned-papers/<pk>/ai-suggest/, which
          creates a row here with status='pending' and queues
          `run_ai_grading_suggestion` (see campusflow_app/tasks.py).
-      2. The task calls Claude (campusflow_app/ai_grading.py) and fills in
+      2. The task calls the local Ollama model (campusflow_app/ai_grading.py) and fills in
          `question_scores_suggested`/`overall_confidence`/`overall_notes` on
          success, or `error_message` and status='failed' on failure. It
          never touches ScannedPaper itself.

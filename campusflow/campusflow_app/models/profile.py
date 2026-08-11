@@ -269,6 +269,10 @@ class TeachingStaffProfile(models.Model):
     research_interests = models.TextField(blank=True, null=True)
     publications_link = models.URLField(max_length=500, blank=True, null=True)
     replacement_availability_preferences = models.TextField(blank=True, null=True, help_text="e.g., Available for substitutes on Tuesdays after 2 PM")
+    max_weekly_teaching_hours = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Optional cap used by timetable generation to avoid overloading this faculty member; unset = no limit.",
+    )
 
     # DPDP Compliance
     consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")

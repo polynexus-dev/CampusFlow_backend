@@ -25,21 +25,21 @@ class ScheduleListView(APIView):
 
         if is_saas_admin(user) or user_group in ('Management', 'Administrator'):
             # Admin roles see everything
-            qs = Schedule.objects.all().select_related('course', 'classroom', 'faculty')
+            qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
         elif user_group == 'student':
             # Students see their department's schedules
             profile = getattr(user, 'student_profile', None)
             if profile and hasattr(profile, 'department') and profile.department:
                 qs = Schedule.objects.filter(
-                    course__department=profile.department
+                    course__department=profile.department, is_draft=False,
                 ).select_related('course', 'classroom', 'faculty')
             else:
                 # No department set — show all schedules (demo/testing mode)
-                qs = Schedule.objects.all().select_related('course', 'classroom', 'faculty')
+                qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
         elif user_group == 'Faculty':
             # Faculty see their own scheduled classes (including substitutions)
             qs = Schedule.objects.filter(
-                Q(faculty=user) | Q(substitute_faculty=user)
+                Q(faculty=user) | Q(substitute_faculty=user), is_draft=False,
             ).select_related('course', 'classroom', 'faculty')
         else:
             qs = Schedule.objects.none()

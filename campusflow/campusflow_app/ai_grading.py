@@ -1,20 +1,21 @@
 """
 campusflow_app/ai_grading.py
 
-Claude-powered first-pass grading for scanned answer scripts. Mirrors the
-shape of face_utils.py: a lazy singleton client, small pure functions, and a
-single custom exception the caller (the Celery task in tasks.py) can catch
-without needing to know about the Anthropic SDK's exception hierarchy.
+Local, on-prem first-pass grading for scanned answer scripts — talks to
+Ollama (a vision-capable model, e.g. qwen2.5vl:3b) over HTTP instead of a
+third-party API, so scanned papers never leave the machine running Ollama.
+Mirrors the shape of face_utils.py: small pure functions, and a single
+custom exception the caller (the Celery task in tasks.py) can catch without
+needing to know about Ollama's HTTP error shapes.
 
 Never writes to the database — that's the caller's job. This module only
-fetches an image and asks Claude to grade it.
+fetches an image and asks the local model to grade it.
 """
 
 import base64
 import json
 import logging
 
-import anthropic
 import requests
 from django.conf import settings
 
@@ -49,19 +50,9 @@ _OUTPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
-_client = None
-
 
 class AIGradingError(Exception):
     """Raised for any failure fetching the scanned image or grading it — safe to store verbatim as AIGradingSuggestion.error_message."""
-
-
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        kwargs = {"api_key": settings.ANTHROPIC_API_KEY} if settings.ANTHROPIC_API_KEY else {}
-        _client = anthropic.Anthropic(**kwargs)
-    return _client
 
 
 def fetch_scanned_image(url: str) -> tuple[bytes, str]:
@@ -117,66 +108,62 @@ def _build_system_prompt(question_structure: dict, answer_key: dict) -> str:
     )
 
 
-def grade_scanned_paper(image_bytes: bytes, media_type: str, question_structure: dict, answer_key: dict) -> dict:
+def grade_scanned_paper(image_bytes: bytes, question_structure: dict, answer_key: dict) -> dict:
     """
-    Sends the scanned answer image + rubric to Claude and returns the parsed
-    structured suggestion (matching _OUTPUT_SCHEMA). Raises AIGradingError on
-    any failure — API errors, a model refusal, or unparseable output.
+    Sends the scanned answer image + rubric to the local Ollama vision model
+    and returns the parsed structured suggestion (matching _OUTPUT_SCHEMA).
+    Raises AIGradingError on any failure — Ollama unreachable/erroring, a
+    truncated response, or unparseable output.
     """
-    import base64
-
-    client = _get_client()
     system_prompt = _build_system_prompt(question_structure, answer_key)
 
-    try:
-        response = client.messages.create(
-            model=settings.AI_GRADING_MODEL,
-            max_tokens=4096,
-            system=[
-                {
-                    "type": "text",
-                    "text": system_prompt,
-                    # Shared verbatim across every paper in the same exam/session —
-                    # caches after the first call so only the per-paper image is
-                    # billed at full price on subsequent papers.
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[{
+    payload = {
+        "model": settings.AI_GRADING_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": base64.standard_b64encode(image_bytes).decode("utf-8"),
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": "Grade this scanned answer script against the rubric above and "
-                                "return the structured JSON result described.",
-                    },
-                ],
-            }],
-            output_config={"format": {"type": "json_schema", "schema": _OUTPUT_SCHEMA}},
+                "content": "Grade this scanned answer script against the rubric above and "
+                           "return the structured JSON result described.",
+                "images": [base64.standard_b64encode(image_bytes).decode("utf-8")],
+            },
+        ],
+        "format": _OUTPUT_SCHEMA,
+        "stream": False,
+        "options": {
+            "temperature": 0,
+            "num_predict": 4096,
+            "num_ctx": settings.AI_GRADING_NUM_CTX,
+        },
+    }
+
+    try:
+        response = requests.post(
+            f"{settings.OLLAMA_BASE_URL}/api/chat",
+            json=payload,
+            timeout=settings.AI_GRADING_REQUEST_TIMEOUT_SECONDS,
         )
-    except anthropic.NotFoundError as e:
-        raise AIGradingError(f"Grading model not found: {e}") from e
-    except anthropic.RateLimitError as e:
-        raise AIGradingError(f"Grading service is rate-limited, try again shortly: {e}") from e
-    except anthropic.APIStatusError as e:
-        raise AIGradingError(f"Grading service error ({e.status_code}): {e.message}") from e
-    except anthropic.APIConnectionError as e:
+        response.raise_for_status()
+    except requests.ConnectionError as e:
+        raise AIGradingError(
+            f"Could not reach the local grading model at {settings.OLLAMA_BASE_URL} — "
+            f"is `ollama serve` running and has `{settings.AI_GRADING_MODEL}` been pulled? ({e})"
+        ) from e
+    except requests.Timeout as e:
+        raise AIGradingError(
+            f"Local grading model timed out after {settings.AI_GRADING_REQUEST_TIMEOUT_SECONDS}s: {e}"
+        ) from e
+    except requests.HTTPError as e:
+        raise AIGradingError(f"Grading service error ({response.status_code}): {response.text[:500]}") from e
+    except requests.RequestException as e:
         raise AIGradingError(f"Could not reach the grading service: {e}") from e
 
-    if response.stop_reason == "refusal":
-        raise AIGradingError("The grading model declined to process this request.")
-    if response.stop_reason == "max_tokens":
+    data = response.json()
+
+    if data.get("done_reason") == "length":
         raise AIGradingError("The grading model's response was truncated before completing — try again.")
 
-    text = next((block.text for block in response.content if block.type == "text"), None)
+    text = (data.get("message") or {}).get("content")
     if not text:
         raise AIGradingError("The grading model returned no usable content.")
 

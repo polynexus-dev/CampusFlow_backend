@@ -9,12 +9,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.db import connection
+
 from ..demo_guard import IsNotDemoTenant
+from ..models.accreditation_narrative import AccreditationNarrativeDraft
 from ..models.compliance import (
     ComplianceCertificateType, ComplianceCertificate,
     AccreditationCriterion, EvidenceItem,
 )
 from ..models.department import Department
+from ..models.finance import FinancialYear
 from ..models.profile import (
     StudentProfile, TeachingStaffProfile, NonTeachingStaffProfile,
     ManagementProfile, AdministratorProfile, DepartmentHeadProfile,
@@ -23,8 +27,10 @@ from ..models.academics import Program
 from ..serializers import (
     ComplianceCertificateTypeSerializer, ComplianceCertificateSerializer,
     AccreditationCriterionSerializer, EvidenceItemSerializer,
+    AccreditationNarrativeDraftSerializer,
 )
 from ..permissions import IsSaaSOrCollegeAdmin, IsHMOrAbove
+from ..tasks import run_accreditation_narrative_draft
 
 
 class ComplianceCertificateTypeViewSet(viewsets.ModelViewSet):
@@ -288,6 +294,122 @@ class SignOffEvidenceItemView(APIView):
         return Response({"message": "Evidence signed off.", "evidence": EvidenceItemSerializer(item).data})
 
 
+# ─────────────────────────────────────────────
+# P7 — AI-Assisted Narrative Drafting (see campusflow_app/ai_narrative.py,
+# models/accreditation_narrative.py, run_accreditation_narrative_draft task)
+# ─────────────────────────────────────────────
+
+class CriterionNarrativeDraftRequestView(APIView):
+    """
+    POST /accreditation-criteria/<int:pk>/narrative-draft/?financial_year=<id>
+    Queues an AI-drafted first-pass SSR/AQAR narrative for one criterion+year.
+    Same permission bar as the rest of this file's admin/reporting views —
+    not the broader IsHMOrAbove used only for evidence sign-off.
+    """
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+
+    def post(self, request, pk):
+        try:
+            criterion = AccreditationCriterion.objects.get(pk=pk)
+        except AccreditationCriterion.DoesNotExist:
+            return Response({"error": "Accreditation criterion not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        financial_year_id = request.query_params.get("financial_year")
+        if not financial_year_id:
+            return Response({"error": "financial_year query param is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            financial_year = FinancialYear.objects.get(pk=financial_year_id)
+        except FinancialYear.DoesNotExist:
+            return Response({"error": "Financial year not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not criterion.evidence.filter(financial_year=financial_year).exists():
+            return Response(
+                {"error": "No evidence items recorded for this criterion and financial year yet — "
+                          "add evidence before requesting an AI draft."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # A fresh request supersedes any draft still awaiting review for the same criterion+year.
+        AccreditationNarrativeDraft.objects.filter(
+            criterion=criterion, financial_year=financial_year, status="pending",
+        ).update(status="rejected")
+
+        draft = AccreditationNarrativeDraft.objects.create(
+            criterion=criterion, financial_year=financial_year, requested_by=request.user,
+        )
+        run_accreditation_narrative_draft.delay(connection.schema_name, draft.id)
+
+        return Response(
+            AccreditationNarrativeDraftSerializer(draft).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class AccreditationNarrativeDraftViewSet(viewsets.ModelViewSet):
+    """
+    List/retrieve drafts (for polling a pending one, and browsing history),
+    and PATCH to edit narrative_text/caveats before applying — every other
+    field is read-only (see AccreditationNarrativeDraftSerializer).
+    """
+    queryset = AccreditationNarrativeDraft.objects.select_related(
+        "criterion", "financial_year", "requested_by", "applied_by",
+    ).all()
+    serializer_class = AccreditationNarrativeDraftSerializer
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        criterion = self.request.query_params.get("criterion")
+        financial_year = self.request.query_params.get("financial_year")
+        if criterion:
+            qs = qs.filter(criterion_id=criterion)
+        if financial_year:
+            qs = qs.filter(financial_year_id=financial_year)
+        return qs
+
+
+class NarrativeDraftApplyView(APIView):
+    """POST /narrative-drafts/<int:pk>/apply/ — marks a draft as the current narrative for its criterion+year."""
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+
+    def post(self, request, pk):
+        try:
+            draft = AccreditationNarrativeDraft.objects.get(pk=pk)
+        except AccreditationNarrativeDraft.DoesNotExist:
+            return Response({"error": "Narrative draft not found."}, status=status.HTTP_404_NOT_FOUND)
+        if draft.status != "pending":
+            return Response(
+                {"error": f"This draft is already {draft.status} and cannot be applied."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        draft.status = "applied"
+        draft.applied_at = timezone.now()
+        draft.applied_by = request.user
+        draft.save(update_fields=["status", "applied_at", "applied_by"])
+
+        return Response(AccreditationNarrativeDraftSerializer(draft).data)
+
+
+class NarrativeDraftRejectView(APIView):
+    """POST /narrative-drafts/<int:pk>/reject/"""
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+
+    def post(self, request, pk):
+        try:
+            draft = AccreditationNarrativeDraft.objects.get(pk=pk)
+        except AccreditationNarrativeDraft.DoesNotExist:
+            return Response({"error": "Narrative draft not found."}, status=status.HTTP_404_NOT_FOUND)
+        if draft.status != "pending":
+            return Response(
+                {"error": f"This draft is already {draft.status}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        draft.status = "rejected"
+        draft.save(update_fields=["status"])
+        return Response(AccreditationNarrativeDraftSerializer(draft).data)
+
+
 class SSRExportView(APIView):
     """
     Admin export of the full evidence tree as the SSR/AQAR submission package:
@@ -305,10 +427,18 @@ class SSRExportView(APIView):
             items = criterion.evidence.all()
             if financial_year:
                 items = items.filter(financial_year_id=financial_year)
-            tree.append({
+            entry = {
                 "criterion": AccreditationCriterionSerializer(criterion).data,
                 "evidence": EvidenceItemSerializer(items, many=True).data,
-            })
+            }
+            if financial_year:
+                # Narratives are year-scoped, so only attach one when the
+                # export itself is scoped to a single financial year.
+                applied_narrative = criterion.narrative_drafts.filter(
+                    financial_year_id=financial_year, status="applied",
+                ).order_by("-applied_at").first()
+                entry["narrative"] = applied_narrative.narrative_text if applied_narrative else None
+            tree.append(entry)
 
         if (request.query_params.get("export") or "").lower() == "zip":
             buffer = io.BytesIO()
