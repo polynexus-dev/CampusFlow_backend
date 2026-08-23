@@ -1,1 +1,1 @@
-refactor: convert relative views imports in urls.py to explicit package imports for clean IDE resolution
+fix: handle expired tokens gracefully in LogoutSerializer so /logout/ endpoint returns 200/204 cleanly

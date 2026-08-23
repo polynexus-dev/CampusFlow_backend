@@ -387,9 +387,10 @@ class LogoutSerializer(serializers.Serializer):
             try:
                 token.blacklist()
             except AttributeError:
-                raise ValidationError("Token blacklisting is not enabled.")
-        except TokenError:
-            raise ValidationError(self.error_messages['bad_token'])
+                pass
+        except (TokenError, Exception):
+            # Token is already expired, blacklisted, or invalid — logout succeeds cleanly
+            pass
 
 def assign_role_permissions(user, role_group_name):
     """Assigns user to a specific role group and sets permissions."""

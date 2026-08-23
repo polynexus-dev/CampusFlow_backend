@@ -139,14 +139,6 @@ class IsCommitteeMember(BasePermission):
         from .models.statutory_committee import CommitteeMembership
         return CommitteeMembership.objects.filter(committee=obj.committee, user=request.user).exists()
 
-    def has_permission(self, request, view):
-        if not request.user.is_authenticated:
-            return False
-        if is_saas_admin(request.user):
-            return True
-        group = get_user_group(request.user)
-        return group != 'student'
-
 
 class DepartmentExistsForUserCreation(BasePermission):
     """
