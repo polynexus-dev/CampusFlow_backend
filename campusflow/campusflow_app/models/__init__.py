@@ -75,6 +75,9 @@ from .parent_link_request import ParentLinkRequest
 # ── Paper Setting from Syllabus ──
 from .question_bank import SyllabusTopic, Question, PaperBlueprintTopic, ExamQuestion, PaperSetVariant
 
+# ── Syllabus Coverage Tracking ──
+from .syllabus_coverage import SyllabusCoverageEntry
+
 # ── Compliance & Accreditation ──
 from .compliance import (
     ComplianceCertificateType, ComplianceCertificate,

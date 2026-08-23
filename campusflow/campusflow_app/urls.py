@@ -143,6 +143,9 @@ from campusflow_app.views.result import StudentExamResultViewSet, ExamClassStats
 from campusflow_app.views.result_correction import (
     ResultCorrectionRequestCreateView, HMCorrectionRequestListView, HMCorrectionRequestActionView,
 )
+from campusflow_app.views.syllabus_coverage import (
+    MyOfferingsForCoverageView, OfferingCoverageChecklistView, HODOfferingCoverageListView,
+)
 from campusflow_app.views.compliance import (
     ComplianceCertificateTypeViewSet, ComplianceCertificateViewSet,
     AISHEAnnualReturnView, AICTEDisclosureView, NAACExtendedProfileView,
@@ -546,6 +549,10 @@ urlpatterns = [
     path('results/corrections/', ResultCorrectionRequestCreateView.as_view(), name='result-correction-create'),
     path('results/corrections/list/', HMCorrectionRequestListView.as_view(), name='result-correction-list'),
     path('results/corrections/<int:pk>/action/', HMCorrectionRequestActionView.as_view(), name='result-correction-action'),
+
+    path('syllabus-coverage/my-offerings/', MyOfferingsForCoverageView.as_view(), name='syllabus-coverage-my-offerings'),
+    path('syllabus-coverage/offerings/<int:offering_id>/', OfferingCoverageChecklistView.as_view(), name='syllabus-coverage-checklist'),
+    path('syllabus-coverage/department-offerings/', HODOfferingCoverageListView.as_view(), name='syllabus-coverage-department'),
 
     # ── Parent / Guardian Endpoints ──
     path('parent/children/', ParentChildrenListView.as_view(), name='parent-children-list'),
