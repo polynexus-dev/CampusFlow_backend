@@ -1,1 +1,1 @@
-fix: handle expired tokens gracefully in LogoutSerializer so /logout/ endpoint returns 200/204 cleanly
+perf: optimize multi-tenant authentication with in-memory schema caching, domain matching, and single-query group evaluation

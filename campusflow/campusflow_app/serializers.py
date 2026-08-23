@@ -4,6 +4,7 @@ import uuid
 
 # ── Django Core Imports ──────────────────────────────────────────────────────
 from django.contrib.auth.models import Group, Permission, User
+from django.core.cache import cache
 from django.db import connection, transaction
 from django.db.models import Q
 from django.http import HttpRequest
@@ -187,21 +188,51 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         user = None
         target_tenant = None
+        user_key = (username or "").strip().lower()
 
-        # First try to find user in current schema (search by username or email)
+        # 1. Try finding user in current schema
         user = User.objects.filter(Q(username=username) | Q(email=username)).first()
         if user:
             target_tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
         elif connection.schema_name == 'public':
-            # Search all other tenant schemas
-            from django_tenants.utils import schema_context
-            for tenant in Tenant.objects.exclude(schema_name='public'):
-                with schema_context(tenant.schema_name):
-                    u = User.objects.filter(Q(username=username) | Q(email=username)).first()
-                    if u:
-                        user = u
-                        target_tenant = tenant
-                        break
+            # 2. Check high-speed cache for previously resolved user tenant schema
+            cache_key = f"user_tenant_schema:{user_key}"
+            cached_schema = cache.get(cache_key)
+
+            if cached_schema and cached_schema != 'public':
+                cached_tenant = Tenant.objects.filter(schema_name=cached_schema).first()
+                if cached_tenant:
+                    from django_tenants.utils import schema_context
+                    with schema_context(cached_schema):
+                        u = User.objects.filter(Q(username=username) | Q(email=username)).first()
+                        if u:
+                            user = u
+                            target_tenant = cached_tenant
+
+            # 3. Direct email-domain tenant resolution (0 ms lookup by domain)
+            if not user and '@' in user_key:
+                email_domain = user_key.split('@')[-1]
+                domain_tenant = Tenant.objects.filter(permitted_email_domain__iexact=email_domain).first()
+                if domain_tenant and domain_tenant.schema_name != 'public':
+                    from django_tenants.utils import schema_context
+                    with schema_context(domain_tenant.schema_name):
+                        u = User.objects.filter(Q(username=username) | Q(email=username)).first()
+                        if u:
+                            user = u
+                            target_tenant = domain_tenant
+                            cache.set(cache_key, domain_tenant.schema_name, 86400)
+
+            # 4. Fallback search across remaining tenant schemas and cache result
+            if not user:
+                from django_tenants.utils import schema_context
+                for tenant in Tenant.objects.exclude(schema_name='public'):
+                    with schema_context(tenant.schema_name):
+                        u = User.objects.filter(Q(username=username) | Q(email=username)).first()
+                        if u:
+                            user = u
+                            target_tenant = tenant
+                            cache.set(cache_key, tenant.schema_name, 86400)
+                            break
 
         if not user:
             raise serializers.ValidationError(f"{username} does not exist", code='not_found')
@@ -217,10 +248,11 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         # Only enforce group and profile checks for non-superusers
         if not user.is_superuser:
-            if not user.groups.exists():
+            user_groups = list(user.groups.all())
+            if not user_groups:
                 raise serializers.ValidationError(f"User '{username}' does not have a group assigned.", code='no_group_assigned')
     
-            user_group = user.groups.first()
+            user_group = user_groups[0]
     
             if user_group.name == 'student':
                 profile_data = StudentProfile.objects.filter(user=user).first()
