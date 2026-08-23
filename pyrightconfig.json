@@ -1,0 +1,15 @@
+{
+  "executionEnvironments": [
+    {
+      "root": "campusflow",
+      "extraPaths": [
+        "campusflow",
+        "campusflow/campusflow_app"
+      ]
+    }
+  ],
+  "extraPaths": [
+    "campusflow",
+    "campusflow/campusflow_app"
+  ]
+}

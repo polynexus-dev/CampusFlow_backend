@@ -1,1 +1,1 @@
-feat: add statutory committees, NIRF, AI insights, paper variants, export services, and cross-module enhancements
+refactor: convert relative views imports in urls.py to explicit package imports for clean IDE resolution

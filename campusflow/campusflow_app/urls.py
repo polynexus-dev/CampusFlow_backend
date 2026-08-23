@@ -1,7 +1,7 @@
 from django.urls import path
 from tenants.views import InvoiceListAPIView, InvoiceUploadReceiptAPIView
-from .views.department import DepartmentView, DepartmentDetailView
-from .views.users import (
+from campusflow_app.views.department import DepartmentView, DepartmentDetailView
+from campusflow_app.views.users import (
     StudentUserProfileView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView,
     MyObtainTokenPairView, LogoutAPIView, UserProfileView,
     ManagementUserProfileView, AdministratorUserProfileView,
@@ -13,100 +13,100 @@ from .views.users import (
     StudentOnboardRequestOTPView, StudentOnboardVerifyPasswordView,
     ForgotPasswordRequestOTPView, ForgotPasswordVerifyOTPView, ForgotPasswordResetView
 )
-from .views.location import LocationDetailView
-from .views.attendance import (
+from campusflow_app.views.location import LocationDetailView
+from campusflow_app.views.attendance import (
     AttendanceMarkView, AllAttendanceView,
     LectureCheckinByCodeView
 )
-from .views.face_attendance import (
+from campusflow_app.views.face_attendance import (
     FaceRegistrationView, LivenessChallengeView,
     MarkAttendanceView, AttendanceHistoryView,
     StudentRequestManualAttendanceView, StudentManualRequestStatusView
 )
-from .views.lecturer_attendance import (
+from campusflow_app.views.lecturer_attendance import (
     LecturerCheckInView, LecturerStartSessionView,
     LecturerAttendanceStatusView, LecturerManualRequestsView,
     LecturerApproveManualRequestView, LecturerConductedHistoryView,
     LecturerBulkApproveManualRequestsView, LecturerDeviceResetRequestsView,
     LecturerApproveDeviceResetRequestView
 )
-from .views.classroom import ClassroomCreateView, CheckAttendanceView, ClassroomListView, ClassroomLocationValidationView
-from .views.lecture import (
+from campusflow_app.views.classroom import ClassroomCreateView, CheckAttendanceView, ClassroomListView, ClassroomLocationValidationView
+from campusflow_app.views.lecture import (
     LectureListCreateView, LectureDetailView, LectureByClassroomView,
     GenerateLectureCodeView
 )
 
 # ── New Module Imports ──
-from .views.audit import AuditLogListView
-from .views.announcement import AnnouncementListCreateView, AnnouncementDetailView
-from .views.leave import (
+from campusflow_app.views.audit import AuditLogListView
+from campusflow_app.views.announcement import AnnouncementListCreateView, AnnouncementDetailView
+from campusflow_app.views.leave import (
     LeaveTypeListCreateView, LeaveTypeDetailView,
     LeaveBalanceView, LeaveRequestCreateView, LeaveRequestListView,
     LeaveRequestActionView, MyLeavesView
 )
-from .views.payroll import (
+from campusflow_app.views.payroll import (
     SalaryStructureListView, SalaryStructureDetailView,
     GeneratePayslipView, BulkPayslipGenerationView, PayslipListView
 )
-from .views.exam import ExamTypeListCreateView, ExamListCreateView, ExamDetailView
-from .views.course import CourseListCreateView, CourseDetailView
-from .views.schedule import ScheduleListView, TeacherTodayScheduleView
-from .views.timetable_generation import (
+from campusflow_app.views.exam import ExamTypeListCreateView, ExamListCreateView, ExamDetailView
+from campusflow_app.views.course import CourseListCreateView, CourseDetailView
+from campusflow_app.views.schedule import ScheduleListView, TeacherTodayScheduleView
+from campusflow_app.views.timetable_generation import (
     GenerateTimetableView, TimetableGenerationRunViewSet,
     ApplyTimetableGenerationRunView, DiscardTimetableGenerationRunView,
 )
-from .views.attendance_correction import (
+from campusflow_app.views.attendance_correction import (
     GuardianCreateCorrectionRequestView, TeacherCorrectionRequestListView,
     TeacherCorrectionRequestActionView,
 )
-from .views.quick_create import QuickCreatePostView
-from .views.enrollment import AdminEnrollStudentView, StudentConsentGrantView, EnrollmentStatsView
-from .views.admissions import (
+from campusflow_app.views.quick_create import QuickCreatePostView
+from campusflow_app.views.enrollment import AdminEnrollStudentView, StudentConsentGrantView, EnrollmentStatsView
+from campusflow_app.views.admissions import (
     LeadViewSet, LeadActivityViewSet, LeadMarkContactedView, LeadSubmitApplicationView,
     LeadAdmitView, LeadCloseView, LeadConvertToStudentView,
 )
-from .views.face_registration_queue import (
+from campusflow_app.views.face_registration_queue import (
     FaceRegistrationQueueView, FaceRegistrationCaptureView, FaceRegistrationRetakeView,
 )
-from .views.promotion import PromoteClassView, PromoteClassRevertView
-from .views.parent_link_request import (
+from campusflow_app.views.promotion import PromoteClassView, PromoteClassRevertView
+from campusflow_app.views.parent_link_request import (
     ParentLinkRequestCreateView, AdminParentLinkRequestListView, AdminParentLinkRequestActionView,
 )
-from .views.question_bank import (
+from campusflow_app.views.question_bank import (
     SyllabusTopicListCreateView, SyllabusTopicDetailView,
     QuestionBankListCreateView, QuestionDetailView,
 )
-from .views.outcomes import (
+from campusflow_app.views.outcomes import (
     ProgramOutcomeListCreateView, ProgramOutcomeDetailView,
     CourseOutcomeListCreateView, CourseOutcomeDetailView,
     POCOMappingListCreateView, POCOMappingDetailView,
     CourseOutcomeAttainmentView, ProgramOutcomeAttainmentView,
 )
-from .views.academics import (
+from campusflow_app.views.academics import (
     AcademicYearListCreateView, AcademicYearDetailView,
     TermListCreateView, TermDetailView,
     CurrentTermView, SetCurrentTermView,
 )
-from .views.curriculum import (
+from campusflow_app.views.curriculum import (
     ProgramListCreateView, ProgramDetailView,
     RegulationListCreateView, RegulationDetailView, RegulationCourseListView,
     BatchListCreateView, BatchDetailView,
     SectionListCreateView, SectionDetailView,
     GradingSchemeListView, GradingSchemeDetailView,
 )
-from .views.grading import PublishTermResultsView, StudentTranscriptView
-from .views.paper_setting import (
+from campusflow_app.views.grading import PublishTermResultsView, StudentTranscriptView
+from campusflow_app.views.paper_setting import (
     PaperBlueprintView, GeneratePaperView, ExamPaperView,
     ExamQuestionAddView, ExamQuestionReplaceView, ExamQuestionDetailView,
     FinalizePaperView, GeneratePaperSetsView, PaperSetsListView,
 )
-from .views.assignment import AssignmentListCreateView, AssignmentDetailView
-from .views.submission import SubmissionListCreateView, SubmissionGradeView
-from .views.analytics import (
+from campusflow_app.views.assignment import AssignmentListCreateView, AssignmentDetailView
+from campusflow_app.views.submission import SubmissionListCreateView, SubmissionGradeView
+from campusflow_app.views.analytics import (
     OverviewKPIView, AttendanceTrendsView, DepartmentPerformanceView,
     LeaveAnalyticsView, PayrollSummaryView, AtRiskStudentsView
 )
-from .views.bus_tracking import (
+from campusflow_app.views.bus_tracking import (
     BusRouteListCreateView, BusRouteDetailView,
     BusRouteQRView, BusRouteRegenQRView,
     BusLiveLocationsView, BusTrailView,
@@ -116,34 +116,34 @@ from .views.bus_tracking import (
     BusTripStartView, BusTripEndView, BusDriverTripStatsView,
     BusConductorScanStudentView, BusTripSummaryView, StudentIDQRView,
 )
-from .views.notifications import (
+from campusflow_app.views.notifications import (
     NotificationListView, NotificationMarkReadView, NotificationUnreadCountView,
 )
-from .views.fees import (
+from campusflow_app.views.fees import (
     FeeCategoryViewSet, FeeStructureViewSet, StudentFeeInvoiceViewSet,
     BulkGenerateInvoicesView, RecordFeePaymentView, FeePaymentListView,
     FeeDashboardView
 )
-from .views.payments import (
+from campusflow_app.views.payments import (
     CreatePaymentOrderView, VerifyPaymentView, RazorpayWebhookView
 )
-from .views.module_permissions import (
+from campusflow_app.views.module_permissions import (
     TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView, CustomRolesView
 )
-from .views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
-from .views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
-from .views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
-from .views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
-from .views.valuation import (
+from campusflow_app.views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
+from campusflow_app.views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
+from campusflow_app.views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
+from campusflow_app.views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
+from campusflow_app.views.valuation import (
     ValuationSessionViewSet, ScannedPaperViewSet,
     ScannedPaperAISuggestView, ScannedPaperAISuggestionListView,
     AIGradingSuggestionApplyView, AIGradingSuggestionRejectView,
 )
-from .views.result import StudentExamResultViewSet, ExamClassStatsView, ExamPublishResultsView
-from .views.result_correction import (
+from campusflow_app.views.result import StudentExamResultViewSet, ExamClassStatsView, ExamPublishResultsView
+from campusflow_app.views.result_correction import (
     ResultCorrectionRequestCreateView, HMCorrectionRequestListView, HMCorrectionRequestActionView,
 )
-from .views.compliance import (
+from campusflow_app.views.compliance import (
     ComplianceCertificateTypeViewSet, ComplianceCertificateViewSet,
     AISHEAnnualReturnView, AICTEDisclosureView, NAACExtendedProfileView,
     AccreditationCriterionViewSet, EvidenceItemViewSet,
@@ -151,26 +151,26 @@ from .views.compliance import (
     CriterionNarrativeDraftRequestView, AccreditationNarrativeDraftViewSet,
     NarrativeDraftApplyView, NarrativeDraftRejectView, NBASARExportView,
 )
-from .views.nirf import NIRFDataEntryViewSet, NIRFReportView
-from .views.statutory_committee import (
+from campusflow_app.views.nirf import NIRFDataEntryViewSet, NIRFReportView
+from campusflow_app.views.statutory_committee import (
     StatutoryCommitteeViewSet, CommitteeMembershipViewSet,
     CommitteeComplaintViewSet, CommitteeMeetingViewSet, CommitteeAnnualReportView,
 )
-from .views.finance import (
+from campusflow_app.views.finance import (
     FinancialYearViewSet, CloseFinancialYearView,
     IncomeCategoryViewSet, IncomeEntryViewSet,
     ExpenseCategoryViewSet, ExpenseEntryViewSet, FixedAssetViewSet,
 )
-from .views.audit_portal import (
+from campusflow_app.views.audit_portal import (
     InviteAuditorView, AuditEngagementListView, RevokeAuditEngagementView, MyAuditEngagementsView,
     ReceiptsPaymentsStatementView, IncomeExpenditureStatementView, FixedAssetRegisterView,
     PayrollStatutorySummaryView, FeeReconciliationView, VendorLedgerView, DocumentVaultExportView,
     AssetsLiabilitiesScheduleView,
 )
-from .views.scholarship import StateScholarshipSchemeViewSet, StudentScholarshipRecordViewSet
-from .views.progress import StudentProgressView, StudentTopicPerformanceView, StudentInsightView
-from .views.contact import ContactEnquiryView
-from .views.guardian import (
+from campusflow_app.views.scholarship import StateScholarshipSchemeViewSet, StudentScholarshipRecordViewSet
+from campusflow_app.views.progress import StudentProgressView, StudentTopicPerformanceView, StudentInsightView
+from campusflow_app.views.contact import ContactEnquiryView
+from campusflow_app.views.guardian import (
     ParentLinkChildView, ParentChildrenListView,
     ParentChildAttendanceView, ParentChildFeesView,
     ParentChildExamsView, ParentChildAssignmentsView

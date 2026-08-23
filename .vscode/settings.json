@@ -1,0 +1,16 @@
+{
+  "python.analysis.extraPaths": [
+    "./campusflow",
+    "./campusflow/campusflow_app",
+    "${workspaceFolder}/campusflow",
+    "${workspaceFolder}/campusflow/campusflow_app"
+  ],
+  "python.autoComplete.extraPaths": [
+    "./campusflow",
+    "./campusflow/campusflow_app",
+    "${workspaceFolder}/campusflow",
+    "${workspaceFolder}/campusflow/campusflow_app"
+  ],
+  "python.analysis.indexing": true,
+  "python.analysis.packageIndexDepth": 3
+}

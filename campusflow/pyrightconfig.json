@@ -1,0 +1,6 @@
+{
+  "extraPaths": [
+    ".",
+    "./campusflow_app"
+  ]
+}
