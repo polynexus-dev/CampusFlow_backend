@@ -1,1 +1,1 @@
-perf: optimize multi-tenant authentication with in-memory schema caching, domain matching, and single-query group evaluation
+feat: add seed_audit_logs management command to populate realistic tenant database AuditLog records
