@@ -29,7 +29,14 @@ class ScannedPaper(models.Model):
 
     session = models.ForeignKey(ValuationSession, on_delete=models.CASCADE, related_name='papers')
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='scanned_papers')
-    scanned_file_url = models.CharField(max_length=500, help_text="S3 / storage URL of scanned answer script")
+    scanned_file_url = models.CharField(
+        max_length=500, blank=True, null=True,
+        help_text="External S3 / storage URL, for scans hosted by a third-party scanning vendor.",
+    )
+    scanned_file = models.FileField(
+        upload_to='scanned_papers/', blank=True, null=True,
+        help_text="Direct upload through the app — the actual ingestion path for scanned answer scripts.",
+    )
     allocated_marks = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     evaluated_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')

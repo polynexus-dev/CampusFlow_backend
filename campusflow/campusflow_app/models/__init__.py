@@ -73,7 +73,7 @@ from .promotion import PromotionBatch, PromotionRecord
 from .parent_link_request import ParentLinkRequest
 
 # ── Paper Setting from Syllabus ──
-from .question_bank import SyllabusTopic, Question, PaperBlueprintTopic, ExamQuestion
+from .question_bank import SyllabusTopic, Question, PaperBlueprintTopic, ExamQuestion, PaperSetVariant
 
 # ── Compliance & Accreditation ──
 from .compliance import (
@@ -91,6 +91,17 @@ from .audit_portal import AuditorProfile, AuditEngagement, AuditorAccessLog
 
 # ── State Scholarship Reconciliation ──
 from .scholarship import StateScholarshipScheme, StudentScholarshipRecord
+
+# ── NIRF Ranking Data Compilation ──
+from .nirf import NIRFDataEntry
+
+# ── Statutory Committee Compliance (Anti-Ragging / ICC-POSH / Grievance Redressal) ──
+from .statutory_committee import (
+    StatutoryCommittee, CommitteeMembership, CommitteeComplaint, CommitteeMeeting,
+)
+
+# ── AI Student Analysis ──
+from .student_insight import StudentInsightSnapshot
 
 
 

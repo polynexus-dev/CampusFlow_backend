@@ -2,17 +2,20 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from ..models.tpo import RecruitmentDrive, PlacementApplication
 from ..serializers import RecruitmentDriveSerializer, PlacementApplicationSerializer
+from ..permissions import RequiresModule
+
+TPO_PERMS = [IsAuthenticated, RequiresModule("tpo")]
 
 
 class RecruitmentDriveViewSet(viewsets.ModelViewSet):
     queryset = RecruitmentDrive.objects.all().order_by('-drive_date')
     serializer_class = RecruitmentDriveSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = TPO_PERMS
 
 
 class PlacementApplicationViewSet(viewsets.ModelViewSet):
     serializer_class = PlacementApplicationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = TPO_PERMS
 
     def get_queryset(self):
         qs = PlacementApplication.objects.select_related('student__user', 'drive').all().order_by('-applied_date')

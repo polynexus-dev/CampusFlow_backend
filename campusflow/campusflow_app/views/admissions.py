@@ -25,7 +25,9 @@ from rest_framework.views import APIView
 from ..demo_guard import IsNotDemoTenant
 from ..models import StudentConsent, StudentProfile
 from ..models.admissions import Lead, LeadActivity
-from ..permissions import IsSaaSOrCollegeAdmin
+from ..permissions import IsSaaSOrCollegeAdmin, RequiresModule
+
+ADMISSIONS_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("admissions")]
 from ..serializers import LeadActivitySerializer, LeadSerializer
 from ..services.enrollment import create_pending_user, generate_admission_number
 from .enrollment import _get_or_create_guardian
@@ -41,7 +43,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         "interested_department", "interested_program", "assigned_to", "created_by", "converted_student",
     ).all()
     serializer_class = LeadSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = ADMISSIONS_PERMS
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -63,7 +65,7 @@ class LeadActivityViewSet(viewsets.ModelViewSet):
     """Interaction log — logging one auto-recomputes the parent lead's priority score."""
     queryset = LeadActivity.objects.select_related("lead", "created_by").all()
     serializer_class = LeadActivitySerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = ADMISSIONS_PERMS
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -79,7 +81,7 @@ class LeadActivityViewSet(viewsets.ModelViewSet):
 
 class LeadMarkContactedView(APIView):
     """POST /leads/<int:pk>/mark-contacted/ — Inquiry -> Contacted."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = ADMISSIONS_PERMS
 
     def post(self, request, pk):
         try:
@@ -95,7 +97,7 @@ class LeadMarkContactedView(APIView):
 
 class LeadSubmitApplicationView(APIView):
     """POST /leads/<int:pk>/submit-application/ — Contacted -> Application Submitted."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = ADMISSIONS_PERMS
 
     def post(self, request, pk):
         try:
@@ -111,7 +113,7 @@ class LeadSubmitApplicationView(APIView):
 
 class LeadAdmitView(APIView):
     """POST /leads/<int:pk>/admit/ — Application Submitted -> Admitted."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = ADMISSIONS_PERMS
 
     def post(self, request, pk):
         try:
@@ -130,7 +132,7 @@ class LeadCloseView(APIView):
     POST /leads/<int:pk>/close/ {"outcome": "rejected"|"withdrawn", "reason": "..."}
     Consolidated terminal-failure action instead of two near-identical views.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = ADMISSIONS_PERMS
 
     def post(self, request, pk):
         try:
@@ -158,7 +160,7 @@ class LeadConvertToStudentView(APIView):
     (views/enrollment.py:52-135) and reusing the same primitives, rather
     than a shared refactor — see this file's module docstring.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = ADMISSIONS_PERMS
 
     @transaction.atomic
     def post(self, request, pk):

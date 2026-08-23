@@ -36,6 +36,12 @@ class PlacementApplication(models.Model):
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='placement_applications')
     applied_date = models.DateField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Applied')
+    offered_ctc_lpa = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Actual CTC (Lakhs Per Annum) offered to this student once Selected — distinct from "
+                   "RecruitmentDrive.package_lpa, which is only the advertised package. Feeds the NIRF "
+                   "GO median-salary metric, which needs per-student outcomes, not the drive's headline figure.",
+    )
     remarks = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

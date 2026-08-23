@@ -24,7 +24,7 @@ from ..models.profile import (
     ManagementProfile, AdministratorProfile, DepartmentHeadProfile
 )
 from ..models.risk_score import StudentRiskScore
-from ..permissions import IsCollegeAdmin, IsFacultyOrAbove, get_user_group, is_college_admin
+from ..permissions import IsCollegeAdmin, IsFacultyOrAbove, RequiresModule, get_user_group, is_college_admin
 from ..serializers import StudentRiskScoreSerializer
 
 
@@ -264,7 +264,7 @@ class AtRiskStudentsView(APIView):
     precomputed StudentRiskScore table, it never scores on request).
     Optional ?department_id=&tier= filters.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("at-risk-prediction")]
 
     def get(self, request):
         scores = StudentRiskScore.objects.select_related(

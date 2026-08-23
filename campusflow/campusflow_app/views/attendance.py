@@ -29,7 +29,7 @@ from django.shortcuts import get_object_or_404
 from ..models.lecture import Lecture
 from ..serializers import AttendanceMarkSerializer, LectureAttendanceCodeSerializer
 from ..permissions import (
-    CanMarkAttendanceManually, IsFacultyOrAbove,
+    CanMarkAttendanceManually, IsFacultyOrAbove, RequiresModule,
     get_user_group, is_saas_admin
 )
 from rest_framework.views import APIView
@@ -42,7 +42,7 @@ class AttendanceMarkView(APIView):
     Only Faculty, Department Heads, and College Admins can do this.
     Students CANNOT manually mark other students' attendance.
     """
-    permission_classes = [IsAuthenticated, CanMarkAttendanceManually]
+    permission_classes = [IsAuthenticated, CanMarkAttendanceManually, RequiresModule("attendance")]
 
     def post(self, request):
         serializer = AttendanceMarkSerializer(data=request.data)
@@ -87,7 +87,7 @@ class AllAttendanceView(APIView):
     Only Faculty and above can access this — students cannot see other students' records.
     Supports optional filtering by user_id and date.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("attendance")]
 
     def get(self, request):
         qs = Attendance.objects.all().select_related('user')
@@ -116,7 +116,7 @@ class LectureCheckinByCodeView(APIView):
     Students mark their attendance by entering the code provided by faculty.
     Validates the code and checks if the student is within the classroom's geofence.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("attendance")]
 
     def post(self, request):
         serializer = LectureAttendanceCodeSerializer(data=request.data)

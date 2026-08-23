@@ -61,6 +61,14 @@ class Question(models.Model):
         default=True,
         help_text="Soft-disable instead of delete — past papers keep their snapshot regardless.",
     )
+    ai_generated = models.BooleanField(
+        default=False,
+        help_text="Authored by the local drafting model to fill a topic's marks shortfall during paper "
+                   "generation (see ai_question_generation.py), then saved as a real, reusable bank entry. "
+                   "Flagged so a reviewing faculty member can see which questions weren't human-authored "
+                   "before finalizing a paper — the finalize step is the human checkpoint, not a separate "
+                   "approval queue.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -127,3 +135,39 @@ class ExamQuestion(models.Model):
 
     def __str__(self):
         return f"{self.exam.name} · {self.question_label} ({self.marks} marks)"
+
+
+class PaperSetVariant(models.Model):
+    """
+    An alternate, independently-generated paper for the same exam/blueprint
+    — "Set B", "Set C", etc., for anti-copying distribution (different
+    students in the same sitting get a different question order/selection).
+
+    Deliberately NOT wired into ScannedPaper, sync_question_structure, or
+    any grading path — only the primary paper (exam.exam_questions, written
+    by GeneratePaperView/GeneratePaperSetsView exactly as today) feeds
+    scanning/AI-grading/topic analytics. These variants are print/export-only
+    distribution copies, so a flat JSON snapshot is enough; a full
+    ExamQuestion-shaped relational table would be structure nothing ever
+    queries relationally, since there's no per-question replace/delete UI
+    for a variant the way there is for the primary paper.
+    """
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name="paper_set_variants")
+    label = models.CharField(max_length=20, help_text='e.g. "Set B".')
+    questions_snapshot = models.JSONField(
+        default=list,
+        help_text="List of {label, text, marks, topic_name, ai_generated}, in paper order.",
+    )
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "paper_set_variants"
+        verbose_name = "Paper Set Variant"
+        verbose_name_plural = "Paper Set Variants"
+        constraints = [
+            models.UniqueConstraint(fields=["exam", "label"], name="unique_exam_paper_set_label"),
+        ]
+        ordering = ["label"]
+
+    def __str__(self):
+        return f"{self.exam.name} · {self.label}"

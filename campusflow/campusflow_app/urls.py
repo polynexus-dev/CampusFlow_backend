@@ -98,7 +98,7 @@ from .views.grading import PublishTermResultsView, StudentTranscriptView
 from .views.paper_setting import (
     PaperBlueprintView, GeneratePaperView, ExamPaperView,
     ExamQuestionAddView, ExamQuestionReplaceView, ExamQuestionDetailView,
-    FinalizePaperView,
+    FinalizePaperView, GeneratePaperSetsView, PaperSetsListView,
 )
 from .views.assignment import AssignmentListCreateView, AssignmentDetailView
 from .views.submission import SubmissionListCreateView, SubmissionGradeView
@@ -149,7 +149,12 @@ from .views.compliance import (
     AccreditationCriterionViewSet, EvidenceItemViewSet,
     SubmitEvidenceItemView, SignOffEvidenceItemView, SSRExportView,
     CriterionNarrativeDraftRequestView, AccreditationNarrativeDraftViewSet,
-    NarrativeDraftApplyView, NarrativeDraftRejectView,
+    NarrativeDraftApplyView, NarrativeDraftRejectView, NBASARExportView,
+)
+from .views.nirf import NIRFDataEntryViewSet, NIRFReportView
+from .views.statutory_committee import (
+    StatutoryCommitteeViewSet, CommitteeMembershipViewSet,
+    CommitteeComplaintViewSet, CommitteeMeetingViewSet, CommitteeAnnualReportView,
 )
 from .views.finance import (
     FinancialYearViewSet, CloseFinancialYearView,
@@ -160,9 +165,10 @@ from .views.audit_portal import (
     InviteAuditorView, AuditEngagementListView, RevokeAuditEngagementView, MyAuditEngagementsView,
     ReceiptsPaymentsStatementView, IncomeExpenditureStatementView, FixedAssetRegisterView,
     PayrollStatutorySummaryView, FeeReconciliationView, VendorLedgerView, DocumentVaultExportView,
+    AssetsLiabilitiesScheduleView,
 )
 from .views.scholarship import StateScholarshipSchemeViewSet, StudentScholarshipRecordViewSet
-from .views.progress import StudentProgressView, StudentTopicPerformanceView
+from .views.progress import StudentProgressView, StudentTopicPerformanceView, StudentInsightView
 from .views.contact import ContactEnquiryView
 from .views.guardian import (
     ParentLinkChildView, ParentChildrenListView,
@@ -365,6 +371,7 @@ urlpatterns = [
     path('analytics/payroll/', PayrollSummaryView.as_view(), name='analytics-payroll'),
     path('analytics/student-progress/', StudentProgressView.as_view(), name='analytics-student-progress'),
     path('analytics/student-topic-performance/', StudentTopicPerformanceView.as_view(), name='analytics-student-topic-performance'),
+    path('analytics/student-insight/', StudentInsightView.as_view(), name='analytics-student-insight'),
     path('analytics/at-risk-students/', AtRiskStudentsView.as_view(), name='analytics-at-risk-students'),
 
     # ── Assignments ──────────────────────────────────────────────────
@@ -419,10 +426,13 @@ urlpatterns = [
     path('po-mappings/<int:pk>/', POCOMappingDetailView.as_view(), name='po-co-mapping-detail'),
     path('courses/<int:course_id>/outcome-attainment/', CourseOutcomeAttainmentView.as_view(), name='course-outcome-attainment'),
     path('academics/programs/<int:program_id>/outcome-attainment/', ProgramOutcomeAttainmentView.as_view(), name='program-outcome-attainment'),
+    path('academics/programs/<int:program_id>/nba-sar-export/', NBASARExportView.as_view(), name='program-nba-sar-export'),
 
     # ── Paper Setting from Syllabus ───────────────────────────────────
     path('exams/<int:pk>/blueprint/', PaperBlueprintView.as_view(), name='exam-paper-blueprint'),
     path('exams/<int:pk>/paper/generate/', GeneratePaperView.as_view(), name='exam-paper-generate'),
+    path('exams/<int:pk>/paper/generate-sets/', GeneratePaperSetsView.as_view(), name='exam-paper-generate-sets'),
+    path('exams/<int:pk>/paper/sets/', PaperSetsListView.as_view(), name='exam-paper-sets'),
     path('exams/<int:pk>/paper/', ExamPaperView.as_view(), name='exam-paper'),
     path('exams/<int:pk>/paper/questions/', ExamQuestionAddView.as_view(), name='exam-paper-question-add'),
     path('exams/<int:pk>/paper/questions/<int:exam_question_id>/replace/', ExamQuestionReplaceView.as_view(), name='exam-paper-question-replace'),
@@ -580,11 +590,28 @@ urlpatterns = [
     path('audit-portal/reports/fee-reconciliation/', FeeReconciliationView.as_view(), name='audit-portal-fee-reconciliation'),
     path('audit-portal/reports/vendor-ledger/', VendorLedgerView.as_view(), name='audit-portal-vendor-ledger'),
     path('audit-portal/document-vault/', DocumentVaultExportView.as_view(), name='audit-portal-document-vault'),
+    path('audit-portal/reports/assets-liabilities-schedule/', AssetsLiabilitiesScheduleView.as_view(), name='audit-portal-assets-liabilities-schedule'),
 
     # Accreditation Reporting — Quick Wins (P5)
     path('compliance-center/reports/aishe-annual-return/', AISHEAnnualReturnView.as_view(), name='compliance-center-aishe'),
     path('compliance-center/reports/aicte-disclosure/', AICTEDisclosureView.as_view(), name='compliance-center-aicte'),
     path('compliance-center/reports/naac-extended-profile/', NAACExtendedProfileView.as_view(), name='compliance-center-naac-profile'),
+
+    # NIRF Ranking Data Compilation
+    path('nirf-data-entries/', NIRFDataEntryViewSet.as_view({'get': 'list', 'post': 'create'}), name='nirfdataentry-list'),
+    path('nirf-data-entries/<int:pk>/', NIRFDataEntryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='nirfdataentry-detail'),
+    path('compliance-center/reports/nirf-data-compilation/', NIRFReportView.as_view(), name='compliance-center-nirf'),
+
+    # Statutory Committee Compliance (Anti-Ragging / ICC-POSH / Grievance Redressal)
+    path('statutory-committees/', StatutoryCommitteeViewSet.as_view({'get': 'list', 'post': 'create'}), name='statutorycommittee-list'),
+    path('statutory-committees/<int:pk>/', StatutoryCommitteeViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='statutorycommittee-detail'),
+    path('committee-memberships/', CommitteeMembershipViewSet.as_view({'get': 'list', 'post': 'create'}), name='committeemembership-list'),
+    path('committee-memberships/<int:pk>/', CommitteeMembershipViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='committeemembership-detail'),
+    path('committee-complaints/', CommitteeComplaintViewSet.as_view({'get': 'list', 'post': 'create'}), name='committeecomplaint-list'),
+    path('committee-complaints/<int:pk>/', CommitteeComplaintViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='committeecomplaint-detail'),
+    path('committee-meetings/', CommitteeMeetingViewSet.as_view({'get': 'list', 'post': 'create'}), name='committeemeeting-list'),
+    path('committee-meetings/<int:pk>/', CommitteeMeetingViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='committeemeeting-detail'),
+    path('compliance-center/reports/statutory-committee-report/', CommitteeAnnualReportView.as_view(), name='compliance-center-statutory-committee'),
 
     # NAAC SSR/AQAR Evidence Workspace (P6)
     path('accreditation-criteria/', AccreditationCriterionViewSet.as_view({'get': 'list', 'post': 'create'}), name='accreditationcriterion-list'),

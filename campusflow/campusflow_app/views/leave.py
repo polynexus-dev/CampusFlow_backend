@@ -12,9 +12,12 @@ from rest_framework.views import APIView
 from django.utils import timezone
 from ..models.leave import LeaveType, LeaveBalance, LeaveRequest
 from ..permissions import (
-    IsCollegeAdmin, IsNotStudent,
+    IsCollegeAdmin, IsNotStudent, RequiresModule,
     get_user_group, is_saas_admin, is_college_admin
 )
+
+LEAVE_ADMIN_PERMS = [IsAuthenticated, IsCollegeAdmin, RequiresModule("leave")]
+LEAVE_STAFF_PERMS = [IsAuthenticated, IsNotStudent, RequiresModule("leave")]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -26,7 +29,7 @@ class LeaveTypeListCreateView(APIView):
     GET: List all leave types.
     POST: Create a new leave type (College Admin only).
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = LEAVE_ADMIN_PERMS
 
     def get(self, request):
         leave_types = LeaveType.objects.filter(is_active=True)
@@ -68,7 +71,7 @@ class LeaveTypeListCreateView(APIView):
 
 class LeaveTypeDetailView(APIView):
     """PUT/DELETE a leave type (College Admin only)."""
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = LEAVE_ADMIN_PERMS
 
     def put(self, request, pk):
         try:
@@ -107,7 +110,7 @@ class LeaveBalanceView(APIView):
     - Admin sees all or a specific user's balance (?user_id=X).
     POST: Allocate balances for a user (Admin only).
     """
-    permission_classes = [IsAuthenticated, IsNotStudent]
+    permission_classes = LEAVE_STAFF_PERMS
 
     def get(self, request):
         user = request.user
@@ -184,7 +187,7 @@ class LeaveBalanceView(APIView):
 
 class LeaveRequestCreateView(APIView):
     """POST: Submit a new leave request (any non-student staff)."""
-    permission_classes = [IsAuthenticated, IsNotStudent]
+    permission_classes = LEAVE_STAFF_PERMS
 
     def post(self, request):
         leave_type_id = request.data.get('leave_type_id')
@@ -238,7 +241,7 @@ class LeaveRequestListView(APIView):
     - HOD: Requests from their department.
     - Others: Their own requests.
     """
-    permission_classes = [IsAuthenticated, IsNotStudent]
+    permission_classes = LEAVE_STAFF_PERMS
 
     def get(self, request):
         user = request.user
@@ -294,7 +297,7 @@ class LeaveRequestActionView(APIView):
     - Admin can approve/reject any request.
     - HOD can approve/reject requests from their department.
     """
-    permission_classes = [IsAuthenticated, IsNotStudent]
+    permission_classes = LEAVE_STAFF_PERMS
 
     def post(self, request):
         leave_id = request.data.get('leave_id')
@@ -366,7 +369,7 @@ class LeaveRequestActionView(APIView):
 
 class MyLeavesView(APIView):
     """GET: View own leave history and balances (any non-student)."""
-    permission_classes = [IsAuthenticated, IsNotStudent]
+    permission_classes = LEAVE_STAFF_PERMS
 
     def get(self, request):
         user = request.user

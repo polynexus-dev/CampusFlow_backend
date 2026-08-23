@@ -60,6 +60,10 @@ from .models.finance import (
 )
 from .models.audit_portal import AuditorProfile, AuditEngagement, AuditorAccessLog
 from .models.scholarship import StateScholarshipScheme, StudentScholarshipRecord
+from .models.nirf import NIRFDataEntry
+from .models.statutory_committee import (
+    StatutoryCommittee, CommitteeMembership, CommitteeComplaint, CommitteeMeeting,
+)
 from .demo_guard import is_demo_tenant
 
 
@@ -1139,6 +1143,72 @@ class StudentExamResultSerializer(serializers.ModelSerializer):
 class ComplianceCertificateTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = ComplianceCertificateType
+        fields = '__all__'
+
+
+class NIRFDataEntrySerializer(serializers.ModelSerializer):
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NIRFDataEntry
+        fields = '__all__'
+        read_only_fields = ('recorded_by',)
+
+    def get_recorded_by_name(self, obj):
+        return obj.recorded_by.get_full_name() or obj.recorded_by.username if obj.recorded_by else None
+
+
+class StatutoryCommitteeSerializer(serializers.ModelSerializer):
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+
+    class Meta:
+        model = StatutoryCommittee
+        fields = '__all__'
+
+
+class CommitteeMembershipSerializer(serializers.ModelSerializer):
+    # By username, not PK: the staff/student list endpoints this form's
+    # picker searches against (StudentUserProfileView/TeachingStaffUserProfileView
+    # etc.) return a nested user object with no id field, only
+    # username/email/name — username is the only identifier the frontend
+    # actually has in hand to submit.
+    user = serializers.SlugRelatedField(
+        slug_field='username', queryset=User.objects.all(), required=False, allow_null=True,
+    )
+    member_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CommitteeMembership
+        fields = '__all__'
+
+    def get_member_name(self, obj):
+        if obj.user:
+            return obj.user.get_full_name() or obj.user.username
+        return obj.external_member_name
+
+
+class CommitteeComplaintSerializer(serializers.ModelSerializer):
+    committee_type = serializers.CharField(source='committee.committee_type', read_only=True)
+    complainant_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CommitteeComplaint
+        fields = '__all__'
+        # A complainant only sets what/when/whom — investigation fields are
+        # the committee's to fill in, same read_only split as
+        # EvidenceItemSerializer's status/sign-off fields.
+        read_only_fields = ('status', 'action_taken', 'resolution_date')
+
+    def get_complainant_name(self, obj):
+        if obj.is_anonymous or not obj.complainant:
+            return None
+        return obj.complainant.get_full_name() or obj.complainant.username
+
+
+class CommitteeMeetingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommitteeMeeting
         fields = '__all__'
 
 

@@ -34,9 +34,12 @@ from campusflow_app.models import (
     BusRoute, BusLocation, BusTrail, BusTrip,
     BusSubscription, BusAttendance, BusScanEvent,
 )
-from campusflow_app.permissions import IsSaaSOrCollegeAdmin, is_saas_or_college_admin, get_user_group
+from campusflow_app.permissions import IsSaaSOrCollegeAdmin, RequiresModule, is_saas_or_college_admin, get_user_group
 from campusflow_app.services.qr_branding import render_branded_qr
 from campusflow_app.services.notifications import notify_guardians_of_student
+
+BUS_PERMS = [IsAuthenticated, RequiresModule("bus-tracking")]
+BUS_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("bus-tracking")]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -209,7 +212,7 @@ class BusRouteQRView(APIView):
     Returns a PNG image of the QR code for this route.
     Print and stick it inside the bus door.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = BUS_ADMIN_PERMS
 
     def get(self, request, pk):
         try:
@@ -235,7 +238,7 @@ class StudentIDQRView(APIView):
     conductor scans to board/alight the student (see BusConductorScanStudentView).
     Admins can fetch anyone's; a student may only fetch their own.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get(self, request, pk):
         from campusflow_app.models import StudentProfile
@@ -263,7 +266,7 @@ class BusRouteRegenQRView(APIView):
     POST /api/bus/routes/<id>/regen-qr/
     Regenerates the QR token, invalidating all previously printed QR codes.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = BUS_ADMIN_PERMS
 
     def post(self, request, pk):
         try:
@@ -289,7 +292,7 @@ class BusSubscriptionListCreateView(generics.ListCreateAPIView):
     Students can view their own subscriptions.
     """
     serializer_class   = BusSubscriptionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get_queryset(self):
         user = self.request.user
@@ -327,7 +330,7 @@ class BusSubscriptionDetailView(generics.RetrieveUpdateDestroyAPIView):
     Admin updates status (active/expired/suspended) or removes a student from route.
     """
     serializer_class   = BusSubscriptionSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = BUS_ADMIN_PERMS
 
     def get_queryset(self):
         return BusSubscription.objects.select_related("user", "route")
@@ -349,7 +352,7 @@ class BusBoardingScanView(APIView):
       3. Prevent duplicate boarding (only one scan per day per route)
       4. Mark BusAttendance → return success
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def post(self, request):
         qr_token  = request.data.get("qr_token")
@@ -452,7 +455,7 @@ class BusConductorScanStudentView(APIView):
     Returns one of BusScanEvent.STATUS_CHOICES so the app can render the
     matching success/error card.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def post(self, request):
         from campusflow_app.models import StudentProfile
@@ -596,7 +599,7 @@ class BusAttendanceListView(generics.ListAPIView):
     Admin can filter bus boarding records.
     """
     serializer_class   = BusAttendanceSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = BUS_ADMIN_PERMS
 
     def get_queryset(self):
         qs = BusAttendance.objects.select_related("user", "route").order_by("-scanned_at")
@@ -636,7 +639,7 @@ class BusLiveLocationsView(generics.ListAPIView):
     at the first stop so stops and maps load on the client.
     """
     serializer_class   = BusLiveLocationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get_queryset(self):
         return BusLocation.objects.none()
@@ -736,7 +739,7 @@ class BusRouteListCreateView(generics.ListCreateAPIView):
     POST /api/bus/routes/       — Create a route (Admin)
     """
     serializer_class = BusRouteSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = BUS_ADMIN_PERMS
 
     def get_queryset(self):
         return BusRoute.objects.select_related("driver", "conductor").order_by("-created_at")
@@ -749,7 +752,7 @@ class BusRouteDetailView(generics.RetrieveUpdateDestroyAPIView):
     DELETE /api/bus/routes/<id>/  — Delete route
     """
     serializer_class = BusRouteSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = BUS_ADMIN_PERMS
 
     def get_queryset(self):
         return BusRoute.objects.select_related("driver", "conductor")
@@ -760,7 +763,7 @@ class BusTrailView(generics.ListAPIView):
     GET /api/bus/trail/<driver_id>/?date=YYYY-MM-DD
     Returns the GPS breadcrumb trail for a bus on a given date.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get(self, request, driver_id, *args, **kwargs):
         from django.contrib.auth import get_user_model
@@ -810,7 +813,7 @@ class BusDriverDashboardView(APIView):
     Shows assigned Route, its Stops, expected passenger lift counts per stop,
     and boarding stats (boarded vs absent).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get(self, request):
         from django.db.models import Q
@@ -911,7 +914,7 @@ class BusSummaryStatsView(APIView):
     GET /api/bus/summary-stats/
     Returns summary statistics for the transit/bus tracking module.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get(self, request):
         total_routes = BusRoute.objects.filter(is_active=True).count()
@@ -947,7 +950,7 @@ class BusTripStartView(APIView):
     Driver taps "Start Active Trip". Closes any dangling open trip first
     (e.g. the app was killed mid-trip last time) so stats never double-count.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def post(self, request):
         from django.db.models import Q
@@ -970,7 +973,7 @@ class BusTripEndView(APIView):
     Driver taps "End Trip & Stop GPS". Closes the most recent open trip and
     computes its distance from the BusTrail breadcrumbs logged during it.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def post(self, request):
         trip = BusTrip.objects.filter(driver=request.user, ended_at__isnull=True).order_by("-started_at").first()
@@ -1060,7 +1063,7 @@ class BusDriverTripStatsView(APIView):
     Completed-trip counts and distance for this calendar week and month,
     shown on the Conductor Panel's dashboard section.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get(self, request):
         from django.db.models import Count, Sum
@@ -1088,7 +1091,7 @@ class BusTripSummaryView(APIView):
     missing counts plus the missing-student list (name, class, stop) for
     the "Missing · did not board" section with a call-parent action.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = BUS_PERMS
 
     def get(self, request, pk):
         try:

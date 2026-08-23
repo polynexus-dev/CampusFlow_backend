@@ -13,7 +13,9 @@ from rest_framework.views import APIView
 
 from ..models import Course, SyllabusTopic, Question
 from ..models.outcomes import CourseOutcome
-from ..permissions import IsFacultyOrAbove
+from ..permissions import IsFacultyOrAbove, RequiresModule
+
+QUESTION_BANK_PERMS = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
 
 
 def _serialize_topic(t):
@@ -37,6 +39,7 @@ def _serialize_question(q):
         "course_outcome_id": q.course_outcome_id,
         "course_outcome_code": q.course_outcome.code if q.course_outcome_id else None,
         "is_active": q.is_active,
+        "ai_generated": q.ai_generated,
         "created_at": q.created_at.isoformat(),
     }
 
@@ -57,7 +60,7 @@ class SyllabusTopicListCreateView(APIView):
     """
     GET/POST /api/courses/<course_id>/syllabus-topics/
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = QUESTION_BANK_PERMS
 
     def get(self, request, course_id):
         topics = SyllabusTopic.objects.filter(course_id=course_id)
@@ -93,7 +96,7 @@ class SyllabusTopicDetailView(APIView):
     """
     PUT/DELETE /api/syllabus-topics/<id>/
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = QUESTION_BANK_PERMS
 
     def put(self, request, pk):
         try:
@@ -125,7 +128,7 @@ class QuestionBankListCreateView(APIView):
     """
     GET/POST /api/courses/<course_id>/questions/?topic_id=&difficulty=
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = QUESTION_BANK_PERMS
 
     def get(self, request, course_id):
         qs = Question.objects.filter(course_id=course_id, is_active=True).select_related("topic")
@@ -178,7 +181,7 @@ class QuestionDetailView(APIView):
     """
     PUT/DELETE /api/questions/<id>/  (DELETE soft-disables, doesn't remove)
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = QUESTION_BANK_PERMS
 
     def put(self, request, pk):
         try:

@@ -20,14 +20,16 @@ from ..models.academics import Term
 from ..models.department import Department
 from ..models.schedule import Schedule
 from ..models.timetable_generation import TimetableGenerationRun
-from ..permissions import IsSaaSOrCollegeAdmin
+from ..permissions import IsSaaSOrCollegeAdmin, RequiresModule
+
+TIMETABLE_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("timetable-generation")]
 from ..serializers import TimetableGenerationRunSerializer
 from ..tasks import run_generate_timetable
 
 
 class GenerateTimetableView(APIView):
     """POST /timetable/generate/ {"term_id": ..., "department_id": ...?}"""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = TIMETABLE_PERMS + [IsNotDemoTenant]
 
     def post(self, request):
         term_id = request.data.get("term_id")
@@ -56,7 +58,7 @@ class TimetableGenerationRunViewSet(viewsets.ReadOnlyModelViewSet):
     """List/retrieve generation runs — for polling a pending one and browsing history."""
     queryset = TimetableGenerationRun.objects.select_related("term", "department", "requested_by", "applied_by").all()
     serializer_class = TimetableGenerationRunSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = TIMETABLE_PERMS
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -68,7 +70,7 @@ class TimetableGenerationRunViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ApplyTimetableGenerationRunView(APIView):
     """POST /timetable-generation-runs/<int:pk>/apply/ — flips the run's draft Schedule rows live."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = TIMETABLE_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         try:
@@ -93,7 +95,7 @@ class ApplyTimetableGenerationRunView(APIView):
 
 class DiscardTimetableGenerationRunView(APIView):
     """POST /timetable-generation-runs/<int:pk>/discard/ — deletes the run's draft Schedule rows."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = TIMETABLE_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         try:

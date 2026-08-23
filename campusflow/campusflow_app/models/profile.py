@@ -252,6 +252,10 @@ class TeachingStaffProfile(models.Model):
     date_of_joining = models.DateField(blank=True, null=True)
     designation = models.CharField(max_length=100, blank=True, null=True)
     qualifications = models.TextField(blank=True, null=True, help_text="e.g., Ph.D., M.Tech, NET, SET")
+    has_phd = models.BooleanField(
+        default=False,
+        help_text="Structured flag for the NIRF TLR 'faculty with PhD' metric — qualifications above is free text and isn't reliably queryable.",
+    )
     specializations = models.TextField(blank=True, null=True, help_text="Subjects taught or areas of specialization")
     experience_years = models.PositiveIntegerField(blank=True, null=True)
     employee_type = models.CharField(max_length=20, default='full_time')

@@ -15,6 +15,7 @@ import logging
 
 from celery import shared_task
 from django.conf import settings
+from django.utils import timezone
 from django_tenants.utils import schema_context
 
 from .face_utils import (
@@ -233,6 +234,54 @@ def run_accreditation_narrative_draft(schema_name: str, draft_id: int) -> None:
         draft.caveats = result.get("caveats", "")
         draft.model_used = getattr(settings, "AI_GRADING_MODEL", "")
         draft.save(update_fields=["narrative_text", "caveats", "model_used"])
+
+
+@shared_task(name="campusflow_app.run_student_insight_generation", time_limit=180, soft_time_limit=150)
+def run_student_insight_generation(schema_name: str, snapshot_id: int) -> None:
+    """
+    Generates a student's AI performance insight via a local Ollama text
+    model and writes it onto the StudentInsightSnapshot row. Same
+    schema_context-wrapped, never-raises shape as
+    run_accreditation_narrative_draft — the caller polls via .delay(), not
+    .get(). Recomputes StudentProgressView/StudentTopicPerformanceView's
+    data directly here rather than trusting anything passed in from the
+    request, since a Celery worker runs asynchronously after the request
+    that queued it has already returned.
+    """
+    from .ai_student_insight import StudentInsightError, build_student_insight
+    from .models.student_insight import StudentInsightSnapshot
+    from .views.progress import _compute_student_progress, _compute_student_topic_performance
+
+    with schema_context(schema_name):
+        try:
+            snapshot = StudentInsightSnapshot.objects.select_related("student").get(pk=snapshot_id)
+        except StudentInsightSnapshot.DoesNotExist:
+            logger.error("run_student_insight_generation: snapshot %s not found in schema %s", snapshot_id, schema_name)
+            return
+
+        progress_data = _compute_student_progress(snapshot.student)
+        topic_data = _compute_student_topic_performance(snapshot.student)
+
+        try:
+            result = build_student_insight(progress_data, topic_data)
+        except StudentInsightError as e:
+            snapshot.status = StudentInsightSnapshot.STATUS_FAILED
+            snapshot.error_message = str(e)
+            snapshot.save(update_fields=["status", "error_message"])
+            return
+        except Exception as e:  # noqa: BLE001 - last-resort guard so a bug here always lands as a visible failed snapshot
+            logger.exception("run_student_insight_generation: unexpected error generating insight %s", snapshot_id)
+            snapshot.status = StudentInsightSnapshot.STATUS_FAILED
+            snapshot.error_message = f"Unexpected error: {e}"
+            snapshot.save(update_fields=["status", "error_message"])
+            return
+
+        snapshot.narrative_text = result.get("narrative", "")
+        snapshot.recommendations = result.get("recommendations", [])
+        snapshot.model_used = getattr(settings, "AI_NARRATIVE_MODEL", "")
+        snapshot.status = StudentInsightSnapshot.STATUS_READY
+        snapshot.generated_at = timezone.now()
+        snapshot.save(update_fields=["narrative_text", "recommendations", "model_used", "status", "generated_at"])
 
 
 @shared_task(name="campusflow_app.run_generate_timetable", time_limit=90, soft_time_limit=80)

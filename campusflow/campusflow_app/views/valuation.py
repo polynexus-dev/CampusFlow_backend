@@ -11,21 +11,54 @@ from rest_framework.views import APIView
 from ..demo_guard import IsNotDemoTenant
 from ..models.ai_grading import AIGradingSuggestion
 from ..models.valuation import ValuationSession, ScannedPaper
-from ..permissions import IsFacultyOrAbove
+from ..permissions import IsFacultyOrAbove, RequiresModule, get_user_group, is_hm_or_above
 from ..serializers import AIGradingSuggestionSerializer, ValuationSessionSerializer, ScannedPaperSerializer
 from ..tasks import run_ai_grading_suggestion
 
+VALUATION_PERMS = [IsAuthenticated, RequiresModule("valuation")]
+AI_VALUATION_PERMS = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("ai-valuation")]
+
 
 class ValuationSessionViewSet(viewsets.ModelViewSet):
+    """
+    Plain Faculty (evaluators) only ever see the sessions actually assigned
+    to them — this was previously unscoped, meaning any authenticated
+    Faculty account could list every valuation session in the tenant
+    regardless of who it was assigned to, undermining the blind-evaluation
+    design the serializer's student-name masking exists for. HOD-or-above
+    keeps the broader view they already have everywhere else in the app.
+    """
     queryset = ValuationSession.objects.select_related('exam', 'evaluator__user').all().order_by('-started_at')
     serializer_class = ValuationSessionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = VALUATION_PERMS
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if get_user_group(user) == 'Faculty' and not is_hm_or_above(user):
+            qs = qs.filter(evaluator__user=user)
+        return qs
 
 
 class ScannedPaperViewSet(viewsets.ModelViewSet):
+    """Same 'assigned to me' scoping as ValuationSessionViewSet, via the
+    parent session's evaluator — see that class's docstring."""
     queryset = ScannedPaper.objects.select_related('student__user', 'session__exam').all().order_by('-evaluated_at')
     serializer_class = ScannedPaperSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = VALUATION_PERMS
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if get_user_group(user) == 'Faculty' and not is_hm_or_above(user):
+            qs = qs.filter(session__evaluator__user=user)
+        session_id = self.request.query_params.get('session')
+        if session_id:
+            qs = qs.filter(session_id=session_id)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
 
 
 class ScannedPaperAISuggestView(APIView):
@@ -38,7 +71,7 @@ class ScannedPaperAISuggestView(APIView):
     bounded than the local ONNX inference other tasks in this app block on —
     the frontend polls ScannedPaperAISuggestionListView for the result.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove, IsNotDemoTenant]
+    permission_classes = AI_VALUATION_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         paper = get_object_or_404(ScannedPaper, pk=pk)
@@ -71,7 +104,7 @@ class ScannedPaperAISuggestionListView(APIView):
     Lists AI grading suggestions for one paper, latest first — for polling
     a pending suggestion until it resolves to applied/rejected/failed.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = AI_VALUATION_PERMS
 
     def get(self, request, pk):
         paper = get_object_or_404(ScannedPaper, pk=pk)
@@ -86,7 +119,7 @@ class AIGradingSuggestionApplyView(APIView):
     Evaluated. Refuses to overwrite an already-Evaluated paper unless
     ?force=true — never silently overwrite a hand-graded paper.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove, IsNotDemoTenant]
+    permission_classes = AI_VALUATION_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         suggestion = get_object_or_404(AIGradingSuggestion, pk=pk)
@@ -129,7 +162,7 @@ class AIGradingSuggestionApplyView(APIView):
 
 class AIGradingSuggestionRejectView(APIView):
     """POST /ai-suggestions/<pk>/reject/"""
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove, IsNotDemoTenant]
+    permission_classes = AI_VALUATION_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         suggestion = get_object_or_404(AIGradingSuggestion, pk=pk)

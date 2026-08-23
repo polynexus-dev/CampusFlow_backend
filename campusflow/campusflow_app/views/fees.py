@@ -16,10 +16,13 @@ from campusflow_app.models import (
 )
 from campusflow_app.models.academics import Batch, Program
 from campusflow_app.models.profile import StudentProfile
-from campusflow_app.permissions import IsSaaSOrCollegeAdmin, IsNotStudent
+from campusflow_app.permissions import IsSaaSOrCollegeAdmin, IsNotStudent, RequiresModule
 from campusflow_app.services.academic_roster import resolve_student_roster
 
 User = get_user_model()
+
+FEES_PERMS = [IsAuthenticated, RequiresModule("fees")]
+FEES_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("fees")]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,11 +164,11 @@ class FeeCategoryViewSet(viewsets.ModelViewSet):
     """
     queryset = FeeCategory.objects.all().order_by("name")
     serializer_class = FeeCategorySerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = FEES_PERMS
 
     def get_permissions(self):
         if self.action in ["create", "update", "partial_update", "destroy"]:
-            return [IsAuthenticated(), IsSaaSOrCollegeAdmin()]
+            return [IsAuthenticated(), IsSaaSOrCollegeAdmin(), RequiresModule("fees")()]
         return super().get_permissions()
 
 
@@ -175,7 +178,7 @@ class FeeStructureViewSet(viewsets.ModelViewSet):
     """
     queryset = FeeStructure.objects.all().prefetch_related("items__category", "department").order_by("-created_at")
     serializer_class = FeeStructureSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = FEES_ADMIN_PERMS
 
 
 class StudentFeeInvoiceViewSet(viewsets.ModelViewSet):
@@ -184,7 +187,7 @@ class StudentFeeInvoiceViewSet(viewsets.ModelViewSet):
     Admins can see all, students can only see their own.
     """
     serializer_class = StudentFeeInvoiceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = FEES_PERMS
 
     def get_queryset(self):
         user = self.request.user
@@ -206,7 +209,7 @@ class StudentFeeInvoiceViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ["create", "update", "partial_update", "destroy"]:
-            return [IsAuthenticated(), IsSaaSOrCollegeAdmin()]
+            return [IsAuthenticated(), IsSaaSOrCollegeAdmin(), RequiresModule("fees")()]
         return super().get_permissions()
 
 
@@ -245,7 +248,7 @@ class BulkGenerateInvoicesView(APIView):
     are still null — would be silently skipped, reintroducing exactly the
     partial-match under-billing this change exists to prevent.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = FEES_ADMIN_PERMS
 
     @transaction.atomic
     def post(self, request):
@@ -378,7 +381,7 @@ class RecordFeePaymentView(APIView):
         "remarks": "paid online" (optional)
     }
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = FEES_ADMIN_PERMS
 
     @transaction.atomic
     def post(self, request, invoice_id):
@@ -437,7 +440,7 @@ class FeePaymentListView(generics.ListAPIView):
     Students can only view their own receipts.
     """
     serializer_class = FeePaymentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = FEES_PERMS
 
     def get_queryset(self):
         user = self.request.user
@@ -459,7 +462,7 @@ class FeeDashboardView(APIView):
     GET /api/fees/dashboard/
     Get financial overview metrics: Collected, Outstanding Dues, Expected.
     """
-    permission_classes = [IsAuthenticated, IsNotStudent]
+    permission_classes = [IsAuthenticated, IsNotStudent, RequiresModule("fees")]
 
     def get(self, request):
         invoices = StudentFeeInvoice.objects.all()

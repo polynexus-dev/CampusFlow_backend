@@ -11,9 +11,11 @@ services:
       - DB_HOST=pgbouncer
       - DB_PORT=5432
       - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
       - pgbouncer
       - redis
+      - ollama
     command: /bin/bash ./entrypoint.sh
 
   db:
@@ -75,11 +77,34 @@ services:
       - DB_HOST=pgbouncer
       - DB_PORT=5432
       - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
       - redis
+      - ollama
     command: /bin/bash ./entrypoint_celery.sh
+
+  # Local, on-prem model server for every AI-assisted feature (answer-sheet
+  # valuation, accreditation narrative drafting, question generation, student
+  # insight — see campusflow_app/ai_*.py). Runs entirely inside this compose
+  # network; nothing about any request ever reaches a third-party AI service.
+  # entrypoint_ollama.sh pulls AI_GRADING_MODEL/AI_NARRATIVE_MODEL on boot —
+  # a no-op once already pulled, so this is safe on every restart. Pulling a
+  # multi-GB model can take a while on first boot; web/celery_worker start
+  # regardless (every AI feature degrades gracefully with a clear warning if
+  # Ollama isn't ready yet, rather than blocking the rest of the app on it).
+  ollama:
+    image: ollama/ollama:latest
+    env_file:
+      - .env
+    volumes:
+      - CampusFlow_ollama_data:/root/.ollama
+      - ./entrypoint_ollama.sh:/entrypoint_ollama.sh
+    entrypoint: ["/bin/sh", "/entrypoint_ollama.sh"]
+    ports:
+      - "11434:11434"
 
 volumes:
   CampusFlow_postgres_data:
   CampusFlow_redis_data:
+  CampusFlow_ollama_data:
 

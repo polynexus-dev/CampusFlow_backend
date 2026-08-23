@@ -10,9 +10,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from ..models.exam import ExamType, Exam
 from ..permissions import (
-    IsCollegeAdmin, IsFacultyOrAbove, IsNotStudent,
+    IsCollegeAdmin, IsFacultyOrAbove, IsNotStudent, RequiresModule,
     get_user_group, is_college_admin, is_saas_admin
 )
+
+EXAM_PERMS = [IsAuthenticated, RequiresModule("exams")]
 
 
 def validate_question_structure(value):
@@ -49,7 +51,7 @@ def validate_question_structure(value):
 
 class ExamTypeListCreateView(APIView):
     """GET: List exam types. POST: Create (Admin only)."""
-    permission_classes = [IsAuthenticated]
+    permission_classes = EXAM_PERMS
 
     def get(self, request):
         types = ExamType.objects.all()
@@ -74,7 +76,7 @@ class ExamTypeListCreateView(APIView):
 
 class ExamListCreateView(APIView):
     """GET: List exams. POST: Create exam (Admin/HOD/Faculty)."""
-    permission_classes = [IsAuthenticated]
+    permission_classes = EXAM_PERMS
 
     def get(self, request):
         user = request.user
@@ -112,6 +114,8 @@ class ExamListCreateView(APIView):
                 "department_id": exam.department_id,
                 "course": exam.course.course_name if exam.course else None,
                 "course_code": exam.course.course_code if exam.course else None,
+                "course_id": exam.course_id,
+                "paper_finalized": exam.paper_finalized,
                 "date": str(exam.date),
                 "start_time": str(exam.start_time),
                 "end_time": str(exam.end_time),
@@ -191,7 +195,7 @@ class ExamListCreateView(APIView):
 
 class ExamDetailView(APIView):
     """GET/PUT/DELETE a single exam."""
-    permission_classes = [IsAuthenticated]
+    permission_classes = EXAM_PERMS
 
     def get(self, request, pk):
         try:

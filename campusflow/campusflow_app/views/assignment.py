@@ -7,17 +7,20 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from ..models.assignment import Assignment
 from ..models.department import Department
 from ..models.course import Course
-from ..permissions import IsFacultyOrAbove, get_user_group, is_college_admin
+from ..permissions import IsFacultyOrAbove, RequiresModule, get_user_group, is_college_admin
 from ..utils.tenant_utils import ensure_tenant_schema
 from ..utils.file_validation import validate_attachment
 from ..services.notifications import notify_guardians_of_course_roster
+
+ASSIGNMENT_PERMS = [IsAuthenticated, RequiresModule("assignments")]
+
 
 class AssignmentListCreateView(APIView):
     """
     GET: List assignments. Filtered automatically for students by their department.
     POST: Create a new assignment (Faculty/HOD/Admin only, supports file attachments).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = ASSIGNMENT_PERMS
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
@@ -128,7 +131,7 @@ class AssignmentDetailView(APIView):
     GET: Retrieve single assignment details.
     PUT/DELETE: Update or delete assignment (Owner or Admin only).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = ASSIGNMENT_PERMS
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request, pk):

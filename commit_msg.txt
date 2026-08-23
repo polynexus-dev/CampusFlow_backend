@@ -1,0 +1,1 @@
+feat: add statutory committees, NIRF, AI insights, paper variants, export services, and cross-module enhancements

@@ -29,7 +29,11 @@ from ..serializers import (
     AccreditationCriterionSerializer, EvidenceItemSerializer,
     AccreditationNarrativeDraftSerializer,
 )
-from ..permissions import IsSaaSOrCollegeAdmin, IsHMOrAbove
+from ..permissions import IsSaaSOrCollegeAdmin, IsHMOrAbove, RequiresModule
+
+COMPLIANCE_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("compliance-center")]
+from ..services.naac_ssr_export import build_naac_document
+from ..services.nba_sar_export import build_nba_sar_document
 from ..tasks import run_accreditation_narrative_draft
 
 
@@ -40,7 +44,7 @@ class ComplianceCertificateTypeViewSet(viewsets.ModelViewSet):
     """
     queryset = ComplianceCertificateType.objects.all().order_by('name')
     serializer_class = ComplianceCertificateTypeSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = COMPLIANCE_ADMIN_PERMS
 
 
 class ComplianceCertificateViewSet(viewsets.ModelViewSet):
@@ -52,7 +56,7 @@ class ComplianceCertificateViewSet(viewsets.ModelViewSet):
     """
     queryset = ComplianceCertificate.objects.select_related('certificate_type', 'uploaded_by').all()
     serializer_class = ComplianceCertificateSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = COMPLIANCE_ADMIN_PERMS
 
     def perform_create(self, serializer):
         serializer.save(uploaded_by=self.request.user)
@@ -95,10 +99,58 @@ def _accreditation_xlsx_response(filename, sheets):
     return response
 
 
+def _accreditation_pdf_response(filename, title, subtitle, sections):
+    """Same (heading, header, rows) sections shape as _accreditation_xlsx_response
+    above, rendered as a submission-shaped PDF instead of a workbook — for
+    reports (like the AICTE Mandatory Disclosure) that are normally submitted
+    as one formatted document rather than a spreadsheet. Cell values are
+    wrapped in Paragraph so long text (e.g. faculty qualifications) wraps
+    within its column instead of overflowing the page."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    styles = getSampleStyleSheet()
+    cell_style = styles["Normal"].clone("cell")
+    cell_style.fontSize = 8
+    cell_style.leading = 10
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=1.5 * cm, rightMargin=1.5 * cm, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+    )
+
+    story = [Paragraph(title, styles["Title"]), Paragraph(subtitle, styles["Normal"]), Spacer(1, 0.5 * cm)]
+    for heading, header, rows in sections:
+        story.append(Paragraph(heading, styles["Heading2"]))
+        col_width = doc.width / len(header)
+        table_data = [[Paragraph(f"<b>{h}</b>", cell_style) for h in header]]
+        for row in rows:
+            table_data.append([Paragraph("" if v is None else str(v), cell_style) for v in row])
+        table = Table(table_data, colWidths=[col_width] * len(header), repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 0.5 * cm))
+
+    doc.build(story)
+    response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 class AISHEAnnualReturnView(APIView):
     """AISHE annual return: enrolment by category/gender/disability status,
     staff counts across all role types."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = COMPLIANCE_ADMIN_PERMS
 
     def get(self, request):
         students = StudentProfile.objects.all()
@@ -139,7 +191,7 @@ class AISHEAnnualReturnView(APIView):
 class AICTEDisclosureView(APIView):
     """AICTE Mandatory Disclosure + Faculty-Student Ratio report: faculty
     qualifications/experience/designation, formatted to the disclosure template."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = COMPLIANCE_ADMIN_PERMS
 
     def get(self, request):
         faculty = TeachingStaffProfile.objects.select_related("user", "department").all()
@@ -168,17 +220,26 @@ class AICTEDisclosureView(APIView):
             for p in programs
         ]
 
-        if (request.query_params.get("export") or "").lower() == "xlsx":
-            return _accreditation_xlsx_response(
-                "aicte_mandatory_disclosure.xlsx",
-                [
-                    ("Faculty", ["Employee ID", "Name", "Department", "Designation", "Qualifications", "Experience (yrs)"],
-                     [[f["employee_id"], f["name"], f["department"], f["designation"], f["qualifications"], f["experience_years"]] for f in faculty_rows]),
-                    ("Programs", ["Code", "Name", "Level", "Department", "AICTE Program Code"],
-                     [[p["code"], p["name"], p["level"], p["department"], p["aicte_program_code"]] for p in program_rows]),
-                    ("Faculty-Student Ratio", ["Metric", "Value"],
-                     [["Total Students", total_students], ["Total Faculty", total_faculty], ["Ratio (Students:Faculty)", ratio]]),
-                ],
+        export_format = (request.query_params.get("export") or "").lower()
+        disclosure_sections = [
+            ("Faculty", ["Employee ID", "Name", "Department", "Designation", "Qualifications", "Experience (yrs)"],
+             [[f["employee_id"], f["name"], f["department"], f["designation"], f["qualifications"], f["experience_years"]] for f in faculty_rows]),
+            ("Programs", ["Code", "Name", "Level", "Department", "AICTE Program Code"],
+             [[p["code"], p["name"], p["level"], p["department"], p["aicte_program_code"]] for p in program_rows]),
+            ("Faculty-Student Ratio", ["Metric", "Value"],
+             [["Total Students", total_students], ["Total Faculty", total_faculty], ["Ratio (Students:Faculty)", ratio]]),
+        ]
+
+        if export_format == "xlsx":
+            return _accreditation_xlsx_response("aicte_mandatory_disclosure.xlsx", disclosure_sections)
+
+        if export_format == "pdf":
+            tenant_name = getattr(connection.tenant, "name", "") or connection.schema_name
+            return _accreditation_pdf_response(
+                "aicte_mandatory_disclosure.pdf",
+                title="AICTE Mandatory Disclosure",
+                subtitle=f"{tenant_name} — Faculty & Program Particulars",
+                sections=disclosure_sections,
             )
 
         return Response({
@@ -192,7 +253,7 @@ class AICTEDisclosureView(APIView):
 
 class NAACExtendedProfileView(APIView):
     """NAAC Extended Profile — institution-level counts feeding the IIQA submission."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = COMPLIANCE_ADMIN_PERMS
 
     def get(self, request):
         programs_by_level = list(Program.objects.filter(is_active=True).values("level").annotate(count=Count("id")))
@@ -229,7 +290,7 @@ class AccreditationCriterionViewSet(viewsets.ModelViewSet):
     """The NAAC/NBA criteria catalog (Admin/IQAC managed)."""
     queryset = AccreditationCriterion.objects.all()
     serializer_class = AccreditationCriterionSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]
 
 
 class EvidenceItemViewSet(viewsets.ModelViewSet):
@@ -243,7 +304,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         "criterion", "department", "financial_year", "uploaded_by", "signed_off_by", "linked_certificate",
     ).all()
     serializer_class = EvidenceItemSerializer
-    permission_classes = [IsAuthenticated, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsNotDemoTenant, RequiresModule("compliance-center")]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -264,7 +325,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
 
 class SubmitEvidenceItemView(APIView):
     """POST /api/evidence-items/<int:pk>/submit/ — Draft -> Submitted."""
-    permission_classes = [IsAuthenticated, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsNotDemoTenant, RequiresModule("compliance-center")]
 
     def post(self, request, pk):
         try:
@@ -281,7 +342,7 @@ class SignOffEvidenceItemView(APIView):
     """POST /api/evidence-items/<int:pk>/sign-off/ — Submitted -> Signed Off.
     Restricted to Department Head or above, the same bar as other HM-level
     re-approval actions in this codebase (see IsHMOrAbove)."""
-    permission_classes = [IsAuthenticated, IsHMOrAbove, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsHMOrAbove, IsNotDemoTenant, RequiresModule("compliance-center")]
 
     def post(self, request, pk):
         try:
@@ -306,7 +367,7 @@ class CriterionNarrativeDraftRequestView(APIView):
     Same permission bar as the rest of this file's admin/reporting views —
     not the broader IsHMOrAbove used only for evidence sign-off.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         try:
@@ -355,7 +416,7 @@ class AccreditationNarrativeDraftViewSet(viewsets.ModelViewSet):
         "criterion", "financial_year", "requested_by", "applied_by",
     ).all()
     serializer_class = AccreditationNarrativeDraftSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -370,7 +431,7 @@ class AccreditationNarrativeDraftViewSet(viewsets.ModelViewSet):
 
 class NarrativeDraftApplyView(APIView):
     """POST /narrative-drafts/<int:pk>/apply/ — marks a draft as the current narrative for its criterion+year."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         try:
@@ -393,7 +454,7 @@ class NarrativeDraftApplyView(APIView):
 
 class NarrativeDraftRejectView(APIView):
     """POST /narrative-drafts/<int:pk>/reject/"""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         try:
@@ -416,10 +477,27 @@ class SSRExportView(APIView):
     a JSON tree (criterion -> evidence items) for the manifest, plus a ZIP of
     every evidence file, grouped by criterion code.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = COMPLIANCE_ADMIN_PERMS
 
     def get(self, request):
         financial_year = request.query_params.get("financial_year")
+        export_format = (request.query_params.get("export") or "").lower()
+
+        if export_format == "docx":
+            financial_year_obj = None
+            if financial_year:
+                financial_year_obj = FinancialYear.objects.filter(pk=financial_year).first()
+                if not financial_year_obj:
+                    return Response({"error": "Financial year not found."}, status=status.HTTP_404_NOT_FOUND)
+            buffer = build_naac_document(financial_year_obj)
+            filename = f"naac_aqar_{financial_year_obj.label}.docx" if financial_year_obj else "naac_ssr.docx"
+            response = HttpResponse(
+                buffer.getvalue(),
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+
         criteria = AccreditationCriterion.objects.prefetch_related("evidence").all()
 
         tree = []
@@ -440,7 +518,7 @@ class SSRExportView(APIView):
                 entry["narrative"] = applied_narrative.narrative_text if applied_narrative else None
             tree.append(entry)
 
-        if (request.query_params.get("export") or "").lower() == "zip":
+        if export_format == "zip":
             buffer = io.BytesIO()
             with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                 for criterion in criteria:
@@ -458,3 +536,40 @@ class SSRExportView(APIView):
             return response
 
         return Response({"criteria": tree})
+
+
+# ─────────────────────────────────────────────
+# P8 — NBA SAR Document Generator
+# ─────────────────────────────────────────────
+
+class NBASARExportView(APIView):
+    """
+    GET /api/academics/programs/<int:program_id>/nba-sar-export/?financial_year=<id>
+    Compiles the program's NBA-tagged criteria (applied narrative + evidence,
+    same source data as SSRExportView above), its CO-PO articulation matrix,
+    and its PO/PSO/PEO attainment (services/outcome_attainment.py — the same
+    computation ProgramOutcomeAttainmentView exposes as CSV) into a single
+    submission-shaped .docx. Same permission bar as SSRExportView: this is an
+    institution-level regulatory export, not a routine faculty-facing report.
+    """
+    permission_classes = COMPLIANCE_ADMIN_PERMS
+
+    def get(self, request, program_id):
+        program = Program.objects.select_related("department").filter(pk=program_id).first()
+        if not program:
+            return Response({"error": "Program not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        financial_year = None
+        financial_year_id = request.query_params.get("financial_year")
+        if financial_year_id:
+            financial_year = FinancialYear.objects.filter(pk=financial_year_id).first()
+            if not financial_year:
+                return Response({"error": "Financial year not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        buffer = build_nba_sar_document(program, financial_year)
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        response["Content-Disposition"] = f'attachment; filename="nba_sar_{program.code}.docx"'
+        return response

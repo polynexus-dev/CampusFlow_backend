@@ -11,7 +11,7 @@ from ..serializers import (
     FinancialYearSerializer, IncomeCategorySerializer, IncomeEntrySerializer,
     ExpenseCategorySerializer, ExpenseEntrySerializer, FixedAssetSerializer,
 )
-from ..permissions import IsSaaSOrCollegeAdmin
+from ..permissions import IsSaaSOrCollegeAdmin, RequiresModule
 
 
 class FinancialYearViewSet(viewsets.ModelViewSet):
@@ -22,7 +22,7 @@ class FinancialYearViewSet(viewsets.ModelViewSet):
     """
     queryset = FinancialYear.objects.all()
     serializer_class = FinancialYearSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("ledger")]
 
 
 class CloseFinancialYearView(APIView):
@@ -31,7 +31,7 @@ class CloseFinancialYearView(APIView):
     Locks this FY (append-only from here on) and carries its closing cash+bank
     balance forward into next_financial_year's opening balance.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("ledger")]
 
     def post(self, request, pk):
         try:
@@ -65,14 +65,14 @@ class CloseFinancialYearView(APIView):
 class IncomeCategoryViewSet(viewsets.ModelViewSet):
     queryset = IncomeCategory.objects.all()
     serializer_class = IncomeCategorySerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("ledger")]
 
 
 class IncomeEntryViewSet(viewsets.ModelViewSet):
     """The missing non-fee income side — donations, grants, interest, rental income."""
     queryset = IncomeEntry.objects.select_related('category', 'financial_year', 'recorded_by').all()
     serializer_class = IncomeEntrySerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("ledger")]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -88,14 +88,14 @@ class IncomeEntryViewSet(viewsets.ModelViewSet):
 class ExpenseCategoryViewSet(viewsets.ModelViewSet):
     queryset = ExpenseCategory.objects.all()
     serializer_class = ExpenseCategorySerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("ledger")]
 
 
 class ExpenseEntryViewSet(viewsets.ModelViewSet):
     """The missing non-payroll expense side — rent, utilities, vendor payments, AMC/maintenance."""
     queryset = ExpenseEntry.objects.select_related('category', 'department', 'vendor', 'financial_year', 'recorded_by').all()
     serializer_class = ExpenseEntrySerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("ledger")]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -112,4 +112,4 @@ class FixedAssetViewSet(viewsets.ModelViewSet):
     """Distinct from InventoryItem — a Fixed Asset Register needs cost/depreciation, not stock quantity."""
     queryset = FixedAsset.objects.select_related('department', 'supplier').all()
     serializer_class = FixedAssetSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("ledger")]

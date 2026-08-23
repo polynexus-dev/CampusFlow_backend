@@ -170,9 +170,16 @@ class RoleModulePermissionView(APIView):
         subscribed_lower_map = {m.lower().replace(" ", "-"): m for m in subscribed}
 
         for role in roles:
-            perm, _ = TenantModulePermission.objects.get_or_create(group_name=role)
-            allowed = perm.allowed_modules
-            if allowed is None:
+            # Read-only lookup — this is a GET, it must not silently create a
+            # permanent empty-list row for every role on first page view (that
+            # row would then read back as "explicitly zero modules" instead of
+            # "unconfigured", since `not allowed` below can't tell a real saved
+            # empty list apart from a role nobody has touched yet). Matches the
+            # read-only .get()/except pattern get_effective_allowed_modules
+            # already uses for the exact same lookup.
+            perm = TenantModulePermission.objects.filter(group_name=role).first()
+            allowed = perm.allowed_modules if perm else None
+            if not allowed:
                 allowed = ROLE_DEFAULT_MODULES.get(role) or []
                 
             # Filter allowed: 
@@ -193,7 +200,13 @@ class RoleModulePermissionView(APIView):
 
         return Response({
             "subscribed_modules": subscribed,
-            "role_permissions": data
+            "role_permissions": data,
+            # So the admin UI can grey out / explain a checkbox instead of
+            # letting an admin check a box that RoleModulePermissionView.post
+            # will silently strip right back out on save (see
+            # RESTRICTED_ROLE_MODULES above) — e.g. only CA may ever hold
+            # "audit-portal", no matter what's submitted for another role.
+            "restricted_role_modules": RESTRICTED_ROLE_MODULES,
         })
 
     def post(self, request):
@@ -258,6 +271,63 @@ class RoleModulePermissionView(APIView):
         })
 
 
+def get_effective_allowed_modules(user):
+    """
+    Resolves the final, normalized (lowercase/dash-separated) set of module
+    keys a user's role may access — combining TenantModulePermission (or
+    ROLE_DEFAULT_MODULES when a tenant hasn't configured that role yet) with
+    the tenant's subscribed_modules.
+
+    This is the single source of truth for "what can this role touch":
+    MyAllowedModulesView uses it to decide what to show in the sidebar, and
+    RequiresModule (permissions.py) uses the exact same function to decide
+    whether to actually allow an API call — so the two can never drift apart.
+    Returns a set for cheap `in` checks from RequiresModule.
+    """
+    tenant = connection.tenant
+    subscribed = getattr(tenant, 'subscribed_modules', None) or []
+
+    if user.is_superuser:
+        return {m.lower().replace(" ", "-") for m in subscribed}
+
+    group_name = get_user_group(user)
+    if not group_name:
+        return {"dashboard", "settings", "profile"}
+
+    default_allowed = ROLE_DEFAULT_MODULES.get(group_name) or ["dashboard", "settings", "profile"]
+
+    try:
+        perm = TenantModulePermission.objects.get(group_name=group_name)
+        allowed = perm.allowed_modules
+        if not allowed:
+            allowed = default_allowed
+    except TenantModulePermission.DoesNotExist:
+        allowed = default_allowed
+
+    subscribed_lower = {m.lower().replace(" ", "-") for m in subscribed}
+
+    final_modules = set()
+
+    # 1. Process database allowed list
+    for m in allowed:
+        m_norm = m.lower().replace(" ", "-")
+        if m_norm not in PREMIUM_MODULES:
+            final_modules.add(m_norm)
+        elif m_norm in subscribed_lower:
+            final_modules.add(m_norm)
+
+    # 2. Always guarantee all default core modules for the role
+    for m in default_allowed:
+        m_norm = m.lower().replace(" ", "-")
+        if m_norm not in PREMIUM_MODULES:
+            final_modules.add(m_norm)
+
+    # Always guarantee core basic views
+    final_modules.update({"dashboard", "settings", "profile"})
+
+    return final_modules
+
+
 class MyAllowedModulesView(APIView):
     """
     Returns the intersection of the Tenant's subscribed modules and the user's role permissions.
@@ -267,66 +337,11 @@ class MyAllowedModulesView(APIView):
 
     def get(self, request):
         user = request.user
-        tenant = connection.tenant
-
-        subscribed = getattr(tenant, 'subscribed_modules', None) or []
-
-        # If SaaS Admin (superuser), grant access to all subscribed modules (normalized)
-        if user.is_superuser:
-            normalized_subscribed = [m.lower().replace(" ", "-") for m in subscribed]
-            return Response({
-                "role": "SaaS Admin",
-                "allowed_modules": normalized_subscribed
-            })
-
-        # Resolve role
-        group_name = get_user_group(user)
-        if not group_name:
-            return Response({
-                "role": "None",
-                "allowed_modules": ["dashboard", "settings", "profile"]
-            })
-
-        # Get role default modules
-        default_allowed = ROLE_DEFAULT_MODULES.get(group_name) or ["dashboard", "settings", "profile"]
-
-        # Get role allowed modules from db, falling back to defaults
-        try:
-            perm = TenantModulePermission.objects.get(group_name=group_name)
-            allowed = perm.allowed_modules
-            if not allowed:
-                allowed = default_allowed
-        except TenantModulePermission.DoesNotExist:
-            allowed = default_allowed
-
-
-        # Intersect to find final list (case-insensitive, returning lowercase/dash-separated form)
-        subscribed_lower = {m.lower().replace(" ", "-") for m in subscribed}
-
-        final_modules = []
-        
-        # 1. Process database allowed list
-        for m in allowed:
-            m_norm = m.lower().replace(" ", "-")
-            if m_norm not in PREMIUM_MODULES:
-                final_modules.append(m_norm)
-            elif m_norm in subscribed_lower:
-                final_modules.append(m_norm)
-                
-        # 2. Always guarantee all default core modules for the role
-        for m in default_allowed:
-            m_norm = m.lower().replace(" ", "-")
-            if m_norm not in PREMIUM_MODULES and m_norm not in final_modules:
-                final_modules.append(m_norm)
-
-        # Always guarantee core basic views
-        for core in ["dashboard", "settings", "profile"]:
-            if core not in final_modules:
-                final_modules.append(core)
-
+        role = "SaaS Admin" if user.is_superuser else (get_user_group(user) or "None")
+        allowed_modules = get_effective_allowed_modules(user)
         return Response({
-            "role": group_name,
-            "allowed_modules": final_modules
+            "role": role,
+            "allowed_modules": sorted(allowed_modules)
         })
 
 

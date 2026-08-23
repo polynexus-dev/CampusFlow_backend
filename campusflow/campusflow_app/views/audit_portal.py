@@ -36,7 +36,11 @@ from ..models.fees import FeePayment, StudentFeeInvoice
 from ..models.finance import ExpenseEntry, FinancialYear, FixedAsset, IncomeEntry, _year_month_pairs
 from ..models.payments import PaymentGatewayTransaction
 from ..models.payroll import Payslip, SalaryStructure
-from ..permissions import IsActiveAuditor, IsSaaSOrCollegeAdmin, get_user_group
+from ..models.scholarship import StudentScholarshipRecord
+from ..permissions import IsActiveAuditor, IsSaaSOrCollegeAdmin, RequiresModule, get_user_group
+
+AUDIT_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("audit-portal")]
+AUDIT_CA_PERMS = [IsAuthenticated, IsActiveAuditor, RequiresModule("audit-portal")]
 from ..serializers import AuditEngagementSerializer, AuditorProfileSerializer
 
 
@@ -52,7 +56,7 @@ class InviteAuditorView(APIView):
     No SaaS-Admin involvement needed, same trust level as adding any other
     staff member today.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = AUDIT_ADMIN_PERMS + [IsNotDemoTenant]
 
     def post(self, request):
         email = (request.data.get("email") or "").strip().lower()
@@ -149,7 +153,7 @@ class InviteAuditorView(APIView):
 
 class AuditEngagementListView(APIView):
     """GET /api/audit-engagements/ — College Admin's view of every CA engagement, active or not."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = AUDIT_ADMIN_PERMS
 
     def get(self, request):
         engagements = AuditEngagement.objects.select_related("auditor", "auditor__user", "financial_year").all()
@@ -158,7 +162,7 @@ class AuditEngagementListView(APIView):
 
 class RevokeAuditEngagementView(APIView):
     """POST /api/audit-portal/engagements/<int:pk>/revoke/ — manual early revocation, on top of auto-expiry."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = AUDIT_ADMIN_PERMS + [IsNotDemoTenant]
 
     def post(self, request, pk):
         try:
@@ -176,7 +180,7 @@ class MyAuditEngagementsView(APIView):
     populate a report selector without the CA needing to already know a
     financial_year id.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("audit-portal")]
 
     def get(self, request):
         if get_user_group(request.user) != 'CA':
@@ -274,7 +278,7 @@ def _export_response(filename_base, sheet_title, header, rows, fmt):
 class ReceiptsPaymentsStatementView(APIView):
     """The primary cash-basis statement, reconciles directly to the bank
     statement the CA already requests: Opening + Receipts - Payments = Closing."""
-    permission_classes = [IsAuthenticated, IsActiveAuditor]
+    permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
         fy = request.auditor_engagement.financial_year
@@ -337,7 +341,7 @@ class ReceiptsPaymentsStatementView(APIView):
 
 class IncomeExpenditureStatementView(APIView):
     """The accrual-adjusted secondary statement: Income - Expenditure = Surplus/Deficit."""
-    permission_classes = [IsAuthenticated, IsActiveAuditor]
+    permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
         from django.db.models import Sum, Q
@@ -408,7 +412,7 @@ class IncomeExpenditureStatementView(APIView):
 
 class FixedAssetRegisterView(APIView):
     """Every FixedAsset row plus its written-down value as of FinancialYear.end_date, grouped by category."""
-    permission_classes = [IsAuthenticated, IsActiveAuditor]
+    permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
         fy = request.auditor_engagement.financial_year
@@ -450,7 +454,7 @@ class PayrollStatutorySummaryView(APIView):
     """Payroll / TDS / PF / ESI statutory summary — SalaryStructure carries the
     per-employee rates, Payslip carries how many months were actually paid in
     this FY, so the summary is rate x months-paid, not a re-derivation."""
-    permission_classes = [IsAuthenticated, IsActiveAuditor]
+    permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
         from django.db.models import Q, Count, Sum
@@ -512,7 +516,7 @@ class PayrollStatutorySummaryView(APIView):
 class FeeReconciliationView(APIView):
     """Fee collection reconciliation: invoice total vs. FeePayment ledger vs.
     what the payment gateway actually confirms as paid."""
-    permission_classes = [IsAuthenticated, IsActiveAuditor]
+    permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
         from django.db.models import Sum
@@ -555,7 +559,7 @@ class FeeReconciliationView(APIView):
 
 class VendorLedgerView(APIView):
     """Vendor / supplier ledger — every ExpenseEntry grouped by vendor for the FY."""
-    permission_classes = [IsAuthenticated, IsActiveAuditor]
+    permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
         from django.db.models import Sum
@@ -596,7 +600,7 @@ class DocumentVaultExportView(APIView):
     individual records. Invoice/receipt/payslip PDFs aren't generated as files
     by this system today (they're rendered on demand), so the vault covers the
     file-backed records that exist: IncomeEntry/ExpenseEntry vouchers."""
-    permission_classes = [IsAuthenticated, IsActiveAuditor]
+    permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
         fy = request.auditor_engagement.financial_year
@@ -618,3 +622,113 @@ class DocumentVaultExportView(APIView):
         response = HttpResponse(buffer.getvalue(), content_type="application/zip")
         response["Content-Disposition"] = f'attachment; filename="document_vault_{fy.label}.zip"'
         return response
+
+
+class AssetsLiabilitiesScheduleView(APIView):
+    """
+    Supporting schedule for the Balance Sheet — deliberately NOT presented as
+    a finalized, self-balancing Balance Sheet. This system tracks cash-basis
+    transactions (see ReceiptsPaymentsStatementView/IncomeExpenditureStatementView
+    above), not a full double-entry ledger: there is no Corpus/Capital Fund
+    account carried forward year over year, and ExpenseEntry only records
+    amounts actually paid — an unpaid vendor bill (Sundry Creditor) has
+    nowhere to live. Rather than plug those with an invented balancing
+    figure, both are called out explicitly as not tracked, for the auditor
+    to supply — same "compile what's real, flag what isn't fabricated"
+    boundary as NIRFReportView's PR section and the statutory-committee
+    annual report's aggregate-only scope.
+
+    Reuses the same figures the sibling reports above already compute:
+    FixedAsset.written_down_value (FixedAssetRegisterView),
+    FinancialYear.closing_balance() (the same cash+bank figure
+    ReceiptsPaymentsStatementView's closing_balance derives, and what
+    close_and_carry_forward writes as next year's opening balance), and
+    StudentScholarshipRecord.reconciliation_gap (already used for NIRF's OI
+    section in services/nirf_compilation.py).
+    """
+    permission_classes = AUDIT_CA_PERMS
+
+    def get(self, request):
+        from django.db.models import Count, Q
+        fy = request.auditor_engagement.financial_year
+        export_format = _export_format(request)
+        action = AuditorAccessLog.ACTION_DOWNLOAD if export_format else AuditorAccessLog.ACTION_VIEW
+        _log_access(request, "assets_liabilities_schedule", action)
+
+        assets = FixedAsset.objects.filter(purchase_date__lte=fy.end_date)
+        fixed_assets_wdv = sum((a.written_down_value(fy.end_date) for a in assets), start=fy.opening_balance.__class__(0))
+
+        cash_bank_balance = fy.closing_balance()
+
+        outstanding_invoices = StudentFeeInvoice.objects.filter(
+            due_date__gte=fy.start_date, due_date__lte=fy.end_date,
+        ).exclude(status=StudentFeeInvoice.STATUS_PAID)
+        fee_receivables = sum((inv.remaining_balance for inv in outstanding_invoices), start=fy.opening_balance.__class__(0))
+
+        scholarship_records = StudentScholarshipRecord.objects.filter(financial_year=fy)
+        scholarship_payable = sum((r.reconciliation_gap for r in scholarship_records), start=fy.opening_balance.__class__(0))
+
+        pairs = _year_month_pairs(fy.start_date, fy.end_date)
+        statutory_dues = {"pf": 0, "esi": 0, "tds": 0}
+        if pairs:
+            q = Q()
+            for y, m in pairs:
+                q |= Q(year=y, month=m)
+            months_paid_by_user = {
+                row["user_id"]: row["months_paid"]
+                for row in Payslip.objects.filter(q).values("user_id").annotate(months_paid=Count("id"))
+            }
+            for structure in SalaryStructure.objects.filter(user_id__in=months_paid_by_user.keys()):
+                months_paid = months_paid_by_user.get(structure.user_id, 0)
+                statutory_dues["pf"] += structure.pf_deduction * months_paid
+                statutory_dues["esi"] += structure.esi_deduction * months_paid
+                statutory_dues["tds"] += structure.tds_deduction * months_paid
+        statutory_dues_total = statutory_dues["pf"] + statutory_dues["esi"] + statutory_dues["tds"]
+
+        not_tracked_note = (
+            "Corpus/Capital Fund and Sundry Creditors (unpaid vendor bills) are not tracked by this "
+            "system and are not included below — the auditor/accountant must supply these to complete "
+            "a finalized Balance Sheet. This schedule is a compilation of underlying account balances, "
+            "not a self-balancing statement; Total Assets and Total Liabilities below are not expected "
+            "to be equal."
+        )
+
+        data = {
+            "financial_year": fy.label,
+            "warning": _lock_warning(fy),
+            "note": not_tracked_note,
+            "assets": {
+                "fixed_assets_wdv": fixed_assets_wdv,
+                "cash_and_bank_balance": cash_bank_balance,
+                "fee_receivables_outstanding": fee_receivables,
+                "total_assets_tracked": fixed_assets_wdv + cash_bank_balance + fee_receivables,
+            },
+            "liabilities": {
+                "scholarship_payable": scholarship_payable,
+                "statutory_dues_deducted": statutory_dues,
+                "statutory_dues_deducted_total": statutory_dues_total,
+                "total_liabilities_tracked": scholarship_payable + statutory_dues_total,
+                "statutory_dues_remittance_status_note": "Remittance to government is not tracked in-system — this is the deducted amount, not necessarily the amount still payable.",
+            },
+        }
+
+        if export_format:
+            rows = [
+                ["ASSETS", "", ""],
+                ["Fixed Assets (Written Down Value)", "", fixed_assets_wdv],
+                ["Cash & Bank Balance", "", cash_bank_balance],
+                ["Fee Receivables (Outstanding Student Dues)", "", fee_receivables],
+                ["Total Assets (tracked only)", "", data["assets"]["total_assets_tracked"]],
+                ["", "", ""],
+                ["LIABILITIES", "", ""],
+                ["Scholarship Payable (Sanctioned, Not Disbursed)", "", scholarship_payable],
+                ["Statutory Dues Deducted — PF", "", statutory_dues["pf"]],
+                ["Statutory Dues Deducted — ESI", "", statutory_dues["esi"]],
+                ["Statutory Dues Deducted — TDS", "", statutory_dues["tds"]],
+                ["Total Liabilities (tracked only)", "", data["liabilities"]["total_liabilities_tracked"]],
+                ["", "", ""],
+                ["NOTE", not_tracked_note, ""],
+            ]
+            return _export_response(f"assets_liabilities_schedule_{fy.label}", "Assets & Liabilities Schedule", ["Line Item", "Detail", "Amount"], rows, export_format)
+
+        return Response(data)

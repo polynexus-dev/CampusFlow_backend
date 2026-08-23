@@ -16,16 +16,18 @@ from ..models.payroll import SalaryStructure, Payslip
 from ..models.attendance import Attendance
 from ..models.leave import LeaveRequest
 from ..permissions import (
-    IsCollegeAdmin, IsNotStudent,
+    IsCollegeAdmin, IsNotStudent, RequiresModule,
     get_user_group, is_college_admin
 )
+
+PAYROLL_ADMIN_PERMS = [IsAuthenticated, IsCollegeAdmin, RequiresModule("payroll")]
 
 
 class SalaryStructureListView(APIView):
     """
     GET: List all salary structures (Admin only).
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = PAYROLL_ADMIN_PERMS
 
     def get(self, request):
         structures = SalaryStructure.objects.all().select_related('user')
@@ -59,7 +61,7 @@ class SalaryStructureDetailView(APIView):
     GET: View salary structure for a specific user.
     PUT: Update salary structure (Admin only).
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = PAYROLL_ADMIN_PERMS
 
     def get(self, request, user_id):
         try:
@@ -115,7 +117,7 @@ class GeneratePayslipView(APIView):
     Calculates present days from Attendance, leave days from LeaveRequest,
     and applies absence deductions.
     """
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = PAYROLL_ADMIN_PERMS
 
     def post(self, request):
         user_id = request.data.get('user_id')
@@ -219,7 +221,7 @@ class GeneratePayslipView(APIView):
 
 class BulkPayslipGenerationView(APIView):
     """POST: Generate payslips for ALL staff for a given month/year."""
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = PAYROLL_ADMIN_PERMS
 
     def post(self, request):
         month = int(request.data.get('month', 0))
@@ -308,7 +310,7 @@ class PayslipListView(APIView):
     - Admin: All payslips (filterable by month/year/user).
     - Employee: Own payslips only.
     """
-    permission_classes = [IsAuthenticated, IsNotStudent]
+    permission_classes = [IsAuthenticated, IsNotStudent, RequiresModule("payroll")]
 
     def get(self, request):
         user = request.user

@@ -28,7 +28,7 @@ except Exception:
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get("DEBUG", "False") == "True"
+DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
 
 
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -350,11 +350,15 @@ FACE_PIPELINE_TASK_TIMEOUT = int(os.environ.get("FACE_PIPELINE_TASK_TIMEOUT", 15
 # ============================================================
 # AI-ASSISTED VALUATION (local Ollama vision grading — nothing about a
 # scanned paper leaves this machine. See campusflow_app/ai_grading.py and
-# the run_ai_grading_suggestion task. Requires `ollama serve` running and
-# `ollama pull <model>` done for AI_GRADING_MODEL beforehand. When Django
-# runs inside docker-compose, "localhost" is the web/celery_worker
-# container itself, not the Windows host running Ollama — override
-# OLLAMA_BASE_URL to http://host.docker.internal:11434 in that case.)
+# the run_ai_grading_suggestion task.
+#
+# Under docker-compose, Ollama runs as its own service in the same compose
+# network (see docker-compose.yml's `ollama` service + entrypoint_ollama.sh,
+# which pulls AI_GRADING_MODEL/AI_NARRATIVE_MODEL automatically on boot) —
+# the default below is overridden to http://ollama:11434 there. Running
+# Django directly on a host instead, point OLLAMA_BASE_URL at wherever
+# `ollama serve` is actually running (with AI_GRADING_MODEL/AI_NARRATIVE_MODEL
+# pulled beforehand via `ollama pull <model>`).
 # ============================================================
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 AI_GRADING_MODEL = os.environ.get("AI_GRADING_MODEL", "qwen2.5vl:3b")

@@ -13,10 +13,12 @@ from django.db.models import Q
 from django.utils import timezone
 from ..models.announcement import Announcement
 from ..permissions import (
-    IsCollegeAdmin, IsFacultyOrAbove,
+    IsCollegeAdmin, IsFacultyOrAbove, RequiresModule,
     get_user_group, is_saas_admin, is_college_admin
 )
 from ..services.notifications import notify_guardians_of_department
+
+ANNOUNCEMENT_PERMS = [IsAuthenticated, RequiresModule("announcements")]
 
 
 class AnnouncementListCreateView(APIView):
@@ -24,7 +26,7 @@ class AnnouncementListCreateView(APIView):
     GET: List announcements visible to the requesting user (filtered by role/department).
     POST: Create a new announcement (Faculty and above only).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = ANNOUNCEMENT_PERMS
 
     def get(self, request):
         user = request.user
@@ -130,7 +132,7 @@ class AnnouncementDetailView(APIView):
     PUT: Update (author or College Admin).
     DELETE: Remove (author or College Admin).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = ANNOUNCEMENT_PERMS
 
     def get_announcement(self, pk):
         try:

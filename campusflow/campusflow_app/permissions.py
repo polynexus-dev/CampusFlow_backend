@@ -112,6 +112,33 @@ class IsNotStudent(BasePermission):
     """Any authenticated user except students."""
     message = "Students are not allowed to access this resource."
 
+
+class IsCommitteeMember(BasePermission):
+    """
+    Statutory committee complaints/meetings (Anti-Ragging/ICC-POSH/Grievance
+    Redressal) are confidential to the committee's *appointed* members, not
+    gated by the base role hierarchy every other permission class here uses
+    — POSH Act Section 16 requires this for ICC specifically, and the same
+    membership model serves all three committee types. SaaS/College Admin
+    can always access (they administer the committees), same as every other
+    admin-managed resource in this codebase.
+
+    List-level filtering (so a non-member never even sees a complaint's row
+    in a list response, not just gets a 403 on its detail) is done in the
+    view's get_queryset — this class only covers the has_permission /
+    has_object_permission checks DRF calls for create/retrieve/update/delete.
+    """
+    message = "Only members of this committee (or a College/SaaS Admin) can access this resource."
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        if is_saas_or_college_admin(request.user):
+            return True
+        from .models.statutory_committee import CommitteeMembership
+        return CommitteeMembership.objects.filter(committee=obj.committee, user=request.user).exists()
+
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
@@ -255,6 +282,37 @@ class IsActiveAuditor(BasePermission):
                 request.auditor_engagement = engagement
                 return True
         return False
+
+
+def RequiresModule(module_key):
+    """
+    Ties an endpoint to the TenantModulePermission catalog (see
+    views/module_permissions.py — PREMIUM_MODULES / ROLE_DEFAULT_MODULES /
+    get_effective_allowed_modules) so a College Admin's Module Assignment
+    toggle actually blocks API access for that role, not just hides the
+    sidebar link the way MyAllowedModulesView alone used to.
+
+    Add this ALONGSIDE a view's existing role-hierarchy permission class,
+    never in place of it — it only narrows access further. SaaS Admin
+    always bypasses, same as every other permission class in this file.
+
+    Lazy import (matches IsActiveAuditor/IsCommitteeMember above) — avoids
+    a circular import, since views/module_permissions.py imports from this
+    module already.
+    """
+    class _RequiresModule(BasePermission):
+        message = f"The '{module_key}' module is not enabled for your role. Contact your College Admin."
+
+        def has_permission(self, request, view):
+            if not request.user.is_authenticated:
+                return False
+            if is_saas_admin(request.user):
+                return True
+            from .views.module_permissions import get_effective_allowed_modules
+            return module_key in get_effective_allowed_modules(request.user)
+
+    _RequiresModule.__name__ = f"RequiresModule_{module_key.replace('-', '_')}"
+    return _RequiresModule
 
 
 class CanGenerateQR(BasePermission):

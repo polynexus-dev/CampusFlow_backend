@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
         # 0009-0011+0013 in the other (applied) branch, deleted for the same
         # reason as in 0010_alter_invoice_bank_receipt.py above. This is the
         # one genuinely new field from that branch.
-        ("tenants", "0010_alter_invoice_bank_receipt"),
+        ("tenants", "0014_alter_invoice_bank_receipt"),
     ]
 
     operations = [
