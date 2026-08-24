@@ -11,6 +11,29 @@ def _print(msg):
         print(msg.encode("ascii", errors="ignore").decode("ascii"))
 
 
+# Known stray/obsolete migration files created from legacy merged branches
+KNOWN_STRAY_FILES = {
+    "tenants": [
+        "0010_tenant_cashfree_app_id_tenant_cashfree_secret_key_and_more.py",
+        "0009_tenant_billing_cycle_tenant_subscription_end_date_and_more.py",
+    ]
+}
+
+
+def purge_known_strays():
+    for app_name, filenames in KNOWN_STRAY_FILES.items():
+        target_dir = f"/app/{app_name}/migrations"
+        if os.path.exists(target_dir):
+            for filename in filenames:
+                file_path = os.path.join(target_dir, filename)
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        _print(f"   🧹 Purged obsolete stray migration file: {app_name}/{filename}")
+                    except Exception as e:
+                        _print(f"   ⚠️ Failed to purge {filename}: {e}")
+
+
 def sync_directory(clean_dir, target_dir, app_name):
     if not os.path.exists(clean_dir):
         return
@@ -47,6 +70,8 @@ def sync_directory(clean_dir, target_dir, app_name):
 
 
 def sync_migrations():
+    purge_known_strays()
+
     base_clean_dir = "/tmp/clean_migrations"
 
     if not os.path.exists(base_clean_dir):
@@ -80,5 +105,6 @@ def sync_migrations():
 
 if __name__ == "__main__":
     sync_migrations()
+
 
 
