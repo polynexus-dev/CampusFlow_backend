@@ -3247,6 +3247,27 @@ class CAAuditPortalTests(TenantTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("audit-portal", response.data["allowed_modules"])
 
+    def test_default_role_modules_never_leak_audit_portal_to_non_ca_role(self):
+        """RESTRICTED_ROLE_MODULES must also be enforced by
+        get_effective_allowed_modules() (which backs MyAllowedModulesView and
+        RequiresModule), not just RoleModulePermissionView.post. Management's
+        ROLE_DEFAULT_MODULES is ALL_ERP_MODULES, which lists "audit-portal" —
+        with no TenantModulePermission row ever saved for Management (the
+        common case: nothing has explicitly granted it), subscribing the
+        tenant to the module alone must not be enough to hand it to a
+        non-CA role that merely falls back to that default.
+        """
+        with schema_context(self.tenant.schema_name):
+            self.tenant.subscribed_modules = ['audit-portal']
+            self.tenant.save()
+            token = self._admin_token()
+
+        response = self.client.get(
+            reverse('user-allowed-modules'), HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("audit-portal", response.data["allowed_modules"])
+
     def test_my_engagements_lists_only_the_calling_auditors_own_engagements(self):
         with schema_context(self.tenant.schema_name):
             fy = self._financial_year()

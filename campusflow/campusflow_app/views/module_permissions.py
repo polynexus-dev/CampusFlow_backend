@@ -340,6 +340,18 @@ def get_effective_allowed_modules(user):
     # Always guarantee core basic views
     final_modules.update({"dashboard", "settings", "profile"})
 
+    # A module in RESTRICTED_ROLE_MODULES (e.g. "audit-portal" -> "CA") may
+    # only ever end up granted to its one designated role -- mirrors the
+    # guard RoleModulePermissionView.post already applies when a College
+    # Admin explicitly edits a role's modules. Without this here too,
+    # subscribing the tenant to that module was enough to also hand it to
+    # every role whose ROLE_DEFAULT_MODULES/ALL_ERP_MODULES happens to list
+    # it (e.g. Administrator/Management via ALL_ERP_MODULES), even though
+    # nothing ever explicitly granted it to them.
+    for module, restricted_to in RESTRICTED_ROLE_MODULES.items():
+        if group_name != restricted_to:
+            final_modules.discard(module)
+
     return final_modules
 
 
