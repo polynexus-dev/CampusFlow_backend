@@ -19,6 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from user_agents import parse
 
 # ── Local App-Specific Imports ────────────────────────────────────────────────
+from .permissions import NON_TEACHING_STAFF_ROLES
 from .models.attendance import Attendance
 from .models.attendance_log import FaceAttendanceLog
 from .models.classroom import Classroom
@@ -258,7 +259,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 profile_data = StudentProfile.objects.filter(user=user).first()
             elif user_group.name == 'Faculty':
                 profile_data = TeachingStaffProfile.objects.filter(user=user).first()
-            elif user_group.name == 'Support Staff':
+            elif user_group.name in NON_TEACHING_STAFF_ROLES:
                 profile_data = NonTeachingStaffProfile.objects.filter(user=user).first()
             elif user_group.name == 'Management':
                 profile_data = ManagementProfile.objects.filter(user=user).first()
@@ -381,7 +382,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 data['profile']['program_enrolled_in'] = profile_data.program_enrolled_in if hasattr(profile_data, 'program_enrolled_in') else None
                 data['profile']['is_face_registered'] = getattr(profile_data, 'is_face_registered', False)
                 data['profile']['locked_device_id'] = getattr(profile_data, 'locked_device_id', None)
-            elif user_group.name in ['Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']:
+            elif user_group.name in ('Faculty', 'Management', 'Administrator', 'Department Head', *NON_TEACHING_STAFF_ROLES):
                 data['profile']['employee_id'] = profile_data.employee_id
             elif user_group.name == 'guardian':
                 data['profile']['guardian_id'] = profile_data.guardian_id
@@ -546,7 +547,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         role = data.get('role')
         student_id = data.get('student_id')
         employee_id = data.get('employee_id')
-        valid_roles = ['student', 'Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head', 'guardian']
+        valid_roles = ['student', 'Faculty', *NON_TEACHING_STAFF_ROLES, 'Management', 'Administrator', 'Department Head', 'guardian']
         if role not in valid_roles:
             raise serializers.ValidationError({"role": f"Invalid role. Must be one of: {', '.join(valid_roles)}."})
         
@@ -575,7 +576,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({
                         "parent_guardian_name": "Parent or guardian details (name and email) are required for students under 18 years of age."
                     })
-        elif role in ['Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head']:
+        elif role in ('Faculty', 'Management', 'Administrator', 'Department Head', *NON_TEACHING_STAFF_ROLES):
             if not employee_id:
                 raise serializers.ValidationError({"employee_id": "Employee ID is required for staff/admin/HOD members."})
             if (TeachingStaffProfile.objects.filter(employee_id=employee_id).exists() or
@@ -671,13 +672,18 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             fields['status'] = 'pending'  # Faculty needs HOD approval
             TeachingStaffProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'Faculty')
-        elif role == 'Support Staff':
+        elif role in NON_TEACHING_STAFF_ROLES:
+            # Every functional non-teaching role (Librarian, Hostel Warden, Fee
+            # Counter, ...) shares the same NonTeachingStaffProfile shape as
+            # plain Support Staff — only the Group (and therefore the module
+            # access) differs, so 'staff_role' free-text field defaults to the
+            # role name itself instead of the generic 'administrator'.
             fields = {k: v for k, v in profile_data.items() if hasattr(NonTeachingStaffProfile, k)}
             if 'staff_role' not in fields or not fields['staff_role']:
-                fields['staff_role'] = 'administrator'
+                fields['staff_role'] = role if role != 'Support Staff' else 'administrator'
             fields['status'] = 'pending'  # Support needs Admin/HOD approval
             NonTeachingStaffProfile.objects.create(user=user, **fields)
-            assign_role_permissions(user, 'Support Staff')
+            assign_role_permissions(user, role)
         elif role == 'Management':
             fields = {k: v for k, v in profile_data.items() if hasattr(ManagementProfile, k)}
             if 'staff_role' not in fields or not fields['staff_role']:

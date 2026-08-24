@@ -4,6 +4,7 @@ from django.utils.text import slugify
 from django.contrib.auth.models import User, Group
 from django_tenants.utils import schema_context
 from campusflow_app.models.profile import ManagementProfile
+from campusflow_app.permissions import NON_TEACHING_STAFF_ROLES
 import uuid
 
 class TenantCreateSerializer(serializers.ModelSerializer):
@@ -43,7 +44,10 @@ class TenantCreateSerializer(serializers.ModelSerializer):
         # 3. Provision the new Tenant (Switch to the new schema context)
         with schema_context(tenant.schema_name):
             # A. Create necessary Role Groups
-            roles = ['student', 'Faculty', 'Support Staff', 'Management', 'Administrator', 'Department Head', 'guardian']
+            roles = [
+                'student', 'Faculty', 'Management', 'Administrator', 'Department Head', 'guardian',
+                *NON_TEACHING_STAFF_ROLES,
+            ]
             for role_name in roles:
                 Group.objects.get_or_create(name=role_name)
             

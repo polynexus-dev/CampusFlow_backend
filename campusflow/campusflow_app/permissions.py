@@ -18,6 +18,18 @@ from rest_framework.permissions import BasePermission
 from django.db import connection, models
 
 
+# Functional non-teaching roles, each its own Django Group (and each with its
+# own TenantModulePermission row in ROLE_DEFAULT_MODULES — see
+# views/module_permissions.py) rather than sub-types of 'Support Staff', so a
+# College Admin can grant a Librarian only 'library' without also handing
+# that same access to every driver/warden/clerk sharing one generic group.
+NON_TEACHING_STAFF_ROLES = (
+    'Support Staff', 'Librarian', 'Hostel Warden', 'Store Manager', 'Placement Officer',
+    'Fee Counter', 'Transport Coordinator', 'Payroll Officer', 'Admissions Officer',
+    'Scholarship Officer', 'Accounts Officer',
+)
+
+
 def get_user_group(user):
     """Returns the name of the user's first group, or None."""
     if user.groups.exists():

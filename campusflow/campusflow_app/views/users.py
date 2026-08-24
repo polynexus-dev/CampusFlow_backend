@@ -40,6 +40,7 @@ from ..permissions import (
     IsNotStudent,
     IsSaaSAdmin,
     IsSaaSOrCollegeAdmin,
+    NON_TEACHING_STAFF_ROLES,
     get_user_group,
     is_college_admin,
     is_saas_admin,
@@ -224,7 +225,7 @@ class StaffRegistrationView(generics.CreateAPIView):
         user = request.user
 
         # ── Role Validation ──
-        valid_staff_roles = ('Faculty', 'Support Staff', 'Department Head', 'Administrator', 'Management')
+        valid_staff_roles = ('Faculty', 'Department Head', 'Administrator', 'Management', *NON_TEACHING_STAFF_ROLES)
         if role not in valid_staff_roles:
             return Response(
                 {"error": f"Invalid role for staff registration. Must be one of: {', '.join(valid_staff_roles)}"},
@@ -1446,7 +1447,7 @@ class NonTeachingStaffUserProfileView(APIView):
         if request.query_params.get('count_only') == 'true':
             return Response({"count": NonTeachingStaffProfile.objects.count()}, status=status.HTTP_200_OK)
 
-        profiles = NonTeachingStaffProfile.objects.all().select_related('user', 'department')
+        profiles = NonTeachingStaffProfile.objects.all().select_related('user', 'department').prefetch_related('user__groups')
 
         result = []
         for prof in profiles:
@@ -1455,7 +1456,10 @@ class NonTeachingStaffUserProfileView(APIView):
                     "username": prof.user.username, "email": prof.user.email,
                     "first_name": prof.user.first_name, "last_name": prof.user.last_name
                 },
-                "role": "Support Staff",
+                # Covers Support Staff plus every functional non-teaching role
+                # (Librarian, Hostel Warden, ...) — label each with their
+                # actual group instead of hardcoding 'Support Staff'.
+                "role": get_user_group(prof.user) or "Support Staff",
                 "employee_id": prof.employee_id,
                 "department": prof.department.name if prof.department else None,
                 "middle_name": prof.middle_name, "date_of_birth": prof.date_of_birth,
@@ -1621,10 +1625,10 @@ class UserProfileView(APIView):
             # Mask Aadhaar on profile_data
             profile_data["aadhaar_number"] = mask_sensitive_field(profile.aadhaar_number)
 
-        elif usergroup == 'Support Staff':
+        elif usergroup in NON_TEACHING_STAFF_ROLES:
             profile = NonTeachingStaffProfile.objects.filter(user=user).first()
             if not profile:
-                return Response({"detail": "Support Staff profile not found."}, status=status.HTTP_404_NOT_FOUND)
+                return Response({"detail": f"{usergroup} profile not found."}, status=status.HTTP_404_NOT_FOUND)
             profile_data = {
                 "user": {"username": user.username, "email": user.email, "first_name": user.first_name, "last_name": user.last_name},
                 "role": usergroup, "tenant": tenant_name,
@@ -1856,7 +1860,7 @@ def get_user_profile_by_user(user):
     group = get_user_group(user)
     if group == 'student': return getattr(user, 'student_profile', None)
     if group == 'Faculty': return getattr(user, 'teaching_staff_profile', None)
-    if group == 'Support Staff': return getattr(user, 'non_teaching_staff_profile', None)
+    if group in NON_TEACHING_STAFF_ROLES: return getattr(user, 'non_teaching_staff_profile', None)
     if group == 'Management': return getattr(user, 'management_profile', None)
     if group == 'Administrator': return getattr(user, 'administrator_profile', None)
     if group == 'Department Head': return getattr(user, 'department_head_profile', None)
@@ -1969,14 +1973,17 @@ class PendingApprovalsView(APIView):
             for p in TeachingStaffProfile.objects.filter(status='pending'):
                 pending_users.append(format_pending(p, 'Faculty'))
             for p in NonTeachingStaffProfile.objects.filter(status='pending'):
-                pending_users.append(format_pending(p, 'Support Staff'))
+                # Non-teaching covers Support Staff plus every functional role
+                # (Librarian, Hostel Warden, ...) — label with the user's actual
+                # group rather than hardcoding 'Support Staff' for all of them.
+                pending_users.append(format_pending(p, get_user_group(p.user) or 'Support Staff'))
 
         # 2. If HOD: Collect Faculty and Support in their department
         elif is_hod and hod_dept:
             for p in TeachingStaffProfile.objects.filter(status='pending', department=hod_dept):
                 pending_users.append(format_pending(p, 'Faculty'))
             for p in NonTeachingStaffProfile.objects.filter(status='pending', department=hod_dept):
-                pending_users.append(format_pending(p, 'Support Staff'))
+                pending_users.append(format_pending(p, get_user_group(p.user) or 'Support Staff'))
         
         else:
             return Response({"detail": "You do not have permission to view pending approvals."}, status=status.HTTP_403_FORBIDDEN)
@@ -1989,7 +1996,7 @@ class ApproveUserView(APIView):
     Approve or Reject a pending user registration.
     - HOD: Approved by Admin.
     - Faculty: Approved by HOD.
-    - Support Staff: Approved by Admin or HOD.
+    - Support Staff / other non-teaching roles: Approved by Admin or HOD.
     """
     permission_classes = [IsAuthenticated, IsNotStudent]
 
@@ -2038,8 +2045,9 @@ class ApproveUserView(APIView):
             elif is_admin: # Admins can always override
                 authorized = True
         
-        elif target_group == 'Support Staff':
-            # Support from Admin or HOD
+        elif target_group in NON_TEACHING_STAFF_ROLES:
+            # Support Staff and every functional non-teaching role
+            # (Librarian, Hostel Warden, ...) from Admin or HOD
             if is_admin:
                 authorized = True
             elif is_hod and target_profile.department == hod_dept:
@@ -2285,7 +2293,7 @@ class UserDataErasureView(APIView):
             profile.status = 'deleted'
             profile.save()
 
-        elif group in ('Support Staff', 'Management', 'Administrator', 'Department Head'):
+        elif group in ('Management', 'Administrator', 'Department Head', *NON_TEACHING_STAFF_ROLES):
             profile.aadhaar_number = None
             profile.pan_number = None
             profile.bank_account_number = None

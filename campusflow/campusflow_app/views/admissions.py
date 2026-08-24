@@ -25,9 +25,15 @@ from rest_framework.views import APIView
 from ..demo_guard import IsNotDemoTenant
 from ..models import StudentConsent, StudentProfile
 from ..models.admissions import Lead, LeadActivity
-from ..permissions import IsSaaSOrCollegeAdmin, RequiresModule
+from ..permissions import RequiresModule
 
-ADMISSIONS_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant, RequiresModule("admissions")]
+# No hardcoded admin check: gated purely by the 'admissions' module, so the
+# Admissions Officer/Registrar role (see permissions.NON_TEACHING_STAFF_ROLES)
+# can run the whole lead pipeline without being a College Admin. There's no
+# separate policy/config endpoint in this file to keep admin-only — the whole
+# pipeline, including converting a lead into an enrolled student, is this
+# role's day-to-day job.
+ADMISSIONS_PERMS = [IsAuthenticated, IsNotDemoTenant, RequiresModule("admissions")]
 from ..serializers import LeadActivitySerializer, LeadSerializer
 from ..services.enrollment import create_pending_user, generate_admission_number
 from .enrollment import _get_or_create_guardian

@@ -4,14 +4,20 @@ from rest_framework.permissions import IsAuthenticated
 from ..demo_guard import IsNotDemoTenant
 from ..models.scholarship import StateScholarshipScheme, StudentScholarshipRecord
 from ..serializers import StateScholarshipSchemeSerializer, StudentScholarshipRecordSerializer
-from ..permissions import IsSaaSOrCollegeAdmin
+from ..permissions import RequiresModule
+
+# No hardcoded admin check: gated purely by the 'scholarship' module (see
+# permissions.NON_TEACHING_STAFF_ROLES), so a dedicated Scholarship Officer
+# can maintain the scheme catalog and reconcile student records without
+# being a College Admin.
+SCHOLARSHIP_PERMS = [IsAuthenticated, IsNotDemoTenant, RequiresModule("scholarship")]
 
 
 class StateScholarshipSchemeViewSet(viewsets.ModelViewSet):
     """Catalog of state/central scholarship schemes the college's students draw on."""
     queryset = StateScholarshipScheme.objects.all()
     serializer_class = StateScholarshipSchemeSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = SCHOLARSHIP_PERMS
 
 
 class StudentScholarshipRecordViewSet(viewsets.ModelViewSet):
@@ -23,7 +29,7 @@ class StudentScholarshipRecordViewSet(viewsets.ModelViewSet):
     """
     queryset = StudentScholarshipRecord.objects.select_related("student", "scheme", "financial_year", "recorded_by").all()
     serializer_class = StudentScholarshipRecordSerializer
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, IsNotDemoTenant]
+    permission_classes = SCHOLARSHIP_PERMS
 
     def get_queryset(self):
         qs = super().get_queryset()

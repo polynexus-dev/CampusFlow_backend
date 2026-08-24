@@ -15,7 +15,7 @@ ALL_ERP_MODULES = [
     "exams", "analytics", "announcements", "audit-logs", "assignments",
     "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "ai-valuation",
     "at-risk-prediction", "admissions", "timetable-generation", "syllabus-tracker",
-    "compliance-center", "ledger", "audit-portal",
+    "compliance-center", "ledger", "audit-portal", "scholarship",
     # Deliberately absent from PREMIUM_MODULES below: the academic calendar and
     # curriculum are foundational — exams and schedules are stamped with a term,
     # and credits drive SGPA and graduation checks — so they must work without a
@@ -33,7 +33,7 @@ PREMIUM_MODULES = {
     "attendance", "leave", "payroll", "exams", "assignments",
     "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "ai-valuation", "announcements",
     "at-risk-prediction", "admissions", "timetable-generation", "syllabus-tracker",
-    "compliance-center", "ledger", "audit-portal",
+    "compliance-center", "ledger", "audit-portal", "scholarship",
 }
 
 # Modules that only their one designated role may ever be granted, regardless
@@ -66,6 +66,21 @@ ROLE_DEFAULT_MODULES = {
         "dashboard", "room", "settings", "leave", "announcements", "hostel",
         "library", "inventory"
     ],
+    # Functional non-teaching roles below: each gets only its own operational
+    # module (plus the same baseline as Support Staff) rather than the whole
+    # Support Staff bucket, so granting one clerk's job doesn't also hand the
+    # same access to every other non-teaching employee. See
+    # permissions.NON_TEACHING_STAFF_ROLES.
+    "Librarian": ["dashboard", "settings", "leave", "announcements", "library"],
+    "Hostel Warden": ["dashboard", "settings", "leave", "announcements", "hostel"],
+    "Store Manager": ["dashboard", "settings", "leave", "announcements", "inventory"],
+    "Placement Officer": ["dashboard", "settings", "leave", "announcements", "tpo"],
+    "Fee Counter": ["dashboard", "settings", "leave", "announcements", "fees"],
+    "Transport Coordinator": ["dashboard", "settings", "leave", "announcements", "bus-tracking"],
+    "Payroll Officer": ["dashboard", "settings", "leave", "announcements", "payroll"],
+    "Admissions Officer": ["dashboard", "settings", "leave", "announcements", "admissions"],
+    "Scholarship Officer": ["dashboard", "settings", "leave", "announcements", "scholarship"],
+    "Accounts Officer": ["dashboard", "settings", "leave", "announcements", "ledger"],
     "student": [
         "dashboard", "attendance", "schedule", "settings", "exams", "announcements",
         "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript"
