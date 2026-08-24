@@ -96,6 +96,8 @@ services:
     image: ollama/ollama:latest
     env_file:
       - .env
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1
     volumes:
       - CampusFlow_ollama_data:/root/.ollama
       - ./entrypoint_ollama.sh:/entrypoint_ollama.sh
