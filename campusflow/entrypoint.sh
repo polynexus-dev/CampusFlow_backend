@@ -15,26 +15,22 @@ echo "✅ PostgreSQL is ready!"
 echo "📦 Syncing installed packages with requirements.txt..."
 pip install -r requirements.txt
 
-# 0. Sync migrations to clear any drifted files
+# 0. Sync & reconcile migrations dynamically to clear any drifted files or DB clashes
+echo "🔄 Running dynamic migration & schema reconciliation..."
 python migrate_sync.py
 
 # 0.5. Make new migrations for any model changes.
-#      --noinput is essential: there is no TTY here, so a model change that
-#      needs an interactive answer (a non-nullable field with no default, or a
-#      rename Django cannot infer) would otherwise hang the boot forever.
-#      With it, such a change fails loudly instead. Keep new fields nullable
-#      or defaulted so this step stays non-interactive.
 echo "🔄 Auto-generating migrations for any updated models..."
 python manage.py makemigrations --noinput
 
-
 # 1. Run shared (public) schema migrations
 echo "🔄 Running shared schema migrations..."
-python manage.py migrate_schemas --shared
+python manage.py migrate_schemas --shared --fake-initial
 
 # 2. Run tenant schema migrations (for any existing tenants)
 echo "🔄 Running tenant schema migrations..."
-python manage.py migrate_schemas
+python manage.py migrate_schemas --fake-initial
+
 
 # 3. Create the public tenant and domain if they don't exist yet
 echo "🔄 Ensuring public tenant exists..."
