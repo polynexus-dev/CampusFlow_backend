@@ -38,7 +38,18 @@ def sync_directory(clean_dir, target_dir, app_name):
     if not os.path.exists(clean_dir):
         return
 
-    clean_files = set(os.listdir(clean_dir))
+    stray_names = set(KNOWN_STRAY_FILES.get(app_name, []))
+
+    # Remove known strays from clean backup directory if present
+    for stray in stray_names:
+        clean_stray_path = os.path.join(clean_dir, stray)
+        if os.path.exists(clean_stray_path):
+            try:
+                os.remove(clean_stray_path)
+            except Exception:
+                pass
+
+    clean_files = set(os.listdir(clean_dir)) - stray_names
 
     if os.path.exists(target_dir):
         for filename in os.listdir(target_dir):
@@ -70,6 +81,7 @@ def sync_directory(clean_dir, target_dir, app_name):
 
 
 def sync_migrations():
+
     purge_known_strays()
 
     base_clean_dir = "/tmp/clean_migrations"
