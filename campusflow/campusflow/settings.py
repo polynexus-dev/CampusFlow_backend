@@ -143,6 +143,14 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 TENANT_MODEL = "tenants.Tenant"
 TENANT_DOMAIN_MODEL = "tenants.Domain"
 
+# django-tenants runs this Command class (instead of Django's stock `migrate`)
+# for every schema pass triggered by `migrate_schemas`. It adds self-healing
+# for schema drift (a migration recorded applied out of dependency order, or
+# already-present tables/columns from before a migration was renamed) so a
+# boot never crashes on InconsistentMigrationHistory again -- see the
+# module docstring in tenant_safe_migrate.py for the full explanation.
+TENANT_BASE_MIGRATE_COMMAND = "campusflow_app.management.commands.tenant_safe_migrate.Command"
+
 # Apps shared across all tenants (live in the 'public' schema)
 SHARED_APPS = [
     "django_tenants",          # mandatory, must be first
