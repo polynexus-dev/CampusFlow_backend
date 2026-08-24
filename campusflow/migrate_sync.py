@@ -178,9 +178,11 @@ def prune_invalid_or_clashing_migrations(app_dirs):
 
 def reconcile_database_columns_and_migrations(app_dirs):
     """
-    Connects to PostgreSQL and inspects target tables.
-    If a migration attempts to AddField for a column that ALREADY exists in PostgreSQL,
-    marks the migration as applied in django_migrations table so Django skips re-adding it.
+    Connects to PostgreSQL and inspects target tables across ALL PostgreSQL schemas
+    (public and tenant-specific schemas managed by django-tenants).
+    If a migration attempts to AddField for columns that ALREADY exist in a schema,
+    marks the migration as applied in that schema's django_migrations table so Django
+    skips re-adding them.
     """
     host = os.environ.get("POSTGRES_HOST", "db")
     port = os.environ.get("POSTGRES_PORT", "5432")
@@ -197,97 +199,110 @@ def reconcile_database_columns_and_migrations(app_dirs):
         conn.autocommit = True
         cur = conn.cursor()
 
-        # Ensure django_migrations table exists
+        # Get all non-system schemas in PostgreSQL (public + tenant schemas)
         cur.execute(
-            "SELECT EXISTS ("
-            "SELECT FROM information_schema.tables WHERE table_name = 'django_migrations'"
-            ");"
+            "SELECT nspname FROM pg_catalog.pg_namespace "
+            "WHERE nspname NOT LIKE 'pg_%%' AND nspname != 'information_schema';"
         )
-        if not cur.fetchone()[0]:
-            conn.close()
-            return
+        schemas = [row[0] for row in cur.fetchall()]
 
-        for app_name, mig_dir in app_dirs.items():
-            if not os.path.exists(mig_dir):
+        for schema_name in schemas:
+            # Set search_path for this schema
+            cur.execute(f'SET search_path TO "{schema_name}", public;')
+
+            # Ensure django_migrations table exists in this schema
+            cur.execute(
+                "SELECT EXISTS ("
+                "SELECT FROM information_schema.tables "
+                "WHERE table_schema = %s AND table_name = 'django_migrations'"
+                ");",
+                (schema_name,),
+            )
+            if not cur.fetchone()[0]:
                 continue
 
-            # Fetch applied migrations in DB
-            cur.execute(
-                "SELECT name FROM django_migrations WHERE app = %s;",
-                (app_name,),
-            )
-            applied_in_db = {row[0] for row in cur.fetchall()}
-
-            # Clean obsolete database records for migration files that no longer exist on disk
-            existing_stems = {
-                f[:-3]
-                for f in os.listdir(mig_dir)
-                if f.endswith(".py") and f != "__init__.py"
-            }
-            for db_mig_name in list(applied_in_db):
-                if db_mig_name != "__first__" and db_mig_name not in existing_stems:
-                    cur.execute(
-                        "DELETE FROM django_migrations WHERE app = %s AND name = %s;",
-                        (app_name, db_mig_name),
-                    )
-                    _print(
-                        f"   🧹 Cleaned obsolete migration record from DB: "
-                        f"{app_name}/{db_mig_name}"
-                    )
-                    applied_in_db.remove(db_mig_name)
-
-            # Inspect unapplied migration files in chronological order
-            unapplied_files = sorted([
-                f
-                for f in os.listdir(mig_dir)
-                if f.endswith(".py")
-                and f != "__init__.py"
-                and f[:-3] not in applied_in_db
-            ])
-
-            for filename in unapplied_files:
-                stem = filename[:-3]
-                file_path = os.path.join(mig_dir, filename)
-                _, add_fields = parse_migration_file_info(file_path)
-
-                if not add_fields:
+            for app_name, mig_dir in app_dirs.items():
+                if not os.path.exists(mig_dir):
                     continue
 
-                # Check if all columns added by this migration already exist in DB relation
-                all_fields_exist = True
-                for model_name, field_name in add_fields:
-                    table_name = (
-                        f"{app_name}_{model_name}"
-                        if not model_name.startswith(app_name)
-                        else model_name
-                    )
-                    cur.execute(
-                        "SELECT EXISTS ("
-                        "SELECT FROM information_schema.columns "
-                        "WHERE table_name = %s AND column_name = %s"
-                        ");",
-                        (table_name, field_name),
-                    )
-                    col_exists = cur.fetchone()[0]
-                    if not col_exists:
-                        all_fields_exist = False
-                        break
+                # Fetch applied migrations in this schema's django_migrations table
+                cur.execute(
+                    f'SELECT name FROM "{schema_name}".django_migrations WHERE app = %s;',
+                    (app_name,),
+                )
+                applied_in_db = {row[0] for row in cur.fetchall()}
 
-                if all_fields_exist:
-                    cur.execute(
-                        "INSERT INTO django_migrations (app, name, applied) "
-                        "VALUES (%s, %s, NOW());",
-                        (app_name, stem),
-                    )
-                    _print(
-                        f"   ⏩ Columns already exist in DB table. "
-                        f"Skipped duplicate creation & marked migration applied: "
-                        f"{app_name}/{stem}"
-                    )
+                # Clean obsolete database records for migration files that no longer exist on disk
+                existing_stems = {
+                    f[:-3]
+                    for f in os.listdir(mig_dir)
+                    if f.endswith(".py") and f != "__init__.py"
+                }
+                for db_mig_name in list(applied_in_db):
+                    if db_mig_name != "__first__" and db_mig_name not in existing_stems:
+                        cur.execute(
+                            f'DELETE FROM "{schema_name}".django_migrations '
+                            f"WHERE app = %s AND name = %s;",
+                            (app_name, db_mig_name),
+                        )
+                        _print(
+                            f"   🧹 Cleaned obsolete migration record from schema "
+                            f"'{schema_name}': {app_name}/{db_mig_name}"
+                        )
+                        applied_in_db.remove(db_mig_name)
+
+                # Inspect unapplied migration files in chronological order
+                unapplied_files = sorted([
+                    f
+                    for f in os.listdir(mig_dir)
+                    if f.endswith(".py")
+                    and f != "__init__.py"
+                    and f[:-3] not in applied_in_db
+                ])
+
+                for filename in unapplied_files:
+                    stem = filename[:-3]
+                    file_path = os.path.join(mig_dir, filename)
+                    _, add_fields = parse_migration_file_info(file_path)
+
+                    if not add_fields:
+                        continue
+
+                    # Check if all columns added by this migration already exist in this schema
+                    all_fields_exist = True
+                    for model_name, field_name in add_fields:
+                        table_name = (
+                            f"{app_name}_{model_name}"
+                            if not model_name.startswith(app_name)
+                            else model_name
+                        )
+                        cur.execute(
+                            "SELECT EXISTS ("
+                            "SELECT FROM information_schema.columns "
+                            "WHERE table_schema = %s AND table_name = %s AND column_name = %s"
+                            ");",
+                            (schema_name, table_name, field_name),
+                        )
+                        col_exists = cur.fetchone()[0]
+                        if not col_exists:
+                            all_fields_exist = False
+                            break
+
+                    if all_fields_exist:
+                        cur.execute(
+                            f'INSERT INTO "{schema_name}".django_migrations '
+                            f"(app, name, applied) VALUES (%s, %s, NOW());",
+                            (app_name, stem),
+                        )
+                        _print(
+                            f"   ⏩ Columns already exist in schema '{schema_name}'. "
+                            f"Skipped duplicate creation & marked migration applied: "
+                            f"{app_name}/{stem}"
+                        )
 
         conn.close()
     except Exception as e:
-        _print(f"   ℹ️ Database migration check skipped or deferred: {e}")
+        _print(f"   ℹ️ Schema-aware database migration check skipped or deferred: {e}")
 
 
 def sync_directory(clean_dir, target_dir, app_name):
@@ -333,7 +348,7 @@ def sync_migrations():
     # 1. Dynamically prune filesystem clashes & broken dependency nodes
     prune_invalid_or_clashing_migrations(app_dirs)
 
-    # 2. Dynamically check DB columns & skip existing fields
+    # 2. Dynamically check DB columns & skip existing fields across ALL tenant schemas
     reconcile_database_columns_and_migrations(app_dirs)
 
     base_clean_dir = "/tmp/clean_migrations"
@@ -368,6 +383,7 @@ def sync_migrations():
 
 if __name__ == "__main__":
     sync_migrations()
+
 
 
 
