@@ -26,6 +26,9 @@ RUN pip install --upgrade pip --no-cache-dir && \
 COPY . .
 
 # Backup clean migration files (tracked in git) to a safe place in the image
-RUN cp -r campusflow_app/migrations /tmp/clean_migrations
+RUN mkdir -p /tmp/clean_migrations/campusflow_app /tmp/clean_migrations/tenants && \
+    cp -r campusflow_app/migrations /tmp/clean_migrations/campusflow_app/migrations && \
+    cp -r tenants/migrations /tmp/clean_migrations/tenants/migrations
 
 EXPOSE 8000
+
