@@ -1,23 +1,32 @@
 from django.core.management.commands.migrate import Command as BaseMigrateCommand
 from django.db import DEFAULT_DB_ALIAS, connections
 from django.db.migrations.executor import MigrationExecutor
-from django.db.migrations.operations import AddField, CreateModel
+from django.db.migrations.operations.special import RunPython, RunSQL
 
 
 def _is_safe_for_soft_apply(migration):
     """
-    True only if EVERY operation in the migration is CreateModel/AddField --
-    the two op types Django's own --fake-initial detector already knows how
-    to verify against live DB introspection (real table/column existence,
-    including the `_id` suffix on FK/O2O columns and M2M through-tables).
+    Eligible unless the migration contains RunPython/RunSQL -- the two
+    operation types that run arbitrary code/data mutations rather than a
+    pure schema-shape change. Skipping those via soft-apply could silently
+    drop a data backfill (see 0014_bustrip_boarded_count..., which mixes
+    AddField with a RunPython backfill + a uniqueness AlterField that
+    depends on it having run).
 
-    Deliberately excludes migrations with AlterField/RemoveField/RunPython/
-    RunSQL/etc: soft-applying skips running the migration entirely, so a
-    RunPython data backfill sitting alongside an already-satisfied AddField
-    (see 0014_bustrip_boarded_count...) would silently never run.
+    Everything else Django ships (CreateModel, AddField, AlterField,
+    RemoveField, DeleteModel, AddIndex, ...) is a pure schema-shape change:
+    detect_soft_applied() below only actually *verifies* the CreateModel/
+    AddField ones against live DB introspection (real column names, FK
+    `_id` suffixes, M2M through-tables, etc.); any other op type in the
+    same migration is simply not checked either way, so a migration that's
+    NOT soft-applied still runs those for real exactly as it would without
+    this broadening -- e.g. 0012_alter_feepayment_payment_method_and_more
+    mixes CreateModel/AddField with a harmless AlterField, and must be
+    eligible here or it goes straight to a real CREATE TABLE and collides
+    with the table that already exists.
     """
-    return bool(migration.operations) and all(
-        isinstance(op, (CreateModel, AddField)) for op in migration.operations
+    return bool(migration.operations) and not any(
+        isinstance(op, (RunPython, RunSQL)) for op in migration.operations
     )
 
 
