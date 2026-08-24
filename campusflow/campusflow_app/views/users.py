@@ -23,6 +23,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 # ── Local App-Specific Imports ────────────────────────────────────────────────
+from ..models.audit import log_account_event
 from ..models.profile import (
     AdministratorProfile,
     DepartmentHeadProfile,
@@ -773,6 +774,7 @@ class LogoutAPIView(generics.GenericAPIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        log_account_event(request.user, 'LOGOUT', request=request, object_repr=f"{request.user.username} logged out")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

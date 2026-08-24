@@ -5,6 +5,37 @@ from django.utils import timezone
 from datetime import timedelta
 from .middleware.audit import get_current_request
 from .models.audit import AuditLog
+from .utils import mask_sensitive_field
+
+# Fields that must never appear in an audit diff as plain text — Aadhaar/PAN/
+# bank details are masked the same way they are everywhere else in the API
+# (see mask_sensitive_field), and encrypted credential fields (payment
+# gateway secrets) are never shown at all, since the whole point of
+# EncryptedCharField is that the plaintext exists nowhere outside the field
+# itself. See Docs/campusnexus_security_compliance.html's minimisation claim
+# — this is what makes it actually true for the audit trail too, not just
+# the regular API responses.
+HIDDEN_AUDIT_FIELDS = {'password'}
+MASKED_AUDIT_FIELDS = {'aadhaar_number', 'pan_number', 'bank_account_number'}
+ENCRYPTED_AUDIT_FIELDS = {
+    'razorpay_key_secret', 'razorpay_webhook_secret', 'cashfree_secret_key',
+    'payu_merchant_salt', 'phonepe_salt_key', 'paytm_merchant_key',
+    'mobikwik_secret_key', 'email_smtp_password', 'erp_auth_token',
+}
+
+
+def _audit_repr(field_name, value):
+    """Renders one field's value for the audit diff, redacting sensitive fields."""
+    if value is None:
+        return None
+    if field_name in HIDDEN_AUDIT_FIELDS:
+        return '[HIDDEN]'
+    if field_name in ENCRYPTED_AUDIT_FIELDS:
+        return '[ENCRYPTED]'
+    if field_name in MASKED_AUDIT_FIELDS:
+        return mask_sensitive_field(str(value))
+    return str(value)
+
 
 def is_audit_eligible(sender):
     """
@@ -89,13 +120,9 @@ def log_save(sender, instance, created, **kwargs):
                 continue
             val = getattr(instance, field.name)
             if val is not None:
-                if field.name == 'password':
-                    new_val_repr = '[HIDDEN]'
-                else:
-                    new_val_repr = str(val)
                 changes[field.name] = {
                     'old': None,
-                    'new': new_val_repr
+                    'new': _audit_repr(field.name, val),
                 }
     else:
         old_values = getattr(instance, '_old_values', {})
@@ -105,15 +132,9 @@ def log_save(sender, instance, created, **kwargs):
             old_val = old_values.get(field.name)
             new_val = getattr(instance, field.name)
             if old_val != new_val:
-                if field.name == 'password':
-                    old_val_repr = '[HIDDEN]' if old_val is not None else None
-                    new_val_repr = '[HIDDEN]' if new_val is not None else None
-                else:
-                    old_val_repr = str(old_val) if old_val is not None else None
-                    new_val_repr = str(new_val) if new_val is not None else None
                 changes[field.name] = {
-                    'old': old_val_repr,
-                    'new': new_val_repr
+                    'old': _audit_repr(field.name, old_val),
+                    'new': _audit_repr(field.name, new_val),
                 }
         if not changes:
             return
@@ -162,13 +183,9 @@ def log_delete(sender, instance, **kwargs):
         if field.name in ['updated_at', 'timestamp']:
             continue
         val = getattr(instance, field.name)
-        if field.name == 'password':
-            old_val_repr = '[HIDDEN]' if val is not None else None
-        else:
-            old_val_repr = str(val) if val is not None else None
         changes[field.name] = {
-            'old': old_val_repr,
-            'new': None
+            'old': _audit_repr(field.name, val),
+            'new': None,
         }
 
     AuditLog.objects.create(

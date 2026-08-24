@@ -20,6 +20,7 @@ from user_agents import parse
 
 # ── Local App-Specific Imports ────────────────────────────────────────────────
 from .permissions import NON_TEACHING_STAFF_ROLES
+from .models.audit import log_account_event
 from .models.attendance import Attendance
 from .models.attendance_log import FaceAttendanceLog
 from .models.classroom import Classroom
@@ -296,10 +297,18 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 )
 
         if not user.check_password(password):
+            log_account_event(
+                user, 'LOGIN_FAILED', request=request, ip_address=client_ip, user_agent=user_agent_string,
+                object_repr=f"Failed login attempt for {user.username} (wrong password)",
+            )
             raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
 
         attrs['username'] = user.username
         data = super().validate(attrs)
+        log_account_event(
+            user, 'LOGIN', request=request, ip_address=client_ip, user_agent=user_agent_string,
+            object_repr=f"{user.username} logged in",
+        )
 
         data['user_id'] = user.id
         data['user'] = user.username

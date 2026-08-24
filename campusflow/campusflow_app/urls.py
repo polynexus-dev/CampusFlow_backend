@@ -37,7 +37,7 @@ from campusflow_app.views.lecture import (
 )
 
 # ── New Module Imports ──
-from campusflow_app.views.audit import AuditLogListView
+from campusflow_app.views.audit import AuditLogListView, MyActivityView
 from campusflow_app.views.announcement import AnnouncementListCreateView, AnnouncementDetailView
 from campusflow_app.views.leave import (
     LeaveTypeListCreateView, LeaveTypeDetailView,
@@ -324,6 +324,7 @@ urlpatterns = [
 
     # ── Audit Logs ────────────────────────────────────────────────────
     path('audit-logs/', AuditLogListView.as_view(), name='audit-logs'),
+    path('audit-logs/mine/', MyActivityView.as_view(), name='my-activity'),
 
     # ── Announcements ─────────────────────────────────────────────────
     path('announcements/', AnnouncementListCreateView.as_view(), name='announcement-list-create'),
