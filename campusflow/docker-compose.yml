@@ -100,8 +100,8 @@ services:
       - CampusFlow_ollama_data:/root/.ollama
       - ./entrypoint_ollama.sh:/entrypoint_ollama.sh
     entrypoint: ["/bin/sh", "/entrypoint_ollama.sh"]
-    expose:
-      - "11434"
+    ports:
+      - "${OLLAMA_HOST_PORT:-11435}:11434"
 
 volumes:
   CampusFlow_postgres_data:
