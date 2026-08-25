@@ -58,6 +58,10 @@ with schema_context('public'):
         print('   ✅ Superuser \"admin\" already exists.')
 "
 
+# 4.5. Ensure demo tenant is seeded (~2,400 students / 12 departments) once
+echo "🔄 Ensuring demo tenant data is seeded (~2,400 students / 12 departments)..."
+python seed_demo_data.py
+
 # 5. Collect static files for the admin panel / DRF browsable API
 echo "🔄 Collecting static files..."
 python manage.py collectstatic --noinput
