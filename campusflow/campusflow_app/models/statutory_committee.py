@@ -1,18 +1,25 @@
 """
-Statutory committee compliance — Anti-Ragging Committee (UGC Anti-Ragging
-Regulations 2009), Internal Complaints Committee / ICC (Sexual Harassment of
-Women at Workplace Act 2013, "POSH"), and Grievance Redressal Committee (UGC
-Grievance Redressal Regulations 2018). All three share the same shape — a
-committee with appointed members, a complaint register, and meeting minutes —
-so one model set serves all three via `committee_type` rather than three
-near-identical copies.
+Statutory and institutional committee compliance — the original three
+(Anti-Ragging Committee under UGC Anti-Ragging Regulations 2009, Internal
+Complaints Committee / ICC under the Sexual Harassment of Women at Workplace
+Act 2013 "POSH", and Grievance Redressal Committee under UGC Grievance
+Redressal Regulations 2018), plus SC/ST/OBC/Minority/Women's cells and the
+governance bodies NAAC evidence draws on (IQAC, Academic Council, Student
+Council). All ten share the same shape — a committee with appointed members,
+a complaint register, and meeting minutes — so one model set serves all of
+them via `committee_type` rather than near-identical copies per type.
 
-Confidentiality is load-bearing, not incidental: POSH Act Section 16 legally
-requires ICC complaint details to stay confidential to the appointed
-committee members only. Access is enforced by committee membership
-(permissions.IsCommitteeMember), not by the base role hierarchy every other
-permission check in this codebase uses — an HOD who isn't on the ICC must
-not see POSH complaint details just because they outrank the complainant.
+Confidentiality is load-bearing for the original three, not incidental: POSH
+Act Section 16 legally requires ICC complaint details to stay confidential to
+the appointed committee members only. Access is enforced by committee
+membership (permissions.IsCommitteeMember) uniformly across every type,
+rather than the base role hierarchy every other permission check in this
+codebase uses — an HOD who isn't on the ICC must not see POSH complaint
+details just because they outrank the complainant. That same membership gate
+applies to IQAC/Academic Council/Student Council too: since those bodies are
+typically meant to be seen more broadly (e.g. as NAAC evidence), an admin
+should add everyone who needs visibility as a CommitteeMembership row for
+that committee, rather than expecting open access by default.
 See views/statutory_committee.py for the enforcement and
 CommitteeAnnualReportView for the aggregate-only reporting boundary.
 """
@@ -30,6 +37,9 @@ class StatutoryCommittee(models.Model):
     TYPE_OBC_CELL = "obc_cell"
     TYPE_MINORITY_CELL = "minority_cell"
     TYPE_WOMENS_CELL = "womens_cell"
+    TYPE_IQAC = "iqac"
+    TYPE_ACADEMIC_COUNCIL = "academic_council"
+    TYPE_STUDENT_COUNCIL = "student_council"
     TYPE_CHOICES = [
         (TYPE_ANTI_RAGGING, "Anti-Ragging Committee"),
         (TYPE_ICC_POSH, "Internal Complaints Committee (POSH)"),
@@ -38,6 +48,9 @@ class StatutoryCommittee(models.Model):
         (TYPE_OBC_CELL, "OBC Cell"),
         (TYPE_MINORITY_CELL, "Minority Cell"),
         (TYPE_WOMENS_CELL, "Women's Cell"),
+        (TYPE_IQAC, "Internal Quality Assurance Cell (IQAC)"),
+        (TYPE_ACADEMIC_COUNCIL, "Academic Council"),
+        (TYPE_STUDENT_COUNCIL, "Student Council"),
     ]
 
     committee_type = models.CharField(max_length=25, choices=TYPE_CHOICES)
@@ -135,7 +148,14 @@ class CommitteeComplaint(models.Model):
         ordering = ["-filed_date"]
 
     def __str__(self):
-        return f"Complaint #{self.id} — {self.committee} ({self.status})"
+        pk_val = getattr(self, "pk", None) or getattr(self, "id", None) or "Unsaved"
+        try:
+            committee_id = getattr(self, "committee_id", None)
+            committee_str = str(self.committee) if committee_id else "No Committee"
+        except Exception:
+            committee_str = f"Committee ID {getattr(self, 'committee_id', None)}"
+        status_str = getattr(self, "status", "Unknown")
+        return f"Complaint #{pk_val} — {committee_str} ({status_str})"
 
 
 class CommitteeMeeting(models.Model):
@@ -152,4 +172,10 @@ class CommitteeMeeting(models.Model):
         ordering = ["-meeting_date"]
 
     def __str__(self):
-        return f"{self.committee} meeting on {self.meeting_date}"
+        try:
+            committee_id = getattr(self, "committee_id", None)
+            committee_str = str(self.committee) if committee_id else "No Committee"
+        except Exception:
+            committee_str = f"Committee ID {getattr(self, 'committee_id', None)}"
+        date_str = getattr(self, "meeting_date", None) or "Unscheduled"
+        return f"{committee_str} meeting on {date_str}"

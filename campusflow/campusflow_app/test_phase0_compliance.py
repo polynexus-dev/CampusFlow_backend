@@ -21,9 +21,9 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
-    AuditEngagement, AuditorProfile, Department, FinancialYear,
-    InstitutionProfile, Payslip, SalaryStructure, StatutoryCommittee,
-    TeachingStaffProfile, AcademicYear,
+    AuditEngagement, AuditorProfile, CommitteeMeeting, CommitteeMembership,
+    Department, FinancialYear, InstitutionProfile, Payslip, SalaryStructure,
+    StatutoryCommittee, TeachingStaffProfile, AcademicYear,
 )
 
 
@@ -218,6 +218,9 @@ class StatutoryCommitteeNewTypesTests(_Phase0FixtureMixin, TenantTestCase):
                 StatutoryCommittee.TYPE_OBC_CELL,
                 StatutoryCommittee.TYPE_MINORITY_CELL,
                 StatutoryCommittee.TYPE_WOMENS_CELL,
+                StatutoryCommittee.TYPE_IQAC,
+                StatutoryCommittee.TYPE_ACADEMIC_COUNCIL,
+                StatutoryCommittee.TYPE_STUDENT_COUNCIL,
             ]:
                 committee = StatutoryCommittee.objects.create(
                     committee_type=committee_type,
@@ -225,3 +228,25 @@ class StatutoryCommitteeNewTypesTests(_Phase0FixtureMixin, TenantTestCase):
                     formed_date=datetime.date(2026, 7, 1),
                 )
                 self.assertEqual(committee.committee_type, committee_type)
+
+    def test_iqac_committee_supports_membership_and_minutes_via_the_generic_engine(self):
+        """IQAC/Academic Council/Student Council reuse the exact same
+        membership + meeting-minutes engine as the original three types —
+        confirms no type-specific code path is silently missing for them."""
+        with schema_context(self.tenant.schema_name):
+            committee = StatutoryCommittee.objects.create(
+                committee_type=StatutoryCommittee.TYPE_IQAC,
+                academic_year=self.fixture["academic_year"],
+                formed_date=datetime.date(2026, 7, 1),
+            )
+            membership = CommitteeMembership.objects.create(
+                committee=committee, user=self.fixture["admin_user"],
+                role_in_committee="IQAC Coordinator", appointed_date=datetime.date(2026, 7, 1),
+            )
+            meeting = CommitteeMeeting.objects.create(
+                committee=committee, meeting_date=datetime.date(2026, 8, 1),
+                minutes_text="Reviewed NAAC AQAR evidence pipeline.", action_items="Compile Criterion 1 evidence by Sep.",
+            )
+            meeting.attendees.add(membership)
+            self.assertEqual(committee.meetings.count(), 1)
+            self.assertIn(membership, meeting.attendees.all())
