@@ -130,6 +130,13 @@ from campusflow_app.views.payments import (
 from campusflow_app.views.module_permissions import (
     TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView, CustomRolesView
 )
+from campusflow_app.views.clearance import (
+    ClearanceDeskViewSet, ClearanceSettingsView, ClearanceRequestViewSet,
+    ClearanceBulkGenerateView, FinalExitClearanceRequestView,
+    ClearanceItemClearView, ClearanceItemRejectView,
+    StudentClearanceStatusView, ClearanceCertificateView,
+    MyClearanceStatusView, MyClearanceCertificateView,
+)
 from campusflow_app.views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
 from campusflow_app.views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
 from campusflow_app.views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
@@ -498,6 +505,21 @@ urlpatterns = [
     path('tenant/module-permissions/', RoleModulePermissionView.as_view(), name='role-module-permissions'),
     path('tenant/roles/', CustomRolesView.as_view(), name='tenant-custom-roles'),
     path('user/allowed-modules/', MyAllowedModulesView.as_view(), name='user-allowed-modules'),
+
+    # ── Clearance (No-Dues) ──────────────────────────────────────────
+    path('clearance/desks/', ClearanceDeskViewSet.as_view({'get': 'list', 'post': 'create'}), name='clearance-desk-list'),
+    path('clearance/desks/<int:pk>/', ClearanceDeskViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='clearance-desk-detail'),
+    path('clearance/settings/', ClearanceSettingsView.as_view(), name='clearance-settings'),
+    path('clearance/requests/', ClearanceRequestViewSet.as_view({'get': 'list'}), name='clearance-request-list'),
+    path('clearance/requests/<int:pk>/', ClearanceRequestViewSet.as_view({'get': 'retrieve'}), name='clearance-request-detail'),
+    path('clearance/requests/bulk-generate/', ClearanceBulkGenerateView.as_view(), name='clearance-bulk-generate'),
+    path('clearance/requests/final-exit/', FinalExitClearanceRequestView.as_view(), name='clearance-final-exit-request'),
+    path('clearance/items/<int:pk>/clear/', ClearanceItemClearView.as_view(), name='clearance-item-clear'),
+    path('clearance/items/<int:pk>/reject/', ClearanceItemRejectView.as_view(), name='clearance-item-reject'),
+    path('clearance/students/<int:pk>/status/', StudentClearanceStatusView.as_view(), name='clearance-student-status'),
+    path('clearance/students/<int:pk>/certificate/', ClearanceCertificateView.as_view(), name='clearance-student-certificate'),
+    path('clearance/me/status/', MyClearanceStatusView.as_view(), name='clearance-my-status'),
+    path('clearance/me/certificate/', MyClearanceCertificateView.as_view(), name='clearance-my-certificate'),
 
     # ── Competitive PARITY Modules ──
     # Hostel Management

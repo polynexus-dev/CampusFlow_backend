@@ -106,5 +106,8 @@ from .statutory_committee import (
 # ── AI Student Analysis ──
 from .student_insight import StudentInsightSnapshot
 
+# ── Clearance (No-Dues) Workflow ──
+from .clearance import ClearanceDesk, ClearanceSettings, ClearanceRequest, ClearanceItem
+
 
 

@@ -15,7 +15,7 @@ ALL_ERP_MODULES = [
     "exams", "analytics", "announcements", "audit-logs", "assignments",
     "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "ai-valuation",
     "at-risk-prediction", "admissions", "timetable-generation", "syllabus-tracker",
-    "compliance-center", "ledger", "audit-portal", "scholarship",
+    "compliance-center", "ledger", "audit-portal", "scholarship", "clearance",
     # Deliberately absent from PREMIUM_MODULES below: the academic calendar and
     # curriculum are foundational — exams and schedules are stamped with a term,
     # and credits drive SGPA and graduation checks — so they must work without a
@@ -33,7 +33,7 @@ PREMIUM_MODULES = {
     "attendance", "leave", "payroll", "exams", "assignments",
     "fees", "bus-tracking", "hostel", "tpo", "library", "inventory", "valuation", "ai-valuation", "announcements",
     "at-risk-prediction", "admissions", "timetable-generation", "syllabus-tracker",
-    "compliance-center", "ledger", "audit-portal", "scholarship",
+    "compliance-center", "ledger", "audit-portal", "scholarship", "clearance",
 }
 
 # Modules that only their one designated role may ever be granted, regardless
@@ -54,13 +54,13 @@ ROLE_DEFAULT_MODULES = {
         "dashboard", "department", "room", "staff", "student", "attendance",
         "schedule", "settings", "leave", "exams", "analytics", "announcements",
         "assignments", "tpo", "library", "valuation", "ai-valuation", "at-risk-prediction", "admissions",
-        "timetable-generation", "syllabus-tracker",
+        "timetable-generation", "syllabus-tracker", "clearance",
         "academics", "curriculum", "transcript"
     ],
     "Faculty": [
         "dashboard", "attendance", "schedule", "settings", "leave", "exams",
         "announcements", "analytics", "assignments", "valuation", "ai-valuation",
-        "at-risk-prediction", "transcript", "syllabus-tracker"
+        "at-risk-prediction", "transcript", "syllabus-tracker", "clearance"
     ],
     "Support Staff": [
         "dashboard", "room", "settings", "leave", "announcements", "hostel",
@@ -71,19 +71,19 @@ ROLE_DEFAULT_MODULES = {
     # Support Staff bucket, so granting one clerk's job doesn't also hand the
     # same access to every other non-teaching employee. See
     # permissions.NON_TEACHING_STAFF_ROLES.
-    "Librarian": ["dashboard", "settings", "leave", "announcements", "library"],
-    "Hostel Warden": ["dashboard", "settings", "leave", "announcements", "hostel"],
+    "Librarian": ["dashboard", "settings", "leave", "announcements", "library", "clearance"],
+    "Hostel Warden": ["dashboard", "settings", "leave", "announcements", "hostel", "clearance"],
     "Store Manager": ["dashboard", "settings", "leave", "announcements", "inventory"],
     "Placement Officer": ["dashboard", "settings", "leave", "announcements", "tpo"],
-    "Fee Counter": ["dashboard", "settings", "leave", "announcements", "fees"],
+    "Fee Counter": ["dashboard", "settings", "leave", "announcements", "fees", "clearance"],
     "Transport Coordinator": ["dashboard", "settings", "leave", "announcements", "bus-tracking"],
     "Payroll Officer": ["dashboard", "settings", "leave", "announcements", "payroll"],
     "Admissions Officer": ["dashboard", "settings", "leave", "announcements", "admissions"],
     "Scholarship Officer": ["dashboard", "settings", "leave", "announcements", "scholarship"],
-    "Accounts Officer": ["dashboard", "settings", "leave", "announcements", "ledger"],
+    "Accounts Officer": ["dashboard", "settings", "leave", "announcements", "ledger", "clearance"],
     "student": [
         "dashboard", "attendance", "schedule", "settings", "exams", "announcements",
-        "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript"
+        "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript", "clearance"
     ],
     # CA is deliberately never given anything beyond its own read-only report
     # namespace — no fees/payroll/inventory, so there's nothing to accidentally

@@ -13,6 +13,7 @@ from ..permissions import (
     IsCollegeAdmin, IsFacultyOrAbove, IsNotStudent, RequiresModule,
     get_user_group, is_college_admin, is_saas_admin
 )
+from ..services.clearance import is_student_cleared
 
 EXAM_PERMS = [IsAuthenticated, RequiresModule("exams")]
 
@@ -96,10 +97,13 @@ class ExamListCreateView(APIView):
             qs = qs.filter(exam_type_id=exam_type_id)
 
         # Students: only see exams from their department
+        clearance_blocked = False
         if user_group == 'student':
             profile = getattr(user, 'student_profile', None)
             if profile and profile.department:
                 qs = qs.filter(department=profile.department)
+                is_cleared, _ = is_student_cleared(profile)
+                clearance_blocked = not is_cleared
             else:
                 qs = qs.none()
 
@@ -127,6 +131,8 @@ class ExamListCreateView(APIView):
                 "invigilator": exam.invigilator.get_full_name() if exam.invigilator else None,
                 "status": exam.status,
                 "instructions": exam.instructions,
+                "results_published": exam.results_published,
+                "is_clearance_blocked": clearance_blocked,
                 "created_at": exam.created_at.isoformat(),
             })
         return Response(data, status=status.HTTP_200_OK)

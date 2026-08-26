@@ -22,6 +22,7 @@ from rest_framework.views import APIView
 
 from ..models import Department, StudentProfile, PromotionBatch, PromotionRecord
 from ..permissions import IsSaaSOrCollegeAdmin
+from ..services.clearance import is_student_cleared
 
 REVERT_WINDOW = timedelta(days=7)
 
@@ -76,6 +77,40 @@ class PromoteClassView(APIView):
                 )
             decision_map[student_id] = d
 
+        # Clearance gate: a student being promoted must have a fully-cleared
+        # periodic ClearanceRequest for the college's current cycle, unless an
+        # admin explicitly overrides with a reason. Checked up front, before
+        # any writes, since this view is already wrapped in one big
+        # transaction.atomic() block and a plain early Response() here would
+        # not roll back anything created earlier in this same call.
+        override = bool(data.get("override"))
+        override_reason = (data.get("override_reason") or "").strip()
+        if override and not override_reason:
+            return Response({"error": "override_reason is required when override is true."}, status=status.HTTP_400_BAD_REQUEST)
+
+        blocked_student_ids = []
+        for student in roster:
+            decision_entry = decision_map.get(student.id, {})
+            decision = decision_entry.get("decision", PromotionRecord.DECISION_PROMOTE)
+            if decision != PromotionRecord.DECISION_PROMOTE:
+                continue
+            is_cleared, _ = is_student_cleared(student)
+            if not is_cleared:
+                blocked_student_ids.append(student.id)
+
+        if blocked_student_ids and not override:
+            return Response(
+                {
+                    "error": (
+                        f"{len(blocked_student_ids)} student(s) do not have a cleared clearance "
+                        "request for the current cycle and cannot be promoted. Resend with "
+                        "override=true and an override_reason to promote them anyway."
+                    ),
+                    "blocked_student_ids": blocked_student_ids,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         batch = PromotionBatch.objects.create(
             department=department,
             from_semester_year=from_year, from_section_division=from_section,
@@ -98,6 +133,7 @@ class PromoteClassView(APIView):
                 previous_section_division=student.section_division or "",
                 previous_batch_academic_year=student.batch_academic_year or "",
                 previous_status=student.status or "",
+                override_reason=override_reason if student.id in blocked_student_ids else "",
             )
 
             if decision == PromotionRecord.DECISION_PROMOTE:

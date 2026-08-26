@@ -60,6 +60,10 @@ class PromotionRecord(models.Model):
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="promotion_records")
     decision = models.CharField(max_length=10, choices=DECISION_CHOICES)
     notes = models.TextField(blank=True)
+    override_reason = models.TextField(
+        blank=True,
+        help_text="Set when this student was promoted despite an uncleared clearance request.",
+    )
 
     previous_semester_year = models.CharField(max_length=50, blank=True)
     previous_section_division = models.CharField(max_length=10, blank=True)
