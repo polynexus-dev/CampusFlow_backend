@@ -156,6 +156,7 @@ from campusflow_app.views.syllabus_coverage import (
 from campusflow_app.views.compliance import (
     ComplianceCertificateTypeViewSet, ComplianceCertificateViewSet,
     AISHEAnnualReturnView, AICTEDisclosureView, NAACExtendedProfileView,
+    InstitutionProfileView,
     AccreditationCriterionViewSet, EvidenceItemViewSet,
     SubmitEvidenceItemView, SignOffEvidenceItemView, SSRExportView,
     CriterionNarrativeDraftRequestView, AccreditationNarrativeDraftViewSet,
@@ -623,6 +624,7 @@ urlpatterns = [
     path('audit-portal/reports/assets-liabilities-schedule/', AssetsLiabilitiesScheduleView.as_view(), name='audit-portal-assets-liabilities-schedule'),
 
     # Accreditation Reporting — Quick Wins (P5)
+    path('compliance-center/institution-profile/', InstitutionProfileView.as_view(), name='compliance-center-institution-profile'),
     path('compliance-center/reports/aishe-annual-return/', AISHEAnnualReturnView.as_view(), name='compliance-center-aishe'),
     path('compliance-center/reports/aicte-disclosure/', AICTEDisclosureView.as_view(), name='compliance-center-aicte'),
     path('compliance-center/reports/naac-extended-profile/', NAACExtendedProfileView.as_view(), name='compliance-center-naac-profile'),

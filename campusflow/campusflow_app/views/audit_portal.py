@@ -35,7 +35,7 @@ from ..models.audit_portal import AuditEngagement, AuditorAccessLog, AuditorProf
 from ..models.fees import FeePayment, StudentFeeInvoice
 from ..models.finance import ExpenseEntry, FinancialYear, FixedAsset, IncomeEntry, _year_month_pairs
 from ..models.payments import PaymentGatewayTransaction
-from ..models.payroll import Payslip, SalaryStructure
+from ..models.payroll import Payslip
 from ..models.scholarship import StudentScholarshipRecord
 from ..permissions import IsActiveAuditor, IsSaaSOrCollegeAdmin, RequiresModule, get_user_group
 
@@ -451,13 +451,15 @@ class FixedAssetRegisterView(APIView):
 
 
 class PayrollStatutorySummaryView(APIView):
-    """Payroll / TDS / PF / ESI statutory summary — SalaryStructure carries the
-    per-employee rates, Payslip carries how many months were actually paid in
-    this FY, so the summary is rate x months-paid, not a re-derivation."""
+    """Payroll / TDS / PF / ESI statutory summary — summed directly from each
+    month's Payslip snapshot, not re-derived as current-rate x months-paid.
+    A live SalaryStructure rate multiplied across months would silently
+    misstate every FY in which an employee's pay changed mid-year; Payslip
+    carries the actual pf/esi/tds that applied in each paid month."""
     permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
-        from django.db.models import Q, Count, Sum
+        from django.db.models import Count, Q, Sum
         fy = request.auditor_engagement.financial_year
         export_format = _export_format(request)
         action = AuditorAccessLog.ACTION_DOWNLOAD if export_format else AuditorAccessLog.ACTION_VIEW
@@ -471,24 +473,28 @@ class PayrollStatutorySummaryView(APIView):
             q = Q()
             for y, m in pairs:
                 q |= Q(year=y, month=m)
-            months_paid_by_user = (
-                Payslip.objects.filter(q).values("user_id").annotate(months_paid=Count("id"))
+            per_user = (
+                Payslip.objects.filter(q)
+                .values("user_id", "user__first_name", "user__last_name", "user__username")
+                .annotate(
+                    months_paid=Count("id"),
+                    total_gross=Sum("gross_salary"),
+                    total_pf=Sum("pf_deduction"),
+                    total_esi=Sum("esi_deduction"),
+                    total_tds=Sum("tds_deduction"),
+                    total_net=Sum("net_payable"),
+                )
             )
-            months_map = {row["user_id"]: row["months_paid"] for row in months_paid_by_user}
-            net_by_user = {
-                row["user_id"]: row["total_net"]
-                for row in Payslip.objects.filter(q).values("user_id").annotate(total_net=Sum("net_payable"))
-            }
-            for structure in SalaryStructure.objects.select_related("user").filter(user_id__in=months_map.keys()):
-                months_paid = months_map.get(structure.user_id, 0)
-                gross = structure.gross_salary * months_paid
-                pf = structure.pf_deduction * months_paid
-                esi = structure.esi_deduction * months_paid
-                tds = structure.tds_deduction * months_paid
-                net = net_by_user.get(structure.user_id, 0) or 0
+            for row in per_user:
+                employee = f"{row['user__first_name']} {row['user__last_name']}".strip() or row["user__username"]
+                gross = row["total_gross"] or 0
+                pf = row["total_pf"] or 0
+                esi = row["total_esi"] or 0
+                tds = row["total_tds"] or 0
+                net = row["total_net"] or 0
                 rows_data.append({
-                    "employee": structure.user.get_full_name() or structure.user.username,
-                    "months_paid": months_paid,
+                    "employee": employee,
+                    "months_paid": row["months_paid"],
                     "gross_salary": gross,
                     "pf": pf,
                     "esi": esi,
@@ -649,7 +655,7 @@ class AssetsLiabilitiesScheduleView(APIView):
     permission_classes = AUDIT_CA_PERMS
 
     def get(self, request):
-        from django.db.models import Count, Q
+        from django.db.models import Q, Sum
         fy = request.auditor_engagement.financial_year
         export_format = _export_format(request)
         action = AuditorAccessLog.ACTION_DOWNLOAD if export_format else AuditorAccessLog.ACTION_VIEW
@@ -674,15 +680,15 @@ class AssetsLiabilitiesScheduleView(APIView):
             q = Q()
             for y, m in pairs:
                 q |= Q(year=y, month=m)
-            months_paid_by_user = {
-                row["user_id"]: row["months_paid"]
-                for row in Payslip.objects.filter(q).values("user_id").annotate(months_paid=Count("id"))
-            }
-            for structure in SalaryStructure.objects.filter(user_id__in=months_paid_by_user.keys()):
-                months_paid = months_paid_by_user.get(structure.user_id, 0)
-                statutory_dues["pf"] += structure.pf_deduction * months_paid
-                statutory_dues["esi"] += structure.esi_deduction * months_paid
-                statutory_dues["tds"] += structure.tds_deduction * months_paid
+            # Summed from each month's own Payslip snapshot, not a live
+            # SalaryStructure rate x months-paid — see PayrollStatutorySummaryView
+            # for why that would misstate any FY with a mid-year pay change.
+            payslip_totals = Payslip.objects.filter(q).aggregate(
+                pf=Sum("pf_deduction"), esi=Sum("esi_deduction"), tds=Sum("tds_deduction"),
+            )
+            statutory_dues["pf"] = payslip_totals["pf"] or 0
+            statutory_dues["esi"] = payslip_totals["esi"] or 0
+            statutory_dues["tds"] = payslip_totals["tds"] or 0
         statutory_dues_total = statutory_dues["pf"] + statutory_dues["esi"] + statutory_dues["tds"]
 
         not_tracked_note = (

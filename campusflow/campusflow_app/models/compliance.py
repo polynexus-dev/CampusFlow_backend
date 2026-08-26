@@ -78,6 +78,27 @@ class ComplianceCertificate(models.Model):
         return self.STATUS_VALID
 
 
+class InstitutionProfile(models.Model):
+    """
+    One row per tenant schema — static institution-level identifiers that
+    regulatory returns need but that aren't computable from any other model.
+    Fetched via get_or_create (see services/compliance.py), the same lazy-
+    singleton idiom used by the academic calendar and clearance settings.
+    """
+    aishe_code = models.CharField(
+        max_length=20, blank=True, null=True,
+        help_text="AISHE institution code — feeds the IIQA submission and the AISHE annual return.",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Institution Profile"
+        verbose_name_plural = "Institution Profile"
+
+    def __str__(self):
+        return f"Institution Profile (AISHE: {self.aishe_code or 'not set'})"
+
+
 class AccreditationCriterion(models.Model):
     """The NAAC/NBA criteria catalog (e.g. "1.1", "3.4") with title text —
     the rows the NAAC SSR/AQAR Evidence Workspace organizes evidence under."""

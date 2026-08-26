@@ -506,6 +506,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     specializations = serializers.CharField(required=False, allow_blank=True)
     experience_years = serializers.IntegerField(required=False, allow_null=True)
     epf_esi_details = serializers.CharField(required=False, allow_blank=True)
+    aicte_faculty_id = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    aicte_cadre = serializers.ChoiceField(choices=TeachingStaffProfile.CADRE_CHOICES, required=False, allow_blank=True)
     office_room_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
     research_interests = serializers.CharField(required=False, allow_blank=True)
     publications_link = serializers.URLField(max_length=500, required=False, allow_blank=True)
@@ -539,6 +541,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             'extracurricular_interests', 'date_of_joining', 'designation', 'employee_type',
             'bank_account_number', 'pan_number', 'staff_role', 'status',
             'qualifications', 'specializations', 'experience_years', 'epf_esi_details',
+            'aicte_faculty_id', 'aicte_cadre',
             'office_room_number', 'research_interests', 'publications_link',
             'replacement_availability_preferences', 'assigned_responsibilities',
             'office_location_details', 'consent_given', 'consent_version',
@@ -630,6 +633,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             'extracurricular_interests', 'date_of_joining', 'designation', 'employee_type',
             'bank_account_number', 'pan_number', 'staff_role', 'status',
             'qualifications', 'specializations', 'experience_years', 'epf_esi_details',
+            'aicte_faculty_id', 'aicte_cadre',
             'office_room_number', 'research_interests', 'publications_link',
             'replacement_availability_preferences', 'assigned_responsibilities',
             'office_location_details', 'consent_given', 'consent_version',

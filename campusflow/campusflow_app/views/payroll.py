@@ -205,6 +205,9 @@ class GeneratePayslipView(APIView):
             absent_days=absent_days,
             gross_salary=gross,
             total_deductions=deductions,
+            pf_deduction=salary.pf_deduction,
+            esi_deduction=salary.esi_deduction,
+            tds_deduction=salary.tds_deduction,
             absence_deduction=absence_deduction,
             net_payable=max(Decimal(0), net_payable),
         )
@@ -290,6 +293,8 @@ class BulkPayslipGenerationView(APIView):
                     total_working_days=total_working_days, present_days=present_days,
                     leave_days=leave_days, absent_days=absent_days,
                     gross_salary=gross, total_deductions=deductions,
+                    pf_deduction=salary.pf_deduction, esi_deduction=salary.esi_deduction,
+                    tds_deduction=salary.tds_deduction,
                     absence_deduction=absence_deduction, net_payable=net_payable,
                 )
                 generated += 1
@@ -345,6 +350,9 @@ class PayslipListView(APIView):
                 "absent_days": p.absent_days,
                 "gross_salary": str(p.gross_salary),
                 "total_deductions": str(p.total_deductions),
+                "pf_deduction": str(p.pf_deduction),
+                "esi_deduction": str(p.esi_deduction),
+                "tds_deduction": str(p.tds_deduction),
                 "absence_deduction": str(p.absence_deduction),
                 "net_payable": str(p.net_payable),
                 "status": p.status,

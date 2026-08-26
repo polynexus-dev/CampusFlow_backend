@@ -1016,6 +1016,7 @@ class TeachingStaffUserProfileView(APIView):
         result = []
         for prof in teaching_staff_profiles:
             result.append({
+                "id": prof.id,
                 "user": {
                     "username": prof.user.username, "email": prof.user.email,
                     "first_name": prof.user.first_name, "last_name": prof.user.last_name
@@ -1023,6 +1024,7 @@ class TeachingStaffUserProfileView(APIView):
                 "role": "Faculty",
                 "employee_id": prof.employee_id,
                 "department": prof.department.name if prof.department else None,
+                "department_id": prof.department_id,
                 "middle_name": prof.middle_name, "date_of_birth": prof.date_of_birth,
                 "gender": prof.gender, "blood_group": prof.blood_group,
                 "aadhaar_number": prof.aadhaar_number, "nationality": prof.nationality,
@@ -1042,6 +1044,7 @@ class TeachingStaffUserProfileView(APIView):
                 "permanent_state": prof.permanent_state,
                 "permanent_pincode": prof.permanent_pincode,
                 "date_of_joining": prof.date_of_joining, "designation": prof.designation,
+                "aicte_faculty_id": prof.aicte_faculty_id, "aicte_cadre": prof.aicte_cadre,
                 "qualifications": prof.qualifications, "specializations": prof.specializations,
                 "experience_years": prof.experience_years, "employee_type": prof.employee_type,
                 "bank_account_number": prof.bank_account_number,
@@ -1082,7 +1085,8 @@ class TeachingStaffUserProfileView(APIView):
             'date_of_joining', 'designation', 'qualifications', 'specializations',
             'experience_years', 'employee_type', 'bank_account_number', 'pan_number',
             'epf_esi_details', 'staff_role', 'status', 'office_room_number',
-            'research_interests', 'publications_link', 'replacement_availability_preferences'
+            'research_interests', 'publications_link', 'replacement_availability_preferences',
+            'aicte_faculty_id', 'aicte_cadre',
         ]
         return helper_update_employee_profile(profile, request, profile_field_names)
 
@@ -1357,6 +1361,7 @@ class DepartmentHeadUserProfileView(APIView):
         result = []
         for prof in profiles:
             result.append({
+                "id": prof.id,
                 "user": {
                     "username": prof.user.username, "email": prof.user.email,
                     "first_name": prof.user.first_name, "last_name": prof.user.last_name
@@ -1364,6 +1369,7 @@ class DepartmentHeadUserProfileView(APIView):
                 "role": "Department Head",
                 "employee_id": prof.employee_id,
                 "department": prof.department.name if prof.department else None,
+                "department_id": prof.department_id,
                 "middle_name": prof.middle_name, "date_of_birth": prof.date_of_birth,
                 "gender": prof.gender, "aadhaar_number": prof.aadhaar_number,
                 "emergency_contact_name": prof.emergency_contact_name,
@@ -1454,6 +1460,7 @@ class NonTeachingStaffUserProfileView(APIView):
         result = []
         for prof in profiles:
             result.append({
+                "id": prof.id,
                 "user": {
                     "username": prof.user.username, "email": prof.user.email,
                     "first_name": prof.user.first_name, "last_name": prof.user.last_name
@@ -1464,6 +1471,7 @@ class NonTeachingStaffUserProfileView(APIView):
                 "role": get_user_group(prof.user) or "Support Staff",
                 "employee_id": prof.employee_id,
                 "department": prof.department.name if prof.department else None,
+                "department_id": prof.department_id,
                 "middle_name": prof.middle_name, "date_of_birth": prof.date_of_birth,
                 "gender": prof.gender, "aadhaar_number": prof.aadhaar_number,
                 "emergency_contact_name": prof.emergency_contact_name,

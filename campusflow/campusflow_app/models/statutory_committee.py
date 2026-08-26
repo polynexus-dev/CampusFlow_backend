@@ -26,10 +26,18 @@ class StatutoryCommittee(models.Model):
     TYPE_ANTI_RAGGING = "anti_ragging"
     TYPE_ICC_POSH = "icc_posh"
     TYPE_GRIEVANCE_REDRESSAL = "grievance_redressal"
+    TYPE_SC_ST_CELL = "sc_st_cell"
+    TYPE_OBC_CELL = "obc_cell"
+    TYPE_MINORITY_CELL = "minority_cell"
+    TYPE_WOMENS_CELL = "womens_cell"
     TYPE_CHOICES = [
         (TYPE_ANTI_RAGGING, "Anti-Ragging Committee"),
         (TYPE_ICC_POSH, "Internal Complaints Committee (POSH)"),
         (TYPE_GRIEVANCE_REDRESSAL, "Grievance Redressal Committee"),
+        (TYPE_SC_ST_CELL, "SC/ST Cell"),
+        (TYPE_OBC_CELL, "OBC Cell"),
+        (TYPE_MINORITY_CELL, "Minority Cell"),
+        (TYPE_WOMENS_CELL, "Women's Cell"),
     ]
 
     committee_type = models.CharField(max_length=25, choices=TYPE_CHOICES)

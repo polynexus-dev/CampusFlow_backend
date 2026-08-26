@@ -15,7 +15,7 @@ from ..demo_guard import IsNotDemoTenant
 from ..models.accreditation_narrative import AccreditationNarrativeDraft
 from ..models.compliance import (
     ComplianceCertificateType, ComplianceCertificate,
-    AccreditationCriterion, EvidenceItem,
+    AccreditationCriterion, EvidenceItem, InstitutionProfile,
 )
 from ..models.department import Department
 from ..models.finance import FinancialYear
@@ -147,12 +147,38 @@ def _accreditation_pdf_response(filename, title, subtitle, sections):
     return response
 
 
+def get_institution_profile():
+    """Fetch (or lazily create) the tenant's InstitutionProfile — same
+    get_or_create singleton idiom used by the academic calendar and clearance
+    settings elsewhere in this codebase."""
+    profile, _ = InstitutionProfile.objects.get_or_create(pk=1)
+    return profile
+
+
+class InstitutionProfileView(APIView):
+    """GET/PATCH static institution-level identifiers (currently just the
+    AISHE code) that regulatory returns need but no other model can supply."""
+    permission_classes = COMPLIANCE_ADMIN_PERMS
+
+    def get(self, request):
+        profile = get_institution_profile()
+        return Response({"aishe_code": profile.aishe_code, "updated_at": profile.updated_at})
+
+    def patch(self, request):
+        profile = get_institution_profile()
+        if "aishe_code" in request.data:
+            profile.aishe_code = request.data["aishe_code"]
+            profile.save(update_fields=["aishe_code", "updated_at"])
+        return Response({"aishe_code": profile.aishe_code, "updated_at": profile.updated_at})
+
+
 class AISHEAnnualReturnView(APIView):
     """AISHE annual return: enrolment by category/gender/disability status,
     staff counts across all role types."""
     permission_classes = COMPLIANCE_ADMIN_PERMS
 
     def get(self, request):
+        aishe_code = get_institution_profile().aishe_code
         students = StudentProfile.objects.all()
         by_category = list(students.values("category").annotate(count=Count("id")).order_by("category"))
         by_gender = list(students.values("gender").annotate(count=Count("id")).order_by("gender"))
@@ -170,6 +196,7 @@ class AISHEAnnualReturnView(APIView):
             return _accreditation_xlsx_response(
                 "aishe_annual_return.xlsx",
                 [
+                    ("Institution", ["Field", "Value"], [["AISHE Code", aishe_code]]),
                     ("Enrolment by Category", ["Category", "Count"], [[r["category"], r["count"]] for r in by_category]),
                     ("Enrolment by Gender", ["Gender", "Count"], [[r["gender"], r["count"]] for r in by_gender]),
                     ("Enrolment by Disability", ["Disability Status", "Count"], [[r["disability_status"], r["count"]] for r in by_disability]),
@@ -178,6 +205,7 @@ class AISHEAnnualReturnView(APIView):
             )
 
         return Response({
+            "aishe_code": aishe_code,
             "total_students": students.count(),
             "enrolment_by_category": by_category,
             "enrolment_by_gender": by_gender,
@@ -198,9 +226,11 @@ class AICTEDisclosureView(APIView):
         faculty_rows = [
             {
                 "employee_id": f.employee_id,
+                "aicte_faculty_id": f.aicte_faculty_id,
                 "name": f.user.get_full_name() or f.user.username,
                 "department": f.department.name if f.department else None,
                 "designation": f.designation,
+                "aicte_cadre": f.get_aicte_cadre_display() if f.aicte_cadre else None,
                 "qualifications": f.qualifications,
                 "experience_years": f.experience_years,
             }
@@ -210,6 +240,12 @@ class AICTEDisclosureView(APIView):
         total_students = StudentProfile.objects.count()
         total_faculty = faculty.count()
         ratio = round(total_students / total_faculty, 2) if total_faculty else None
+
+        cadre_counts = {
+            label: faculty.filter(aicte_cadre=value).count()
+            for value, label in TeachingStaffProfile.CADRE_CHOICES
+        }
+        cadre_counts["Not Set"] = faculty.filter(aicte_cadre__isnull=True).count() + faculty.filter(aicte_cadre="").count()
 
         programs = Program.objects.select_related("department").filter(is_active=True)
         program_rows = [
@@ -222,12 +258,13 @@ class AICTEDisclosureView(APIView):
 
         export_format = (request.query_params.get("export") or "").lower()
         disclosure_sections = [
-            ("Faculty", ["Employee ID", "Name", "Department", "Designation", "Qualifications", "Experience (yrs)"],
-             [[f["employee_id"], f["name"], f["department"], f["designation"], f["qualifications"], f["experience_years"]] for f in faculty_rows]),
+            ("Faculty", ["Employee ID", "AICTE Faculty ID", "Name", "Department", "Designation", "AICTE Cadre", "Qualifications", "Experience (yrs)"],
+             [[f["employee_id"], f["aicte_faculty_id"], f["name"], f["department"], f["designation"], f["aicte_cadre"], f["qualifications"], f["experience_years"]] for f in faculty_rows]),
             ("Programs", ["Code", "Name", "Level", "Department", "AICTE Program Code"],
              [[p["code"], p["name"], p["level"], p["department"], p["aicte_program_code"]] for p in program_rows]),
             ("Faculty-Student Ratio", ["Metric", "Value"],
              [["Total Students", total_students], ["Total Faculty", total_faculty], ["Ratio (Students:Faculty)", ratio]]),
+            ("Cadre-wise Faculty Count", ["Cadre", "Count"], list(cadre_counts.items())),
         ]
 
         if export_format == "xlsx":
@@ -247,6 +284,7 @@ class AICTEDisclosureView(APIView):
             "total_students": total_students,
             "total_faculty": total_faculty,
             "student_faculty_ratio": ratio,
+            "cadre_wise_faculty_count": cadre_counts,
             "programs": program_rows,
         })
 

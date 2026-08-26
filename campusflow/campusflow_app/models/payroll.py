@@ -72,6 +72,18 @@ class Payslip(models.Model):
     # Pay breakdown (snapshot)
     gross_salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_deductions = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    pf_deduction = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text="Provident Fund for this month, snapshotted from SalaryStructure at generation time.",
+    )
+    esi_deduction = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text="Employee State Insurance for this month, snapshotted from SalaryStructure at generation time.",
+    )
+    tds_deduction = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text="Tax Deducted at Source for this month, snapshotted from SalaryStructure at generation time.",
+    )
     absence_deduction = models.DecimalField(
         max_digits=12, decimal_places=2, default=0,
         help_text="(gross / working_days) × absent_days"

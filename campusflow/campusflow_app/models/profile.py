@@ -263,6 +263,26 @@ class TeachingStaffProfile(models.Model):
     pan_number = models.CharField(max_length=10, unique=True, blank=True, null=True)
     epf_esi_details = models.TextField(blank=True, null=True)
 
+    # AICTE Extension of Approval — Faculty ID (linked to PAN/Aadhaar above in the
+    # actual AICTE filing) and cadre category, needed for the cadre-wise ratio
+    # AICTE audits (Professor:Associate:Assistant), not just a flat headcount ratio.
+    CADRE_PROFESSOR = 'professor'
+    CADRE_ASSOCIATE_PROFESSOR = 'associate_professor'
+    CADRE_ASSISTANT_PROFESSOR = 'assistant_professor'
+    CADRE_CHOICES = [
+        (CADRE_PROFESSOR, 'Professor'),
+        (CADRE_ASSOCIATE_PROFESSOR, 'Associate Professor'),
+        (CADRE_ASSISTANT_PROFESSOR, 'Assistant Professor'),
+    ]
+    aicte_faculty_id = models.CharField(
+        max_length=50, unique=True, blank=True, null=True,
+        help_text="AICTE-issued Faculty ID, for the annual Extension of Approval filing.",
+    )
+    aicte_cadre = models.CharField(
+        max_length=25, choices=CADRE_CHOICES, blank=True, null=True,
+        help_text="AICTE cadre category, distinct from the free-text designation above — powers the cadre-wise ratio computation.",
+    )
+
     # Login & Security (Role and Status)
     staff_role = models.CharField(max_length=50, default='lecturer', help_text="Specific role within teaching staff (e.g., Professor, HOD)")
     status = models.CharField(max_length=20, default='active')

@@ -80,7 +80,7 @@ from .syllabus_coverage import SyllabusCoverageEntry
 
 # ── Compliance & Accreditation ──
 from .compliance import (
-    ComplianceCertificateType, ComplianceCertificate,
+    ComplianceCertificateType, ComplianceCertificate, InstitutionProfile,
     AccreditationCriterion, EvidenceItem,
 )
 
