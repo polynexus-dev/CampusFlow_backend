@@ -51,6 +51,13 @@ class ApprenticeshipContractViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        # A student (unlike TPO staff) must only ever see their own
+        # contracts — TPO_PERMS alone doesn't draw that line since "tpo" is
+        # in every student's default module list, the same way
+        # PlacementApplicationViewSet's own bar works today.
+        student_profile = getattr(self.request.user, "student_profile", None)
+        if student_profile is not None:
+            qs = qs.filter(placement_application__student=student_profile)
         student_id = self.request.query_params.get("student_id")
         if student_id:
             qs = qs.filter(placement_application__student_id=student_id)
