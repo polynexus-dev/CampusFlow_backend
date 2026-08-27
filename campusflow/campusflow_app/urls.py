@@ -82,6 +82,10 @@ from campusflow_app.views.outcomes import (
     POCOMappingListCreateView, POCOMappingDetailView,
     CourseOutcomeAttainmentView, ProgramOutcomeAttainmentView,
 )
+from campusflow_app.views.indirect_attainment import (
+    OutcomeIndirectSurveyListCreateView, OutcomeIndirectSurveyDetailView,
+    OutcomeIndirectSurveyResponseListCreateView,
+)
 from campusflow_app.views.academics import (
     AcademicYearListCreateView, AcademicYearDetailView,
     TermListCreateView, TermDetailView,
@@ -139,6 +143,22 @@ from campusflow_app.views.clearance import (
 )
 from campusflow_app.views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
 from campusflow_app.views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
+from campusflow_app.views.apprenticeship import (
+    ApprenticeshipContractViewSet, StipendClaimCreateView, StipendClaimListView, StipendClaimActionView,
+)
+from campusflow_app.views.fra import (
+    FeeRegulatingAuthoritySubmissionViewSet, SubmitFRASubmissionView, RecordFRADecisionView,
+)
+from campusflow_app.views.dte_cet_admissions import (
+    SeatMatrixViewSet, CAPRoundViewSet, CAPApplicantViewSet, CAPAllotmentViewSet,
+    ConfirmCAPAllotmentView, CancelCAPAllotmentView, ConvertCAPAllotmentToStudentView,
+)
+from campusflow_app.views.university_affiliation import (
+    AffiliationApplicationViewSet, SubmitAffiliationApplicationView, RecordLICVisitView,
+    RecordAffiliationDecisionView, TeacherApprovalProposalViewSet, TeacherApprovalProposalDecisionView,
+    FacultyWorkloadStatementViewSet, ReservationRosterEntryViewSet,
+)
+from campusflow_app.views.abc_credit import ABCCreditEntryListView, SyncABCCreditEntryView
 from campusflow_app.views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
 from campusflow_app.views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from campusflow_app.views.valuation import (
@@ -166,6 +186,20 @@ from campusflow_app.views.nirf import NIRFDataEntryViewSet, NIRFReportView
 from campusflow_app.views.statutory_committee import (
     StatutoryCommitteeViewSet, CommitteeMembershipViewSet,
     CommitteeComplaintViewSet, CommitteeMeetingViewSet, CommitteeAnnualReportView,
+)
+from campusflow_app.views.anti_ragging import (
+    AntiRaggingUndertakingViewSet, AntiRaggingCoverageReportView,
+)
+from campusflow_app.views.aqar_ssr import (
+    FacultyResearchOutputViewSet, StudentFeedbackViewSet, RecordStudentFeedbackActionView,
+    StudentFeedbackActionTakenReportView, InstitutionalEventViewSet, AccreditationSubmissionViewSet,
+    SubmitAccreditationSubmissionView, SignOffAccreditationSubmissionView, AuditedFinancialsCoverageView,
+)
+from campusflow_app.views.exam_administration import (
+    AttendanceDetentionSettingsView,
+    RevaluationRequestCreateView, RevaluationRequestListView, RevaluationRequestActionView,
+    MigrationRequestCreateView, MigrationRequestListView, MigrationRequestActionView,
+    ConvocationRequestCreateView, ConvocationRequestListView, ConvocationRequestActionView,
 )
 from campusflow_app.views.finance import (
     FinancialYearViewSet, CloseFinancialYearView,
@@ -440,6 +474,11 @@ urlpatterns = [
     path('academics/programs/<int:program_id>/outcome-attainment/', ProgramOutcomeAttainmentView.as_view(), name='program-outcome-attainment'),
     path('academics/programs/<int:program_id>/nba-sar-export/', NBASARExportView.as_view(), name='program-nba-sar-export'),
 
+    # NBA Indirect Attainment (Course-Exit / Programme-Exit / Employer / Alumni Surveys)
+    path('academics/programs/<int:program_id>/indirect-surveys/', OutcomeIndirectSurveyListCreateView.as_view(), name='indirect-survey-list'),
+    path('indirect-surveys/<int:pk>/', OutcomeIndirectSurveyDetailView.as_view(), name='indirect-survey-detail'),
+    path('indirect-surveys/<int:survey_id>/responses/', OutcomeIndirectSurveyResponseListCreateView.as_view(), name='indirect-survey-response-list'),
+
     # ── Paper Setting from Syllabus ───────────────────────────────────
     path('exams/<int:pk>/blueprint/', PaperBlueprintView.as_view(), name='exam-paper-blueprint'),
     path('exams/<int:pk>/paper/generate/', GeneratePaperView.as_view(), name='exam-paper-generate'),
@@ -536,6 +575,50 @@ urlpatterns = [
     path('recruitment-drives/<int:pk>/', RecruitmentDriveViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='recruitmentdrive-detail'),
     path('placement-applications/', PlacementApplicationViewSet.as_view({'get': 'list', 'post': 'create'}), name='placementapplication-list'),
     path('placement-applications/<int:pk>/', PlacementApplicationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='placementapplication-detail'),
+
+    # NATS Apprenticeship Layer (Contracts / Stipend Claims)
+    path('apprenticeship/contracts/', ApprenticeshipContractViewSet.as_view({'get': 'list', 'post': 'create'}), name='apprenticeshipcontract-list'),
+    path('apprenticeship/contracts/<int:pk>/', ApprenticeshipContractViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='apprenticeshipcontract-detail'),
+    path('apprenticeship/stipend-claims/', StipendClaimCreateView.as_view(), name='stipendclaim-create'),
+    path('apprenticeship/stipend-claims/pending/', StipendClaimListView.as_view(), name='stipendclaim-list'),
+    path('apprenticeship/stipend-claims/<int:pk>/action/', StipendClaimActionView.as_view(), name='stipendclaim-action'),
+
+    # Fee Regulating Authority Submissions
+    path('fra-submissions/', FeeRegulatingAuthoritySubmissionViewSet.as_view({'get': 'list', 'post': 'create'}), name='frasubmission-list'),
+    path('fra-submissions/<int:pk>/', FeeRegulatingAuthoritySubmissionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='frasubmission-detail'),
+    path('fra-submissions/<int:pk>/submit/', SubmitFRASubmissionView.as_view(), name='frasubmission-submit'),
+    path('fra-submissions/<int:pk>/record-decision/', RecordFRADecisionView.as_view(), name='frasubmission-record-decision'),
+
+    # DTE/CET Admissions (Seat Matrix / CAP Rounds / Applicants / Allotments)
+    path('seat-matrix/', SeatMatrixViewSet.as_view({'get': 'list', 'post': 'create'}), name='seatmatrix-list'),
+    path('seat-matrix/<int:pk>/', SeatMatrixViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='seatmatrix-detail'),
+    path('cap-rounds/', CAPRoundViewSet.as_view({'get': 'list', 'post': 'create'}), name='capround-list'),
+    path('cap-rounds/<int:pk>/', CAPRoundViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='capround-detail'),
+    path('cap-applicants/', CAPApplicantViewSet.as_view({'get': 'list', 'post': 'create'}), name='capapplicant-list'),
+    path('cap-applicants/<int:pk>/', CAPApplicantViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='capapplicant-detail'),
+    path('cap-allotments/', CAPAllotmentViewSet.as_view({'get': 'list', 'post': 'create'}), name='capallotment-list'),
+    path('cap-allotments/<int:pk>/', CAPAllotmentViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='capallotment-detail'),
+    path('cap-allotments/<int:pk>/confirm/', ConfirmCAPAllotmentView.as_view(), name='capallotment-confirm'),
+    path('cap-allotments/<int:pk>/cancel/', CancelCAPAllotmentView.as_view(), name='capallotment-cancel'),
+    path('cap-allotments/<int:pk>/convert/', ConvertCAPAllotmentToStudentView.as_view(), name='capallotment-convert'),
+
+    # University Affiliation & LIC
+    path('affiliation-applications/', AffiliationApplicationViewSet.as_view({'get': 'list', 'post': 'create'}), name='affiliationapplication-list'),
+    path('affiliation-applications/<int:pk>/', AffiliationApplicationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='affiliationapplication-detail'),
+    path('affiliation-applications/<int:pk>/submit/', SubmitAffiliationApplicationView.as_view(), name='affiliationapplication-submit'),
+    path('affiliation-applications/<int:pk>/record-lic-visit/', RecordLICVisitView.as_view(), name='affiliationapplication-record-lic-visit'),
+    path('affiliation-applications/<int:pk>/record-decision/', RecordAffiliationDecisionView.as_view(), name='affiliationapplication-record-decision'),
+    path('teacher-approval-proposals/', TeacherApprovalProposalViewSet.as_view({'get': 'list', 'post': 'create'}), name='teacherapprovalproposal-list'),
+    path('teacher-approval-proposals/<int:pk>/', TeacherApprovalProposalViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='teacherapprovalproposal-detail'),
+    path('teacher-approval-proposals/<int:pk>/record-decision/', TeacherApprovalProposalDecisionView.as_view(), name='teacherapprovalproposal-record-decision'),
+    path('faculty-workload-statements/', FacultyWorkloadStatementViewSet.as_view({'get': 'list', 'post': 'create'}), name='facultyworkloadstatement-list'),
+    path('faculty-workload-statements/<int:pk>/', FacultyWorkloadStatementViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='facultyworkloadstatement-detail'),
+    path('reservation-roster-entries/', ReservationRosterEntryViewSet.as_view({'get': 'list', 'post': 'create'}), name='reservationrosterentry-list'),
+    path('reservation-roster-entries/<int:pk>/', ReservationRosterEntryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='reservationrosterentry-detail'),
+
+    # ABC/APAAR Internal Modeling
+    path('abc-credit-entries/', ABCCreditEntryListView.as_view(), name='abccreditentry-list'),
+    path('abc-credit-entries/<int:pk>/sync/', SyncABCCreditEntryView.as_view(), name='abccreditentry-sync'),
 
     # Library Management
     path('books/', BookViewSet.as_view({'get': 'list', 'post': 'create'}), name='book-list'),
@@ -644,6 +727,38 @@ urlpatterns = [
     path('committee-meetings/', CommitteeMeetingViewSet.as_view({'get': 'list', 'post': 'create'}), name='committeemeeting-list'),
     path('committee-meetings/<int:pk>/', CommitteeMeetingViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='committeemeeting-detail'),
     path('compliance-center/reports/statutory-committee-report/', CommitteeAnnualReportView.as_view(), name='compliance-center-statutory-committee'),
+
+    # Anti-Ragging Undertaking Capture
+    path('anti-ragging-undertakings/', AntiRaggingUndertakingViewSet.as_view({'get': 'list', 'post': 'create'}), name='antiraggingundertaking-list'),
+    path('anti-ragging-undertakings/<int:pk>/', AntiRaggingUndertakingViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='antiraggingundertaking-detail'),
+    path('compliance-center/reports/anti-ragging-coverage/', AntiRaggingCoverageReportView.as_view(), name='compliance-center-anti-ragging-coverage'),
+
+    # AQAR/SSR Content Completeness
+    path('faculty-research-outputs/', FacultyResearchOutputViewSet.as_view({'get': 'list', 'post': 'create'}), name='facultyresearchoutput-list'),
+    path('faculty-research-outputs/<int:pk>/', FacultyResearchOutputViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='facultyresearchoutput-detail'),
+    path('student-feedback/', StudentFeedbackViewSet.as_view({'get': 'list', 'post': 'create'}), name='studentfeedback-list'),
+    path('student-feedback/<int:pk>/', StudentFeedbackViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='studentfeedback-detail'),
+    path('student-feedback/<int:pk>/record-action/', RecordStudentFeedbackActionView.as_view(), name='studentfeedback-record-action'),
+    path('compliance-center/reports/student-feedback-action-taken/', StudentFeedbackActionTakenReportView.as_view(), name='compliance-center-student-feedback-report'),
+    path('institutional-events/', InstitutionalEventViewSet.as_view({'get': 'list', 'post': 'create'}), name='institutionalevent-list'),
+    path('institutional-events/<int:pk>/', InstitutionalEventViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='institutionalevent-detail'),
+    path('accreditation-submissions/', AccreditationSubmissionViewSet.as_view({'get': 'list', 'post': 'create'}), name='accreditationsubmission-list'),
+    path('accreditation-submissions/<int:pk>/', AccreditationSubmissionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='accreditationsubmission-detail'),
+    path('accreditation-submissions/<int:pk>/submit/', SubmitAccreditationSubmissionView.as_view(), name='accreditationsubmission-submit'),
+    path('accreditation-submissions/<int:pk>/sign-off/', SignOffAccreditationSubmissionView.as_view(), name='accreditationsubmission-sign-off'),
+    path('compliance-center/reports/audited-financials-coverage/', AuditedFinancialsCoverageView.as_view(), name='compliance-center-audited-financials-coverage'),
+
+    # University Exam Administration (Detention / Revaluation / Migration / Convocation)
+    path('exam-administration/detention-settings/', AttendanceDetentionSettingsView.as_view(), name='attendance-detention-settings'),
+    path('exam-administration/revaluation-requests/', RevaluationRequestCreateView.as_view(), name='revaluationrequest-create'),
+    path('exam-administration/revaluation-requests/pending/', RevaluationRequestListView.as_view(), name='revaluationrequest-list'),
+    path('exam-administration/revaluation-requests/<int:pk>/action/', RevaluationRequestActionView.as_view(), name='revaluationrequest-action'),
+    path('exam-administration/migration-requests/', MigrationRequestCreateView.as_view(), name='migrationrequest-create'),
+    path('exam-administration/migration-requests/list/', MigrationRequestListView.as_view(), name='migrationrequest-list'),
+    path('exam-administration/migration-requests/<int:pk>/action/', MigrationRequestActionView.as_view(), name='migrationrequest-action'),
+    path('exam-administration/convocation-requests/', ConvocationRequestCreateView.as_view(), name='convocationrequest-create'),
+    path('exam-administration/convocation-requests/list/', ConvocationRequestListView.as_view(), name='convocationrequest-list'),
+    path('exam-administration/convocation-requests/<int:pk>/action/', ConvocationRequestActionView.as_view(), name='convocationrequest-action'),
 
     # NAAC SSR/AQAR Evidence Workspace (P6)
     path('accreditation-criteria/', AccreditationCriterionViewSet.as_view({'get': 'list', 'post': 'create'}), name='accreditationcriterion-list'),

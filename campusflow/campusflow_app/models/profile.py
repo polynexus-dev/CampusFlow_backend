@@ -21,6 +21,12 @@ class StudentProfile(models.Model):
     gender = models.CharField(max_length=10, blank=True, null=True)
     blood_group = models.CharField(max_length=5, blank=True, null=True)
     aadhaar_number = models.CharField(max_length=12, unique=True, blank=True, null=True)
+    apaar_id = models.CharField(
+        max_length=12, unique=True, blank=True, null=True,
+        help_text="APAAR ID (Automated Permanent Academic Account Registry) — the student's ABC "
+                   "(Academic Bank of Credits) account identifier. Blank until issued by the "
+                   "government; nothing in this system generates one.",
+    )
     nationality = models.CharField(max_length=100, blank=True, null=True)
     religion = models.CharField(max_length=100, blank=True, null=True) # NEW
     category = models.CharField(max_length=50, blank=True, null=True) # NEW

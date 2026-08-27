@@ -57,6 +57,13 @@ class ComplianceCertificate(models.Model):
         related_name='uploaded_compliance_certificates'
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    financial_year = models.ForeignKey(
+        FinancialYear, on_delete=models.SET_NULL, null=True, blank=True, related_name='compliance_certificates',
+        help_text="Which financial year this certificate covers — lets a renews-annually certificate "
+                   "(e.g. an audited financial statement) be matched to its year without re-deriving "
+                   "that from issued_date. Optional: most certificates (Trust registration, Fire NOC) "
+                   "aren't year-scoped at all.",
+    )
 
     class Meta:
         verbose_name = "Compliance Certificate"

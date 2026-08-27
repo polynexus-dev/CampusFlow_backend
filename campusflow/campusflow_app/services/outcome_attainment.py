@@ -7,12 +7,23 @@ per-student version of the same extraction loop already existed in
 views/progress.py (StudentTopicPerformanceView) — this module generalises it
 from one student to every student who sat an exam for the course, which is
 what a class-level CO attainment (and therefore an NBA SAR) actually needs.
+
+`compute_program_outcome_attainment`'s result blends in indirect (survey)
+attainment from models/indirect_attainment.py using NBA's standard 80:20
+direct:indirect split at the PO level — the same ratio nearly every NBA SAR
+template in circulation uses, distinct from (and not to be confused with)
+how the four indirect *channels themselves* are combined, which NBA does not
+mandate a fixed split for (handled by equal-weight-per-channel below).
 """
 from collections import defaultdict
 
 from ..models.exam import Exam
+from ..models.indirect_attainment import OutcomeIndirectSurveyResponse
 from ..models.outcomes import CourseOutcome, ProgramOutcome
 from ..models.valuation import ScannedPaper
+
+DIRECT_ATTAINMENT_WEIGHT = 0.8
+INDIRECT_ATTAINMENT_WEIGHT = 0.2
 
 
 def _extract_score_and_max(raw, spec):
@@ -118,12 +129,66 @@ def compute_course_outcome_class_attainment(course_id):
     return results
 
 
-def compute_program_outcome_attainment(program_id):
+def compute_program_outcome_indirect_attainment(program_id, academic_year_id=None):
+    """
+    Converts each Program Outcome's 1-5 Likert survey ratings into a
+    percentage (average / 5 x 100), per indirect channel (course-exit,
+    programme-exit, employer, alumni), then blends the channels with equal
+    weight across whichever ones actually have responses — NBA's SAR
+    template does not mandate a fixed split between the four channels
+    themselves, only the direct:indirect split this feeds into (see
+    DIRECT_ATTAINMENT_WEIGHT / INDIRECT_ATTAINMENT_WEIGHT above). Equal
+    weighting also means a channel nobody has surveyed yet (e.g. no alumni
+    responses collected this year) simply doesn't participate, rather than
+    silently dragging the average toward zero.
+
+    Returns {program_outcome_id: {"indirect_attainment_percent": float|None,
+    "channel_breakdown": {survey_type: {...}}}}.
+    """
+    responses = OutcomeIndirectSurveyResponse.objects.filter(survey__program_id=program_id)
+    if academic_year_id is not None:
+        responses = responses.filter(survey__academic_year_id=academic_year_id)
+
+    # program_outcome_id -> survey_type -> [ratings]
+    ratings_by_po_and_channel = defaultdict(lambda: defaultdict(list))
+    for row in responses.values("program_outcome_id", "survey__survey_type", "rating"):
+        ratings_by_po_and_channel[row["program_outcome_id"]][row["survey__survey_type"]].append(row["rating"])
+
+    results = {}
+    for po_id, by_channel in ratings_by_po_and_channel.items():
+        channel_percentages = []
+        breakdown = {}
+        for survey_type, values in by_channel.items():
+            average_rating = sum(values) / len(values)
+            channel_percent = round((average_rating / 5) * 100, 2)
+            channel_percentages.append(channel_percent)
+            breakdown[survey_type] = {
+                "average_rating": round(average_rating, 2),
+                "response_count": len(values),
+                "attainment_percent": channel_percent,
+            }
+        results[po_id] = {
+            "indirect_attainment_percent": (
+                round(sum(channel_percentages) / len(channel_percentages), 2) if channel_percentages else None
+            ),
+            "channel_breakdown": breakdown,
+        }
+    return results
+
+
+def compute_program_outcome_attainment(program_id, academic_year_id=None):
     """
     Rolls CO attainment up to each ProgramOutcome via the CO-PO correlation
     matrix (POCOMapping), using the standard weighted-by-correlation-strength
-    method: PO attainment = sum(CO attainment x strength) / sum(strength),
-    over every CO mapped to that PO with a computed attainment value.
+    method: direct PO attainment = sum(CO attainment x strength) / sum(strength),
+    over every CO mapped to that PO with a computed attainment value. Then
+    blends in indirect (survey) attainment at NBA's standard 80:20 ratio.
+
+    When a PO has direct attainment but no indirect survey data yet (the
+    common case before a survey cycle closes), `attainment_percent` falls
+    back to the direct figure alone rather than fabricating an indirect
+    component — the same "don't blend with a number that doesn't exist yet"
+    rule the rest of this codebase's reports follow.
     """
     program_outcomes = (
         ProgramOutcome.objects
@@ -140,6 +205,8 @@ def compute_program_outcome_attainment(program_id):
                 for r in compute_course_outcome_class_attainment(course_id)
             }
         return co_attainment_cache[course_id].get(co_code)
+
+    indirect_by_po = compute_program_outcome_indirect_attainment(program_id, academic_year_id=academic_year_id)
 
     results = []
     for po in program_outcomes:
@@ -161,14 +228,27 @@ def compute_program_outcome_attainment(program_id):
                 "attainment_value": attainment_value,
             })
 
-        po_attainment = round(weighted_sum / total_weight, 2) if total_weight else None
+        direct_attainment = round(weighted_sum / total_weight, 2) if total_weight else None
+
+        indirect_entry = indirect_by_po.get(po.id, {})
+        indirect_attainment = indirect_entry.get("indirect_attainment_percent")
+
+        if direct_attainment is not None and indirect_attainment is not None:
+            overall_attainment = round(
+                DIRECT_ATTAINMENT_WEIGHT * direct_attainment + INDIRECT_ATTAINMENT_WEIGHT * indirect_attainment, 2,
+            )
+        else:
+            overall_attainment = direct_attainment
 
         results.append({
             "program_outcome_id": po.id,
             "code": po.code,
             "kind": po.kind,
             "statement": po.statement,
-            "attainment_percent": po_attainment,
+            "direct_attainment_percent": direct_attainment,
+            "indirect_attainment_percent": indirect_attainment,
+            "indirect_channel_breakdown": indirect_entry.get("channel_breakdown", {}),
+            "attainment_percent": overall_attainment,
             "contributing_course_outcomes": contributing,
         })
 

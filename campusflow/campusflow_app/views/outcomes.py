@@ -379,18 +379,27 @@ class ProgramOutcomeAttainmentView(APIView):
         if not program:
             return Response({"error": "Program not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        results = compute_program_outcome_attainment(program_id)
+        academic_year_id = _to_int(request.query_params.get("academic_year"))
+        results = compute_program_outcome_attainment(program_id, academic_year_id=academic_year_id)
 
         if (request.query_params.get("export") or "").lower() == "csv":
             buffer = io.StringIO()
             writer = csv.writer(buffer)
-            writer.writerow(["PO/PSO/PEO Code", "Kind", "Statement", "Attainment %", "Contributing Course Outcomes"])
+            writer.writerow([
+                "PO/PSO/PEO Code", "Kind", "Statement",
+                "Direct Attainment %", "Indirect Attainment %", "Overall Attainment %",
+                "Contributing Course Outcomes",
+            ])
             for po in results:
                 contributing = "; ".join(
                     f"{c['course_code']} {c['course_outcome_code']} (strength {c['correlation_strength']}, {c['attainment_value']}%)"
                     for c in po["contributing_course_outcomes"]
                 )
-                writer.writerow([po["code"], po["kind"], po["statement"], po["attainment_percent"], contributing])
+                writer.writerow([
+                    po["code"], po["kind"], po["statement"],
+                    po["direct_attainment_percent"], po["indirect_attainment_percent"], po["attainment_percent"],
+                    contributing,
+                ])
             response = HttpResponse(buffer.getvalue(), content_type="text/csv")
             response["Content-Disposition"] = f'attachment; filename="sar_po_attainment_{program.code}.csv"'
             return response

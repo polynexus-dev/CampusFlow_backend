@@ -103,6 +103,39 @@ from .statutory_committee import (
     StatutoryCommittee, CommitteeMembership, CommitteeComplaint, CommitteeMeeting,
 )
 
+# ── Anti-Ragging Undertaking Capture ──
+from .anti_ragging import AntiRaggingUndertaking
+
+# ── NBA Indirect Attainment (Course-Exit / Programme-Exit / Employer / Alumni Surveys) ──
+from .indirect_attainment import OutcomeIndirectSurvey, OutcomeIndirectSurveyResponse
+
+# ── AQAR/SSR Content Completeness (Faculty Output / Student Feedback / Events / IIQA-DVV) ──
+from .aqar_ssr import (
+    FacultyResearchOutput, StudentFeedback, InstitutionalEvent, AccreditationSubmission,
+)
+
+# ── University Exam Administration (Detention / Revaluation / Migration / Convocation) ──
+from .exam_administration import (
+    AttendanceDetentionSettings, RevaluationRequest, MigrationRequest, ConvocationRequest,
+)
+
+# ── NATS Apprenticeship Layer (Contracts / Stipend Claims) ──
+from .apprenticeship import ApprenticeshipContract, StipendClaim
+
+# ── Fee Regulating Authority Submissions ──
+from .fra import FeeRegulatingAuthoritySubmission
+
+# ── DTE/CET Admissions (Seat Matrix / CAP Rounds / Applicants / Allotments) ──
+from .dte_cet_admissions import SeatMatrix, CAPRound, CAPApplicant, CAPAllotment
+
+# ── University Affiliation & LIC ──
+from .university_affiliation import (
+    AffiliationApplication, TeacherApprovalProposal, FacultyWorkloadStatement, ReservationRosterEntry,
+)
+
+# ── ABC/APAAR Internal Modeling ──
+from .abc_credit import ABCCreditEntry
+
 # ── AI Student Analysis ──
 from .student_insight import StudentInsightSnapshot
 

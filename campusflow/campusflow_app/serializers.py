@@ -46,6 +46,13 @@ from .models.profile import (
 )
 from .models.schedule import Schedule
 from .models.tpo import PlacementApplication, RecruitmentDrive
+from .models.apprenticeship import ApprenticeshipContract
+from .models.fra import FeeRegulatingAuthoritySubmission
+from .models.dte_cet_admissions import SeatMatrix, CAPRound, CAPApplicant, CAPAllotment
+from .models.university_affiliation import (
+    AffiliationApplication, TeacherApprovalProposal, FacultyWorkloadStatement, ReservationRosterEntry,
+)
+from .models.abc_credit import ABCCreditEntry
 from .models.valuation import ScannedPaper, ValuationSession
 from .models.ai_grading import AIGradingSuggestion
 from .models.risk_score import StudentRiskScore
@@ -66,6 +73,10 @@ from .models.scholarship import StateScholarshipScheme, StudentScholarshipRecord
 from .models.nirf import NIRFDataEntry
 from .models.statutory_committee import (
     StatutoryCommittee, CommitteeMembership, CommitteeComplaint, CommitteeMeeting,
+)
+from .models.anti_ragging import AntiRaggingUndertaking
+from .models.aqar_ssr import (
+    FacultyResearchOutput, StudentFeedback, InstitutionalEvent, AccreditationSubmission,
 )
 from .demo_guard import is_demo_tenant
 
@@ -901,6 +912,137 @@ class PlacementApplicationSerializer(serializers.ModelSerializer):
         }
 
 
+class FeeRegulatingAuthoritySubmissionSerializer(serializers.ModelSerializer):
+    program_code = serializers.CharField(source='program.code', read_only=True)
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+
+    class Meta:
+        model = FeeRegulatingAuthoritySubmission
+        fields = '__all__'
+        read_only_fields = (
+            'status', 'fra_order_number', 'sanctioned_fee_amount', 'submitted_at', 'decided_at', 'created_by',
+        )
+
+
+class ABCCreditEntrySerializer(serializers.ModelSerializer):
+    student_id_display = serializers.CharField(source='student.student_id', read_only=True)
+    course_code = serializers.CharField(source='course.course_code', read_only=True)
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+
+    class Meta:
+        model = ABCCreditEntry
+        fields = '__all__'
+        read_only_fields = ('credits_earned', 'grade', 'sync_status', 'synced_at')
+
+
+class AffiliationApplicationSerializer(serializers.ModelSerializer):
+    program_code = serializers.CharField(source='program.code', read_only=True)
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+
+    class Meta:
+        model = AffiliationApplication
+        fields = '__all__'
+        read_only_fields = (
+            'status', 'university_reference_number', 'lic_visit_date', 'lic_committee_members',
+            'lic_observations', 'lic_compliance_status', 'submitted_at', 'decided_at', 'created_by',
+        )
+
+
+class TeacherApprovalProposalSerializer(serializers.ModelSerializer):
+    faculty_name = serializers.SerializerMethodField()
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+    program_code = serializers.CharField(source='program.code', read_only=True, default=None)
+
+    class Meta:
+        model = TeacherApprovalProposal
+        fields = '__all__'
+        read_only_fields = (
+            'status', 'university_approval_number', 'reviewed_by', 'reviewed_at',
+        )
+
+    def get_faculty_name(self, obj):
+        return obj.faculty.user.get_full_name() or obj.faculty.user.username
+
+
+class FacultyWorkloadStatementSerializer(serializers.ModelSerializer):
+    faculty_name = serializers.SerializerMethodField()
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+
+    class Meta:
+        model = FacultyWorkloadStatement
+        fields = '__all__'
+
+    def get_faculty_name(self, obj):
+        return obj.faculty.user.get_full_name() or obj.faculty.user.username
+
+
+class ReservationRosterEntrySerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    filled_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReservationRosterEntry
+        fields = '__all__'
+
+    def get_filled_by_name(self, obj):
+        return obj.filled_by.user.get_full_name() or obj.filled_by.user.username if obj.filled_by else None
+
+
+class SeatMatrixSerializer(serializers.ModelSerializer):
+    program_code = serializers.CharField(source='program.code', read_only=True)
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+
+    class Meta:
+        model = SeatMatrix
+        fields = '__all__'
+
+
+class CAPRoundSerializer(serializers.ModelSerializer):
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+
+    class Meta:
+        model = CAPRound
+        fields = '__all__'
+
+
+class CAPApplicantSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CAPApplicant
+        fields = '__all__'
+
+
+class CAPAllotmentSerializer(serializers.ModelSerializer):
+    applicant_name = serializers.SerializerMethodField()
+    application_number = serializers.CharField(source='applicant.application_number', read_only=True)
+    program_code = serializers.CharField(source='program.code', read_only=True)
+    cap_round_name = serializers.CharField(source='cap_round.name', read_only=True)
+
+    class Meta:
+        model = CAPAllotment
+        fields = '__all__'
+        read_only_fields = (
+            'status', 'allotted_at', 'confirmed_at', 'cancelled_at', 'cancellation_reason',
+            'converted_student', 'created_by',
+        )
+
+    def get_applicant_name(self, obj):
+        return f"{obj.applicant.first_name} {obj.applicant.last_name}".strip()
+
+
+class ApprenticeshipContractSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(
+        source='placement_application.student.user.get_full_name', read_only=True,
+    )
+    student_id_display = serializers.CharField(
+        source='placement_application.student.student_id', read_only=True,
+    )
+    company_name = serializers.CharField(source='placement_application.drive.company_name', read_only=True)
+
+    class Meta:
+        model = ApprenticeshipContract
+        fields = '__all__'
+
+
 # ── Library Management Serializers ──
 class BookSerializer(serializers.ModelSerializer):
     class Meta:
@@ -1264,9 +1406,28 @@ class CommitteeMeetingSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class AntiRaggingUndertakingSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_id_display = serializers.CharField(source='student.student_id', read_only=True)
+    department_name = serializers.CharField(source='student.department.name', read_only=True, default=None)
+    academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+    is_complete = serializers.ReadOnlyField()
+
+    class Meta:
+        model = AntiRaggingUndertaking
+        fields = '__all__'
+        # reference_number is server-generated (see services/anti_ragging.py)
+        # and ip_address/user_agent are captured from the request, not submitted.
+        read_only_fields = ('reference_number', 'ip_address', 'user_agent')
+
+    def get_student_name(self, obj):
+        return obj.student.user.get_full_name() or obj.student.user.username
+
+
 class ComplianceCertificateSerializer(serializers.ModelSerializer):
     certificate_type_name = serializers.CharField(source='certificate_type.name', read_only=True)
     uploaded_by_name = serializers.SerializerMethodField()
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True, default=None)
     status = serializers.ReadOnlyField()
 
     class Meta:
@@ -1301,6 +1462,70 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
 
     def get_uploaded_by_name(self, obj):
         return obj.uploaded_by.get_full_name() or obj.uploaded_by.username if obj.uploaded_by else None
+
+    def get_signed_off_by_name(self, obj):
+        return obj.signed_off_by.get_full_name() or obj.signed_off_by.username if obj.signed_off_by else None
+
+
+class FacultyResearchOutputSerializer(serializers.ModelSerializer):
+    faculty_name = serializers.SerializerMethodField()
+    faculty_employee_id = serializers.CharField(source='faculty.employee_id', read_only=True)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+
+    class Meta:
+        model = FacultyResearchOutput
+        fields = '__all__'
+
+    def get_faculty_name(self, obj):
+        return obj.faculty.user.get_full_name() or obj.faculty.user.username
+
+
+class StudentFeedbackSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    department_name = serializers.CharField(source='department.name', read_only=True, default=None)
+    course_code = serializers.CharField(source='course.course_code', read_only=True, default=None)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+
+    class Meta:
+        model = StudentFeedback
+        fields = '__all__'
+        # action_taken/action_taken_date/status move only via record_action()
+        # (views/aqar_ssr.py), the same "committee investigates, not the
+        # complainant" split CommitteeComplaintSerializer already uses.
+        read_only_fields = ('status', 'action_taken', 'action_taken_date')
+
+    def get_student_name(self, obj):
+        if obj.is_anonymous or not obj.student:
+            return None
+        return obj.student.user.get_full_name() or obj.student.user.username
+
+
+class InstitutionalEventSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True, default=None)
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InstitutionalEvent
+        fields = '__all__'
+        read_only_fields = ('created_by',)
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() or obj.created_by.username if obj.created_by else None
+
+
+class AccreditationSubmissionSerializer(serializers.ModelSerializer):
+    financial_year_label = serializers.CharField(source='financial_year.label', read_only=True)
+    prepared_by_name = serializers.SerializerMethodField()
+    signed_off_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AccreditationSubmission
+        fields = '__all__'
+        read_only_fields = ('status', 'submitted_at', 'signed_off_by', 'signed_off_at')
+
+    def get_prepared_by_name(self, obj):
+        return obj.prepared_by.get_full_name() or obj.prepared_by.username if obj.prepared_by else None
 
     def get_signed_off_by_name(self, obj):
         return obj.signed_off_by.get_full_name() or obj.signed_off_by.username if obj.signed_off_by else None

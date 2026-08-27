@@ -11,6 +11,7 @@ from ..models.profile import StudentProfile
 from ..serializers import StudentExamResultSerializer
 from ..permissions import IsFacultyOrAbove, get_user_group
 from ..services.notifications import notify_guardians_of_student
+from ..services.abc_credit import record_credit_entry
 
 
 class StudentExamResultViewSet(viewsets.ModelViewSet):
@@ -131,6 +132,7 @@ class ExamPublishResultsView(APIView):
 
         results = StudentExamResult.objects.filter(exam=exam).select_related("student")
         for result in results:
+            record_credit_entry(result)
             notify_guardians_of_student(
                 result.student,
                 title=f"Results published: {exam.name}",

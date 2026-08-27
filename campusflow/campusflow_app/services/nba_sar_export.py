@@ -188,6 +188,12 @@ def _co_po_matrix_section(document, program):
 
 def _po_attainment_section(document, program):
     document.add_heading("Program Outcome Attainment", level=1)
+    document.add_paragraph(
+        "Overall attainment blends Direct (exam-derived) and Indirect (course-exit / "
+        "programme-exit / employer / alumni survey) attainment at NBA's standard 80:20 "
+        "ratio. Where indirect survey data has not yet been collected for a PO, the "
+        "overall figure falls back to Direct attainment alone."
+    )
 
     results = compute_program_outcome_attainment(program.id)
     if results:
@@ -197,8 +203,16 @@ def _po_attainment_section(document, program):
                 f"{c['course_code']} {c['course_outcome_code']} (strength {c['correlation_strength']}, {c['attainment_value']}%)"
                 for c in po["contributing_course_outcomes"]
             )
-            rows.append([po["code"], po["kind"].upper(), po["statement"], po["attainment_percent"], contributing])
-        _add_table(document, ["Code", "Kind", "Statement", "Attainment %", "Contributing Course Outcomes"], rows)
+            rows.append([
+                po["code"], po["kind"].upper(), po["statement"],
+                po["direct_attainment_percent"], po["indirect_attainment_percent"], po["attainment_percent"],
+                contributing,
+            ])
+        _add_table(
+            document,
+            ["Code", "Kind", "Statement", "Direct %", "Indirect %", "Overall %", "Contributing Course Outcomes"],
+            rows,
+        )
     else:
         document.add_paragraph("No attainment could be computed — no CO-PO mappings or evaluated exams found yet.")
 

@@ -25,6 +25,7 @@ CATALOG = [
     ("Fire Safety NOC", "State Fire Department", True, True),
     ("Building/Structural Stability Certificate", "Local Municipal Authority", False, True),
     ("Previous NAAC Accreditation Certificate", "NAAC", False, False),
+    ("Audited Financial Statement", "Chartered Accountant", True, False),
 
     # ── State-varying statutory/labour compliance (missing-module addition) ──
     ("Professional Tax Registration Certificate", "State Government", True, True),
