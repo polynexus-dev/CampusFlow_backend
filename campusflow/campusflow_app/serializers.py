@@ -263,10 +263,51 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         if not user.is_superuser:
             user_groups = list(user.groups.all())
             if not user_groups:
-                raise serializers.ValidationError(f"User '{username}' does not have a group assigned.", code='no_group_assigned')
-    
+                # Auto-detect role from profile or staff status and auto-assign group
+                detected_role = None
+                if ManagementProfile.objects.filter(user=user).exists():
+                    detected_role = 'Management'
+                elif AdministratorProfile.objects.filter(user=user).exists():
+                    detected_role = 'Administrator'
+                elif TeachingStaffProfile.objects.filter(user=user).exists():
+                    detected_role = 'Faculty'
+                elif StudentProfile.objects.filter(user=user).exists():
+                    detected_role = 'student'
+                elif DepartmentHeadProfile.objects.filter(user=user).exists():
+                    detected_role = 'Department Head'
+                elif GuardianProfile.objects.filter(user=user).exists():
+                    detected_role = 'guardian'
+                elif AuditorProfile.objects.filter(user=user).exists():
+                    detected_role = 'CA'
+                elif NonTeachingStaffProfile.objects.filter(user=user).exists():
+                    nt_profile = NonTeachingStaffProfile.objects.filter(user=user).first()
+                    detected_role = nt_profile.staff_role if nt_profile.staff_role in NON_TEACHING_STAFF_ROLES else 'Support Staff'
+                elif user.is_staff:
+                    detected_role = 'Management'
+                    ManagementProfile.objects.get_or_create(
+                        user=user,
+                        defaults={
+                            'employee_id': f"STAFF-{uuid.uuid4().hex[:6].upper()}",
+                            'designation': 'Staff Administrator',
+                            'status': 'active'
+                        }
+                    )
+                else:
+                    detected_role = 'student'
+                    StudentProfile.objects.get_or_create(
+                        user=user,
+                        defaults={
+                            'student_id': f"STU-{uuid.uuid4().hex[:6].upper()}",
+                            'status': 'active'
+                        }
+                    )
+
+                group_obj, _ = Group.objects.get_or_create(name=detected_role)
+                user.groups.add(group_obj)
+                user_groups = [group_obj]
+
             user_group = user_groups[0]
-    
+
             if user_group.name == 'student':
                 profile_data = StudentProfile.objects.filter(user=user).first()
             elif user_group.name == 'Faculty':
@@ -285,10 +326,45 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 profile_data = AuditorProfile.objects.filter(user=user).first()
 
             if not profile_data:
-                raise serializers.ValidationError(
-                    f"User '{username}' with role '{user_group.name}' does not have an associated profile.",
-                    code='no_profile_found'
-                )
+                # Auto-create missing profile matching the user's role group
+                if user_group.name == 'Management':
+                    profile_data = ManagementProfile.objects.create(
+                        user=user,
+                        employee_id=f"MGMT-{uuid.uuid4().hex[:6].upper()}",
+                        designation="College Management",
+                        status="active"
+                    )
+                elif user_group.name == 'Administrator':
+                    profile_data = AdministratorProfile.objects.create(
+                        user=user,
+                        employee_id=f"ADMIN-{uuid.uuid4().hex[:6].upper()}",
+                        designation="System Administrator",
+                        status="active"
+                    )
+                elif user_group.name == 'student':
+                    profile_data = StudentProfile.objects.create(
+                        user=user,
+                        student_id=f"STU-{uuid.uuid4().hex[:6].upper()}",
+                        status="active"
+                    )
+                elif user_group.name == 'Faculty':
+                    profile_data = TeachingStaffProfile.objects.create(
+                        user=user,
+                        employee_id=f"FAC-{uuid.uuid4().hex[:6].upper()}",
+                        designation="Faculty",
+                        status="active"
+                    )
+                elif user_group.name == 'guardian':
+                    profile_data = GuardianProfile.objects.create(
+                        user=user,
+                        guardian_id=f"GUA-{uuid.uuid4().hex[:6].upper()}",
+                        status="active"
+                    )
+                else:
+                    raise serializers.ValidationError(
+                        f"User '{username}' with role '{user_group.name}' does not have an associated profile.",
+                        code='no_profile_found'
+                    )
             
             # --- STATUS CHECK: Block Pending/Rejected Users ---
             if profile_data.status == 'pending':
@@ -364,7 +440,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         # --- SECURITY: AUTO-DEVICE BINDING ---
         if user_group and user_group.name == 'student':
-            device_id = request.data.get('device_id')
+            req_data = getattr(request, 'data', None) or getattr(request, 'POST', {})
+            device_id = req_data.get('device_id') if isinstance(req_data, dict) else None
             if device_id:
                 profile = user.student_profile
                 if not profile.locked_device_id:
