@@ -228,30 +228,6 @@ class GenerateLectureCodeView(APIView):
         lecture.longitude = lon
         lecture.save()
 
-        # --- NEW: Sync location back to the Classroom ---
-        classroom = lecture.classroom
-        if classroom:
-            if not classroom.main_entry_location:
-                # Create a new Location record for this classroom
-                from ..models.location import Location
-                loc_id = f"auto_{classroom.name.replace(' ', '_')}_{lat}_{lon}"
-                new_loc = Location.objects.create(
-                    location_id=loc_id,
-                    name=f"{classroom.name} (Auto-Registered)",
-                    latitude=lat,
-                    longitude=lon,
-                    geofence_radius_meters=50,
-                    is_classroom_entry=True
-                )
-                classroom.main_entry_location = new_loc
-                classroom.save()
-            else:
-                # Update the existing location
-                loc = classroom.main_entry_location
-                loc.latitude = lat
-                loc.longitude = lon
-                loc.save()
-
         return Response({
             "message": "Attendance code generated successfully.",
             "code": code,

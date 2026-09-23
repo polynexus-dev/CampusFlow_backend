@@ -97,6 +97,7 @@ class RequestOTPView(APIView):
 
         # Generate 6-digit OTP
         otp_code = str(random.randint(100000, 999999))
+        # print("OTP CODE", otp_code)
         expiry_time = timezone.now() + datetime.timedelta(minutes=10)
 
         # Save to Cache (expires in 10 minutes)
@@ -1866,7 +1867,7 @@ class UserProfileView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_user_profile_by_user(user):
-    """Helper to get the profile object for any user based on their group."""
+    """Helper to get the profile object for any user based on their group or profile relations."""
     group = get_user_group(user)
     if group == 'student': return getattr(user, 'student_profile', None)
     if group == 'Faculty': return getattr(user, 'teaching_staff_profile', None)
@@ -1875,6 +1876,12 @@ def get_user_profile_by_user(user):
     if group == 'Administrator': return getattr(user, 'administrator_profile', None)
     if group == 'Department Head': return getattr(user, 'department_head_profile', None)
     if group == 'CA': return getattr(user, 'auditor_profile', None)
+
+    # Fallback to direct reverse relations if group is not set on the user yet
+    for attr in ('teaching_staff_profile', 'department_head_profile', 'non_teaching_staff_profile', 'student_profile', 'management_profile', 'administrator_profile', 'auditor_profile'):
+        profile = getattr(user, attr, None)
+        if profile is not None:
+            return profile
     return None
 
 def helper_update_employee_profile(profile, request, profile_field_names):
@@ -2025,6 +2032,20 @@ class ApproveUserView(APIView):
         target_group = get_user_group(target_user)
         target_profile = get_user_profile_by_user(target_user)
 
+        if not target_group and target_profile:
+            if hasattr(target_user, 'teaching_staff_profile'):
+                target_group = 'Faculty'
+            elif hasattr(target_user, 'department_head_profile'):
+                target_group = 'Department Head'
+            elif hasattr(target_user, 'non_teaching_staff_profile'):
+                target_group = getattr(target_user.non_teaching_staff_profile, 'staff_role', 'Support Staff') or 'Support Staff'
+            elif hasattr(target_user, 'student_profile'):
+                target_group = 'student'
+            elif hasattr(target_user, 'management_profile'):
+                target_group = 'Management'
+            elif hasattr(target_user, 'administrator_profile'):
+                target_group = 'Administrator'
+
         if not target_profile or target_profile.status != 'pending':
             return Response({"error": "User is not in a pending state."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2055,7 +2076,7 @@ class ApproveUserView(APIView):
             elif is_admin: # Admins can always override
                 authorized = True
         
-        elif target_group in NON_TEACHING_STAFF_ROLES:
+        elif target_group in NON_TEACHING_STAFF_ROLES or target_group == 'Support Staff':
             # Support Staff and every functional non-teaching role
             # (Librarian, Hostel Warden, ...) from Admin or HOD
             if is_admin:
@@ -2073,6 +2094,10 @@ class ApproveUserView(APIView):
         if action == 'approve':
             target_profile.status = 'active'
             target_user.is_active = True
+            if target_group:
+                from django.contrib.auth.models import Group
+                group_obj, _ = Group.objects.get_or_create(name=target_group)
+                target_user.groups.add(group_obj)
             msg = f"User {target_user.username} has been approved."
         else:
             target_profile.status = 'rejected'

@@ -45,20 +45,15 @@ class CheckAttendanceView(APIView):
         return Response({'detail': 'Method \"GET\" not allowed.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
-class ClassroomListView(APIView):
+class ClassroomListView(generics.ListCreateAPIView):
+    queryset = Classroom.objects.all()
+    serializer_class = ClassroomSerializer
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, *args, **kwargs):
-        classrooms = Classroom.objects.all()
-        classroomData = []
-        for classroom in classrooms:
-            classroomData.append({
-                'id': classroom.id,
-                'name': classroom.name,
-                # 'polygon': classroom.polygon.json,  # Commented out - requires GDAL
-                'created_at': classroom.created_at,
-            })
-        return Response(classroomData)
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAuthenticated(), IsSaaSOrCollegeAdmin()]
+        return [IsAuthenticated()]
     
 class ClassroomLocationValidationView(APIView):
     permission_classes = [IsAuthenticated]

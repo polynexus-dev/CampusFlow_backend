@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from ..models.assignment import Assignment
 from ..models.department import Department
 from ..models.course import Course
@@ -21,7 +21,7 @@ class AssignmentListCreateView(APIView):
     POST: Create a new assignment (Faculty/HOD/Admin only, supports file attachments).
     """
     permission_classes = ASSIGNMENT_PERMS
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
         ensure_tenant_schema(request)
@@ -132,7 +132,7 @@ class AssignmentDetailView(APIView):
     PUT/DELETE: Update or delete assignment (Owner or Admin only).
     """
     permission_classes = ASSIGNMENT_PERMS
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request, pk):
         try:

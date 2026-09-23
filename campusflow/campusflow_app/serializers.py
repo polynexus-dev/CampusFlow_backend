@@ -87,7 +87,7 @@ from .demo_guard import is_demo_tenant
 class ClassroomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Classroom
-        fields = ('id', 'name', 'code', 'main_entry_location',)
+        fields = ('id', 'name', 'code', 'capacity')
         read_only_fields = ('id',)
 
 class LectureSerializer(serializers.ModelSerializer):

@@ -1,5 +1,6 @@
 from django.db.models.signals import pre_save, post_save, post_delete
 from django.dispatch import receiver
+from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.utils import timezone
 from datetime import timedelta
@@ -102,7 +103,11 @@ def log_save(sender, instance, created, **kwargs):
 
     if request:
         if request.user and request.user.is_authenticated:
-            user = request.user
+            # Check if this user exists in the current tenant schema's auth_user table
+            if User.objects.filter(id=request.user.id).exists():
+                user = request.user
+            else:
+                user = None
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
         if x_forwarded_for:
             ip_address = x_forwarded_for.split(',')[0].strip()
@@ -139,18 +144,21 @@ def log_save(sender, instance, created, **kwargs):
         if not changes:
             return
 
-    AuditLog.objects.create(
-        user=user,
-        action=action,
-        model_name=sender.__name__,
-        object_id=str(instance.pk),
-        object_repr=str(instance)[:500],
-        changes=changes,
-        ip_address=ip_address,
-        user_agent=user_agent,
-        endpoint=endpoint
-    )
-    cleanup_old_audit_logs()
+    try:
+        AuditLog.objects.create(
+            user=user,
+            action=action,
+            model_name=sender.__name__,
+            object_id=str(instance.pk),
+            object_repr=str(instance)[:500],
+            changes=changes,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            endpoint=endpoint
+        )
+        cleanup_old_audit_logs()
+    except Exception:
+        pass
 
 
 @receiver(post_delete)
@@ -169,7 +177,10 @@ def log_delete(sender, instance, **kwargs):
 
     if request:
         if request.user and request.user.is_authenticated:
-            user = request.user
+            if User.objects.filter(id=request.user.id).exists():
+                user = request.user
+            else:
+                user = None
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
         if x_forwarded_for:
             ip_address = x_forwarded_for.split(',')[0].strip()
@@ -188,18 +199,21 @@ def log_delete(sender, instance, **kwargs):
             'new': None,
         }
 
-    AuditLog.objects.create(
-        user=user,
-        action='DELETE',
-        model_name=sender.__name__,
-        object_id=str(instance.pk),
-        object_repr=str(instance)[:500],
-        changes=changes,
-        ip_address=ip_address,
-        user_agent=user_agent,
-        endpoint=endpoint
-    )
-    cleanup_old_audit_logs()
+    try:
+        AuditLog.objects.create(
+            user=user,
+            action='DELETE',
+            model_name=sender.__name__,
+            object_id=str(instance.pk),
+            object_repr=str(instance)[:500],
+            changes=changes,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            endpoint=endpoint
+        )
+        cleanup_old_audit_logs()
+    except Exception:
+        pass
 
 
 # ── Library Management Signal Receivers ──

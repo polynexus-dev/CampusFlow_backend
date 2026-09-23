@@ -32,8 +32,13 @@ class CampusFlowTenantMiddleware(TenantMainMiddleware):
     def process_request(self, request):
         TenantModel = get_tenant_model()
 
-        # 1. Check for X-Tenant header (mobile apps set this after login)
-        tenant_schema = request.headers.get('X-Tenant')
+        # 1. Check for X-Tenant or X-Tenant-Schema header (Postman and mobile apps)
+        tenant_schema = (
+            request.headers.get('X-Tenant')
+            or request.headers.get('X-Tenant-Schema')
+            or request.META.get('HTTP_X_TENANT')
+            or request.META.get('HTTP_X_TENANT_SCHEMA')
+        )
         if tenant_schema:
             try:
                 tenant = TenantModel.objects.get(schema_name=tenant_schema)

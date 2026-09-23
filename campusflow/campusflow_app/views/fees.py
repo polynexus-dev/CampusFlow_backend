@@ -391,7 +391,7 @@ class RecordFeePaymentView(APIView):
             return Response({"error": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
 
         amount_paid = Decimal(str(request.data.get("amount_paid", 0)))
-        method = request.data.get("payment_method")
+        method = (request.data.get("payment_method") or request.data.get("payment_mode") or "").strip().lower()
 
         if amount_paid <= 0:
             return Response({"error": "amount_paid must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)

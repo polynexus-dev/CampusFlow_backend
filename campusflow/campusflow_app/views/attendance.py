@@ -169,8 +169,10 @@ class LectureCheckinByCodeView(APIView):
         if not lecture_lat or not lecture_lon:
              return Response({"detail": "This lecture does not have a geofence set by the faculty yet."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get radius from classroom (fallback to 50m)
-        radius = lecture.classroom.main_entry_location.geofence_radius_meters if (lecture.classroom.main_entry_location) else 50
+        # Default geofence radius to 50 meters
+        classroom = getattr(lecture, 'classroom', None)
+        main_entry = getattr(classroom, 'main_entry_location', None)
+        radius = main_entry.geofence_radius_meters if main_entry else 50
 
         distance = calculate_distance(
             float(check_in_lat), float(check_in_lon),
