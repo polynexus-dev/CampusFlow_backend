@@ -121,8 +121,14 @@ class IsHMOrAbove(BasePermission):
 
 
 class IsNotStudent(BasePermission):
-    """Any authenticated user except students."""
+    """Any authenticated staff user — not students, and not guardians either
+    (who are also outside the college's staff hierarchy)."""
     message = "Students are not allowed to access this resource."
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        return get_user_group(request.user) not in ('student', 'guardian')
 
 
 class IsCommitteeMember(BasePermission):

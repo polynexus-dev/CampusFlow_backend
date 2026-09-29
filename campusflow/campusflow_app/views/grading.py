@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 from ..models.academics import Term
 from ..models.grading import CourseGradeAward, StudentAcademicSummary, TermGradeSheet
 from ..models.profile import StudentProfile
-from ..permissions import IsHMOrAbove, is_faculty_or_above
+from ..permissions import RequiresModule, IsHMOrAbove, is_faculty_or_above
 from ..services.grading import publish_term_results
 
 
@@ -73,7 +73,7 @@ class PublishTermResultsView(APIView):
     touched here (see recompute_academic_records for an explicit correction).
     """
 
-    permission_classes = [IsAuthenticated, IsHMOrAbove]
+    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("academics")]
 
     def post(self, request, pk):
         term = Term.objects.filter(pk=pk).first()
@@ -102,7 +102,7 @@ class StudentTranscriptView(APIView):
     the running CGPA from StudentAcademicSummary.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("transcript")]
 
     def get(self, request, pk=None):
         if pk is None:

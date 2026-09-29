@@ -200,6 +200,9 @@ class DPDPComplianceTests(TenantTestCase):
         self.assertEqual(response.data['aadhaar_number'], '********9012')
 
     def test_face_registration_requires_consent(self):
+        # Face registration is gated by the premium 'attendance' module.
+        self.tenant.subscribed_modules = ['attendance']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             student_user = User.objects.create_user(
                 username='stu_face_test', email='facetest@test.com', password='Password123'
@@ -241,8 +244,9 @@ class DPDPComplianceTests(TenantTestCase):
         self.assertEqual(response_req.status_code, status.HTTP_200_OK)
 
         # Retrieve cached OTP
-        otp_code = self.dict_cache.get("forgot_otp_forgot@test.com")
-        self.assertIsNotNone(otp_code)
+        otp_entry = self.dict_cache.get(f"otp:forgot:{self.tenant.schema_name}:forgot@test.com")
+        self.assertIsNotNone(otp_entry)
+        otp_code = otp_entry["code"]
 
         # Step 2: Verify OTP
         url_ver = reverse('forgot_password_verify_otp')
@@ -2881,6 +2885,9 @@ class RosterCutoverTests(TenantTestCase):
         self.assertEqual(response.data["enrolled_count"], 3)
 
     def _teacher_token(self):
+        # Class stats are gated by the premium 'exams' module.
+        self.tenant.subscribed_modules = ['exams']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             Group.objects.get_or_create(name='Faculty')
             user = User.objects.create_user(

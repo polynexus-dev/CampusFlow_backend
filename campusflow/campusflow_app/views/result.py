@@ -9,7 +9,7 @@ from ..models.exam import Exam
 from ..models.offerings import CourseOffering, StudentCourseRegistration
 from ..models.profile import StudentProfile
 from ..serializers import StudentExamResultSerializer
-from ..permissions import IsFacultyOrAbove, get_user_group, is_faculty_or_above
+from ..permissions import RequiresModule, IsFacultyOrAbove, get_user_group, is_faculty_or_above
 from ..services.notifications import notify_guardians_of_student
 from ..services.abc_credit import record_credit_entry
 
@@ -26,8 +26,8 @@ class StudentExamResultViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.request.method not in ('GET', 'HEAD', 'OPTIONS'):
-            return [IsAuthenticated(), IsFacultyOrAbove()]
-        return [IsAuthenticated()]
+            return [IsAuthenticated(), IsFacultyOrAbove(), RequiresModule("exams")()]
+        return [IsAuthenticated(), RequiresModule("exams")()]
 
     def get_queryset(self):
         qs = StudentExamResult.objects.select_related(
@@ -67,7 +67,7 @@ class ExamClassStatsView(APIView):
     since "the roster isn't tracked" and "the roster is zero" are different
     facts a marks-entry screen needs to tell apart.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
 
     def get(self, request, pk):
         try:
@@ -120,7 +120,7 @@ class ExamPublishResultsView(APIView):
     Publishes all entered marks for this exam: locks direct edits and
     notifies the guardians of every student who has a result.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
 
     def post(self, request, pk):
         try:

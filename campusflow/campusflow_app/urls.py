@@ -2,7 +2,7 @@ from django.urls import path
 from tenants.views import InvoiceListAPIView, InvoiceUploadReceiptAPIView
 from campusflow_app.views.department import DepartmentView, DepartmentDetailView
 from campusflow_app.views.users import (
-    StudentUserProfileView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView,
+    StudentUserProfileView, StudentLookupView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView,
     MyObtainTokenPairView, LogoutAPIView, UserProfileView,
     ManagementUserProfileView, AdministratorUserProfileView,
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
@@ -30,7 +30,7 @@ from campusflow_app.views.lecturer_attendance import (
     LecturerBulkApproveManualRequestsView, LecturerDeviceResetRequestsView,
     LecturerApproveDeviceResetRequestView
 )
-from campusflow_app.views.classroom import ClassroomCreateView, CheckAttendanceView, ClassroomListView, ClassroomLocationValidationView
+from campusflow_app.views.classroom import ClassroomCreateView, ClassroomDetailView, CheckAttendanceView, ClassroomListView, ClassroomLocationValidationView
 from campusflow_app.views.lecture import (
     LectureListCreateView, LectureDetailView, LectureByClassroomView,
     GenerateLectureCodeView
@@ -54,6 +54,7 @@ from campusflow_app.views.schedule import ScheduleListView, TeacherTodaySchedule
 from campusflow_app.views.timetable_generation import (
     GenerateTimetableView, TimetableGenerationRunViewSet,
     ApplyTimetableGenerationRunView, DiscardTimetableGenerationRunView,
+    TimetableGenerationRunDraftView,
 )
 from campusflow_app.views.attendance_correction import (
     GuardianCreateCorrectionRequestView, TeacherCorrectionRequestListView,
@@ -168,7 +169,7 @@ from campusflow_app.views.valuation import (
 )
 from campusflow_app.views.result import StudentExamResultViewSet, ExamClassStatsView, ExamPublishResultsView
 from campusflow_app.views.result_correction import (
-    ResultCorrectionRequestCreateView, HMCorrectionRequestListView, HMCorrectionRequestActionView,
+    ResultCorrectionRequestCreateView, HMCorrectionRequestListView, MyCorrectionRequestListView, HMCorrectionRequestActionView,
 )
 from campusflow_app.views.syllabus_coverage import (
     MyOfferingsForCoverageView, OfferingCoverageChecklistView, HODOfferingCoverageListView,
@@ -215,6 +216,7 @@ from campusflow_app.views.audit_portal import (
 from campusflow_app.views.scholarship import StateScholarshipSchemeViewSet, StudentScholarshipRecordViewSet
 from campusflow_app.views.progress import StudentProgressView, StudentTopicPerformanceView, StudentInsightView
 from campusflow_app.views.contact import ContactEnquiryView
+from campusflow_app.views.sso import SSOHandoffCreateView, SSOHandoffRedeemView, TenantTokenRefreshView
 from campusflow_app.views.guardian import (
     ParentLinkChildView, ParentChildrenListView,
     ParentChildAttendanceView, ParentChildFeesView,
@@ -240,6 +242,10 @@ urlpatterns = [
     path('login/', MyObtainTokenPairView.as_view(), name='token_obtain_pair'),
     path('logout/', LogoutAPIView.as_view(), name='logout'),
     path('token/verify/', VerifyTokenView.as_view(), name='verify-token'),
+    # Renew an access token from a refresh token (web/mobile call this on 401).
+    path('token/refresh/', TenantTokenRefreshView.as_view(), name='token-refresh'),
+    path('auth/sso/handoff/', SSOHandoffCreateView.as_view(), name='sso-handoff'),
+    path('auth/sso/redeem/', SSOHandoffRedeemView.as_view(), name='sso-redeem'),
     path('student/reset-device-lock/', ResetDeviceLockView.as_view(), name='reset_device_lock'),
     path('student/request-biometric-reset/', RequestBiometricResetView.as_view(), name='request_biometric_reset'),
     
@@ -272,6 +278,7 @@ urlpatterns = [
     path('support-staff/user/', NonTeachingStaffUserProfileView.as_view(), name='non_teaching_staff_user_profile'),
     # GET all student profiles (Faculty and above only)
     path('student/user/', StudentUserProfileView.as_view(), name='student_user_profile'),
+    path('students/lookup/', StudentLookupView.as_view(), name='student-lookup'),
 
     # ── Department ────────────────────────────────────────────────────
     # GET list / POST create / DELETE all  (write: College Admins + SaaS Admin)
@@ -344,6 +351,7 @@ urlpatterns = [
     # POST create (College Admins+ only)
     path('classroom/', ClassroomCreateView.as_view(), name='ClassroomCreateView'),
     path('classrooms/', ClassroomListView.as_view(), name='classroom-list'),
+    path('classrooms/<int:pk>/', ClassroomDetailView.as_view(), name='classroom-detail'),
     path('attendance/check/', CheckAttendanceView.as_view(), name='CheckAttendanceView'),
     path('validate-location/', ClassroomLocationValidationView.as_view(), name='validate-location'),
 
@@ -402,6 +410,7 @@ urlpatterns = [
     path('timetable/generate/', GenerateTimetableView.as_view(), name='timetable-generate'),
     path('timetable-generation-runs/', TimetableGenerationRunViewSet.as_view({'get': 'list'}), name='timetablegenerationrun-list'),
     path('timetable-generation-runs/<int:pk>/', TimetableGenerationRunViewSet.as_view({'get': 'retrieve'}), name='timetablegenerationrun-detail'),
+    path('timetable-generation-runs/<int:pk>/draft-schedules/', TimetableGenerationRunDraftView.as_view(), name='timetablegenerationrun-drafts'),
     path('timetable-generation-runs/<int:pk>/apply/', ApplyTimetableGenerationRunView.as_view(), name='timetablegenerationrun-apply'),
     path('timetable-generation-runs/<int:pk>/discard/', DiscardTimetableGenerationRunView.as_view(), name='timetablegenerationrun-discard'),
 
@@ -656,6 +665,7 @@ urlpatterns = [
     path('exams/<int:pk>/publish-results/', ExamPublishResultsView.as_view(), name='exam-publish-results'),
     path('results/corrections/', ResultCorrectionRequestCreateView.as_view(), name='result-correction-create'),
     path('results/corrections/list/', HMCorrectionRequestListView.as_view(), name='result-correction-list'),
+    path('results/corrections/mine/', MyCorrectionRequestListView.as_view(), name='result-correction-mine'),
     path('results/corrections/<int:pk>/action/', HMCorrectionRequestActionView.as_view(), name='result-correction-action'),
 
     path('syllabus-coverage/my-offerings/', MyOfferingsForCoverageView.as_view(), name='syllabus-coverage-my-offerings'),

@@ -102,7 +102,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
-from campusflow_app.permissions import IsCollegeAdmin
+from campusflow_app.permissions import IsCollegeAdmin, IsSaaSAdmin
 from .models import Invoice
 from .serializers import InvoiceSerializer, InvoiceUploadReceiptSerializer
 
@@ -170,14 +170,14 @@ class SaaSInvoiceListAPIView(generics.ListAPIView):
     """
     queryset = Invoice.objects.all().order_by('-created_at')
     serializer_class = InvoiceSerializer
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, IsSaaSAdmin]
 
 
 class SaaSInvoiceApproveAPIView(APIView):
     """
     SaaS Admin only: Approve invoice payment and extend subscription.
     """
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, IsSaaSAdmin]
 
     def post(self, request, pk):
         invoice = Invoice.objects.filter(pk=pk).first()
@@ -230,7 +230,7 @@ class SaaSInvoiceRejectAPIView(APIView):
     """
     SaaS Admin only: Reject invoice receipt screenshot.
     """
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, IsSaaSAdmin]
 
     def post(self, request, pk):
         invoice = Invoice.objects.filter(pk=pk).first()

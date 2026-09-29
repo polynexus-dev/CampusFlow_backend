@@ -87,8 +87,17 @@ from .demo_guard import is_demo_tenant
 class ClassroomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Classroom
-        fields = ('id', 'name', 'code', 'capacity')
+        fields = ('id', 'name', 'code', 'capacity', 'boundary')
         read_only_fields = ('id',)
+
+    def validate_boundary(self, value):
+        from .utils.geofence import validate_boundary
+        if value is None:
+            return value
+        error = validate_boundary(value)
+        if error:
+            raise serializers.ValidationError(error)
+        return [[float(lat), float(lng)] for lat, lng in value]
 
 class LectureSerializer(serializers.ModelSerializer):
     classroom_name = serializers.CharField(source='classroom.name', read_only=True)
@@ -126,6 +135,10 @@ class LocationValidationSerializer(serializers.Serializer):
     classroom_id = serializers.IntegerField()
     latitude = serializers.DecimalField(max_digits=9, decimal_places=6)
     longitude = serializers.DecimalField(max_digits=9, decimal_places=6)
+
+LOGIN_MAX_FAILURES = 10
+LOGIN_LOCKOUT_SECONDS = 15 * 60
+
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -247,14 +260,35 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                             cache.set(cache_key, tenant.schema_name, 86400)
                             break
 
+        # Same message for "no such user" and "wrong password", so the login
+        # form can't be used to discover which usernames/emails exist.
         if not user:
-            raise serializers.ValidationError(f"{username} does not exist", code='not_found')
+            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
 
         # Switch context to the target tenant's schema for the rest of this request
         if target_tenant and target_tenant.schema_name != connection.schema_name:
             connection.set_tenant(target_tenant)
             # Re-fetch user in the active tenant connection context
             user = User.objects.get(id=user.id)
+
+        # Password first, before anything below reveals account status or
+        # auto-creates groups/profiles. Accounts lock for LOGIN_LOCKOUT_SECONDS
+        # after LOGIN_MAX_FAILURES wrong passwords, on top of the per-IP throttle.
+        lockout_key = f"login_failures:{connection.schema_name}:{user.id}"
+        failures = cache.get(lockout_key) or 0
+        if failures >= LOGIN_MAX_FAILURES:
+            raise serializers.ValidationError(
+                "Too many failed login attempts. Please try again in 15 minutes or reset your password.",
+                code='account_locked',
+            )
+        if not user.check_password(password):
+            cache.set(lockout_key, failures + 1, timeout=LOGIN_LOCKOUT_SECONDS)
+            log_account_event(
+                user, 'LOGIN_FAILED', request=request, ip_address=client_ip, user_agent=user_agent_string,
+                object_repr=f"Failed login attempt for {user.username} (wrong password)",
+            )
+            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
+        cache.delete(lockout_key)
 
         profile_data = None
         user_group = None
@@ -382,13 +416,6 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                     f"Your account status is '{profile_data.status}'. Please contact administration.",
                     code='account_inactive'
                 )
-
-        if not user.check_password(password):
-            log_account_event(
-                user, 'LOGIN_FAILED', request=request, ip_address=client_ip, user_agent=user_agent_string,
-                object_repr=f"Failed login attempt for {user.username} (wrong password)",
-            )
-            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
 
         attrs['username'] = user.username
         data = super().validate(attrs)

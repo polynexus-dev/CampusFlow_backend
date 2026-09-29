@@ -62,10 +62,20 @@ class CommitteeMembershipViewSet(viewsets.ModelViewSet):
     IsCommitteeMember checks against."""
     queryset = CommitteeMembership.objects.select_related("committee", "user").all()
     serializer_class = CommitteeMembershipSerializer
-    permission_classes = COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]
+
+    def get_permissions(self):
+        # Members may read the membership of committees they sit on (to pick
+        # meeting attendees); appointing/removing members stays admin-only.
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated()]
+        return [permission() for permission in COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]]
 
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        if not is_saas_or_college_admin(user):
+            member_committee_ids = CommitteeMembership.objects.filter(user=user).values_list("committee_id", flat=True)
+            qs = qs.filter(committee_id__in=member_committee_ids)
         committee = self.request.query_params.get("committee")
         if committee:
             qs = qs.filter(committee_id=committee)

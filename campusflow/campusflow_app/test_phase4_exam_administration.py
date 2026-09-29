@@ -41,8 +41,11 @@ from .services.detention import is_student_detained
 
 class _Phase4FixtureMixin:
     def _build_fixture(self):
-        for role in ("Administrator",):
+        for role in ("Administrator", "student"):
             Group.objects.get_or_create(name=role)
+        # Exam administration endpoints are gated by the 'exams' module.
+        self.tenant.subscribed_modules = ["exams"]
+        self.tenant.save(update_fields=["subscribed_modules"])
 
         self.dept = Department.objects.create(name="Computer Science", code="CSE")
         self.admin_user = User.objects.create_user(username="admin1", password="pw12345!")
@@ -53,6 +56,7 @@ class _Phase4FixtureMixin:
         self.faculty_user = faculty_user
 
         student_user = User.objects.create_user(username="stu1", password="pw12345!", email="stu1@test.com")
+        student_user.groups.add(Group.objects.get(name="student"))
         self.student = StudentProfile.objects.create(user=student_user, student_id="STU001", department=self.dept)
 
         self.academic_year = AcademicYear.objects.create(

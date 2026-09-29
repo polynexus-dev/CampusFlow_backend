@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import ResultCorrectionRequest, StudentExamResult
-from ..permissions import IsFacultyOrAbove, IsHMOrAbove, is_college_admin
+from ..permissions import RequiresModule, IsFacultyOrAbove, IsHMOrAbove, is_college_admin
 from ..services.notifications import notify_user, notify_guardians_of_student
 
 
@@ -30,6 +30,8 @@ def _serialize(req):
         "status": req.status,
         "requested_by": req.requested_by.get_full_name() or req.requested_by.username,
         "requested_at": req.requested_at.isoformat(),
+        "reviewed_by": (req.reviewed_by.get_full_name() or req.reviewed_by.username) if req.reviewed_by else None,
+        "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
     }
 
 
@@ -38,7 +40,7 @@ class ResultCorrectionRequestCreateView(APIView):
     POST /api/results/corrections/
     Payload: {result_id, proposed_marks, reason}
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
 
     def post(self, request):
         result_id = request.data.get("result_id")
@@ -76,7 +78,7 @@ class HMCorrectionRequestListView(APIView):
     Pending correction requests, scoped to the HM's own department when
     they're a Department Head, or all for College Admin/SaaS Admin.
     """
-    permission_classes = [IsAuthenticated, IsHMOrAbove]
+    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("exams")]
 
     def get(self, request):
         qs = ResultCorrectionRequest.objects.filter(
@@ -100,7 +102,7 @@ class HMCorrectionRequestActionView(APIView):
     POST /api/results/corrections/<id>/action/
     Payload: {action: "approve" | "reject"}
     """
-    permission_classes = [IsAuthenticated, IsHMOrAbove]
+    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("exams")]
 
     def post(self, request, pk):
         try:
@@ -150,3 +152,18 @@ class HMCorrectionRequestActionView(APIView):
         )
 
         return Response(_serialize(correction), status=status.HTTP_200_OK)
+
+
+class MyCorrectionRequestListView(APIView):
+    """
+    GET /api/results/corrections/mine/
+    The logged-in teacher's own correction requests, every status, newest
+    first — so they can see whether the HOD approved or rejected them.
+    """
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
+
+    def get(self, request):
+        qs = ResultCorrectionRequest.objects.filter(requested_by=request.user).select_related(
+            "result__student__user", "result__exam", "requested_by", "reviewed_by",
+        ).order_by("-requested_at")[:200]
+        return Response({"results": [_serialize(r) for r in qs]}, status=status.HTTP_200_OK)

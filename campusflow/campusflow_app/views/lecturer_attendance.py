@@ -10,7 +10,7 @@ from ..models.lecture import Lecture
 from ..models.attendance import Attendance
 from ..models.attendance_session import AttendanceSession
 from ..models.manual_attendance_request import ManualAttendanceRequest
-from ..permissions import IsFacultyOrAbove
+from ..permissions import RequiresModule, IsFacultyOrAbove
 
 class IsFaculty(permissions.BasePermission):
     """
@@ -28,7 +28,7 @@ class LecturerCheckInView(APIView):
     POST /api/lecturer/check-in/
     Allows lecturer to check in. Sets the geofence coordinate center.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFaculty]
+    permission_classes = [permissions.IsAuthenticated, IsFaculty, RequiresModule("attendance")]
 
     def post(self, request):
         lecture_id = request.data.get("lecture_id")
@@ -76,7 +76,7 @@ class LecturerStartSessionView(APIView):
     POST /api/lecturer/start-attendance/
     Starts a 3-minute student verify-in session.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFaculty]
+    permission_classes = [permissions.IsAuthenticated, IsFaculty, RequiresModule("attendance")]
 
     def post(self, request):
         lecture_id = request.data.get("lecture_id")
@@ -124,7 +124,7 @@ class LecturerAttendanceStatusView(APIView):
     GET /api/lecturer/status/?lecture_id=...
     Returns real-time session status, countdown, and student verify lists.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFaculty]
+    permission_classes = [permissions.IsAuthenticated, IsFaculty, RequiresModule("attendance")]
 
     def get(self, request):
         lecture_id = request.query_params.get("lecture_id")
@@ -181,7 +181,7 @@ class LecturerManualRequestsView(APIView):
     GET /api/lecturer/manual-requests/?lecture_id=...
     Lists all pending manual requests for review.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFaculty]
+    permission_classes = [permissions.IsAuthenticated, IsFaculty, RequiresModule("attendance")]
 
     def get(self, request):
         lecture_id = request.query_params.get("lecture_id")
@@ -208,7 +208,7 @@ class LecturerApproveManualRequestView(APIView):
     POST /api/lecturer/approve-manual-request/
     Approves or rejects a student's manual attendance request.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFaculty]
+    permission_classes = [permissions.IsAuthenticated, IsFaculty, RequiresModule("attendance")]
 
     def post(self, request):
         request_id = request.data.get("request_id")
@@ -253,7 +253,7 @@ class LecturerConductedHistoryView(APIView):
     Retrieves history of lectures conducted by the logged-in lecturer.
     Allows filtering by year, month, and day query parameters.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFaculty]
+    permission_classes = [permissions.IsAuthenticated, IsFaculty, RequiresModule("attendance")]
 
     def get(self, request):
         user = request.user
@@ -321,7 +321,7 @@ class LecturerBulkApproveManualRequestsView(APIView):
     POST /api/lecturer/bulk-approve-manual-requests/
     Allows lecturer to bulk approve/reject multiple student manual requests.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [permissions.IsAuthenticated, IsFacultyOrAbove, RequiresModule("attendance")]
 
     def post(self, request):
         request_ids = request.data.get("request_ids", [])
@@ -371,7 +371,7 @@ class LecturerDeviceResetRequestsView(APIView):
     GET /api/lecturer/device-resets/
     Lists all pending biometric/device reset requests.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [permissions.IsAuthenticated, IsFacultyOrAbove, RequiresModule("attendance")]
 
     def get(self, request):
         from ..models.device_reset import DeviceResetRequest
@@ -402,7 +402,7 @@ class LecturerApproveDeviceResetRequestView(APIView):
     POST /api/lecturer/approve-device-reset/
     Approves or rejects a student's device reset request.
     """
-    permission_classes = [permissions.IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [permissions.IsAuthenticated, IsFacultyOrAbove, RequiresModule("attendance")]
 
     def post(self, request):
         from ..models.device_reset import DeviceResetRequest

@@ -1,12 +1,16 @@
 # ── Standard Library Imports ──────────────────────────────────────────────────
 import datetime
+import hmac
 import math
 import random
+import secrets
 import uuid
 
 # ── Django Core Imports ──────────────────────────────────────────────────────
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
 from django.db import connection, transaction
 from django.utils import timezone
@@ -44,6 +48,7 @@ from ..permissions import (
     NON_TEACHING_STAFF_ROLES,
     get_user_group,
     is_college_admin,
+    is_faculty_or_above,
     is_saas_admin,
 )
 from ..serializers import (
@@ -52,21 +57,125 @@ from ..serializers import (
     UserRegistrationSerializer,
 )
 from ..utils import mask_sensitive_field
+from ..throttling import AuthScopedRateThrottle
+
+
+# ── One-time codes ───────────────────────────────────────────────────────────
+# Keys are scoped to the college schema (the cache is shared by every tenant),
+# a code dies after OTP_MAX_ATTEMPTS wrong guesses, and at most
+# OTP_MAX_ISSUED_PER_HOUR codes can be sent to one email per purpose per hour.
+# Together with the per-IP throttles on these views, that makes guessing a
+# 6-digit code impractical (it used to allow unlimited guesses for 10 minutes).
+OTP_TTL_SECONDS = 600
+OTP_MAX_ATTEMPTS = 5
+OTP_MAX_ISSUED_PER_HOUR = 5
+GENERIC_OTP_SENT = "If an account exists for this email, a verification code has been sent."
+
+
+class OtpRateLimited(Exception):
+    pass
+
+
+def _otp_key(purpose, email):
+    return f"otp:{purpose}:{connection.schema_name}:{email}"
+
+
+def issue_otp(purpose, email):
+    issued_key = f"otp_issued:{purpose}:{connection.schema_name}:{email}"
+    issued = cache.get(issued_key) or 0
+    if issued >= OTP_MAX_ISSUED_PER_HOUR:
+        raise OtpRateLimited()
+    cache.set(issued_key, issued + 1, timeout=3600)
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    cache.set(_otp_key(purpose, email), {"code": code, "attempts": 0}, timeout=OTP_TTL_SECONDS)
+    return code
+
+
+def check_otp(purpose, email, provided):
+    """True (and the code is consumed) only for a correct, unexpired code."""
+    key = _otp_key(purpose, email)
+    entry = cache.get(key)
+    if not isinstance(entry, dict):
+        return False
+    if hmac.compare_digest(entry["code"], str(provided or "")):
+        cache.delete(key)
+        return True
+    entry["attempts"] += 1
+    if entry["attempts"] >= OTP_MAX_ATTEMPTS:
+        cache.delete(key)
+    else:
+        cache.set(key, entry, timeout=OTP_TTL_SECONDS)
+    return False
+
+
+def otp_rate_limited_response():
+    return Response(
+        {"error": "Too many codes requested for this email. Please try again in an hour."},
+        status=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+
+
+def route_to_tenant_by_email(email):
+    """
+    On the public schema, switch this request to the college whose permitted
+    email domain matches `email`. Returns an error Response, or None when the
+    request is now (or already was) on a college schema.
+    """
+    if connection.schema_name != 'public':
+        return None
+    if not email or '@' not in email:
+        return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
+    from tenants.models import Tenant
+    target_tenant = Tenant.objects.filter(permitted_email_domain=email.split('@')[-1]).first()
+    if not target_tenant:
+        return Response(
+            {"error": f"No college registration is configured for the email domain '@{email.split('@')[-1]}'."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    connection.set_tenant(target_tenant)
+    return None
+
+
+def password_error_response(password, user=None):
+    try:
+        validate_password(password, user=user)
+    except DjangoValidationError as e:
+        return Response({"error": " ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+    return None
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class MyObtainTokenPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'login'
 
 
 class VerifyTokenView(APIView):
+    """
+    POST {token} -> 200 if it's a valid, unexpired access token issued for the
+    college this request is routed to; 401 otherwise. The web app's
+    ProtectedRoute relies on this (it used to accept any non-empty string).
+    """
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     def post(self, request, *args, **kwargs):
+        from rest_framework_simplejwt.exceptions import TokenError
+        from rest_framework_simplejwt.tokens import AccessToken
+
         token = request.data.get('token')
-        if token:
-            return Response({'message': 'Token is valid.'}, status=status.HTTP_200_OK)
-        return Response({'error': 'Invalid token.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not token:
+            return Response({'error': 'Token is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            access = AccessToken(token)
+        except TokenError:
+            return Response({'error': 'Invalid or expired token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # A token from one college must not validate on another's schema.
+        if connection.schema_name != 'public' and access.get('tenant_schema') != connection.schema_name:
+            return Response({'error': 'Token was issued for a different college.'}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({'message': 'Token is valid.'}, status=status.HTTP_200_OK)
 
 
 class RequestOTPView(APIView):
@@ -75,6 +184,8 @@ class RequestOTPView(APIView):
     If role is 'student', it checks if the email domain is allowed.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
@@ -95,13 +206,13 @@ class RequestOTPView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-        # Generate 6-digit OTP
-        otp_code = str(random.randint(100000, 999999))
-        # print("OTP CODE", otp_code)
-        expiry_time = timezone.now() + datetime.timedelta(minutes=10)
-
-        # Save to Cache (expires in 10 minutes)
-        cache.set(f"otp_{email}", otp_code, timeout=600)
+        error = route_to_tenant_by_email(email)
+        if error:
+            return error
+        try:
+            otp_code = issue_otp("verify", email)
+        except OtpRateLimited:
+            return otp_rate_limited_response()
 
         # Send Email via Brevo (SMTP)
         try:
@@ -115,11 +226,8 @@ class RequestOTPView(APIView):
                 fail_silently=False,
             )
             return Response({"message": f"OTP sent successfully to {email}."}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response(
-                {"error": f"Failed to send email. Please check SMTP settings. Detail: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        except Exception:
+            return Response({"error": "Failed to send email. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class StudentRegistrationView(generics.CreateAPIView):
@@ -129,6 +237,8 @@ class StudentRegistrationView(generics.CreateAPIView):
     """
     serializer_class = UserRegistrationSerializer
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp'
 
     def post(self, request, *args, **kwargs):
         # Force the role to 'student' to prevent role escalation
@@ -191,8 +301,10 @@ class StudentRegistrationView(generics.CreateAPIView):
             )
 
         # ── Generate & Send Activation OTP ──
-        otp_code = str(random.randint(100000, 999999))
-        cache.set(f"otp_{new_user.email}", otp_code, timeout=600)
+        try:
+            otp_code = issue_otp("verify", new_user.email.lower())
+        except OtpRateLimited:
+            return otp_rate_limited_response()
 
         try:
             send_mail(
@@ -264,9 +376,10 @@ class StaffRegistrationView(generics.CreateAPIView):
         new_user = serializer.save()
 
         # ── Generate OTP for staff activation (optional, but consistent) ──
-        otp_code = str(random.randint(100000, 999999))
-        cache.set(f"otp_{new_user.email}", otp_code, timeout=600)
+        # Best effort: the account exists either way, and a new code can be
+        # requested via resend-otp if this one isn't sent.
         try:
+            otp_code = issue_otp("verify", new_user.email.lower())
             send_mail("CampusFlow Staff Account Created", f"Account created for {role} role. OTP: {otp_code}", None, [new_user.email])
         except Exception:
             pass
@@ -286,6 +399,8 @@ class VerifyAccountView(APIView):
     Verify the OTP sent to the user's email and activate their account.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp_verify'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
@@ -294,9 +409,10 @@ class VerifyAccountView(APIView):
         if not email or not otp_provided:
             return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Verify OTP from cache
-        cached_otp = cache.get(f"otp_{email}")
-        if not cached_otp or cached_otp != otp_provided:
+        error = route_to_tenant_by_email(email)
+        if error:
+            return error
+        if not check_otp("verify", email, otp_provided):
             return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Activate the user
@@ -318,7 +434,6 @@ class VerifyAccountView(APIView):
             if profile:
                 profile.status = 'active'
                 profile.save()
-        cache.delete(f"otp_{email}")
 
         return Response({"message": "Account activated successfully! You can now log in."}, status=status.HTTP_200_OK)
 
@@ -328,25 +443,32 @@ class ResendOTPView(APIView):
     Resend the activation OTP to the user's email.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
         if not email:
             return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        error = route_to_tenant_by_email(email)
+        if error:
+            return error
+
+        # Same reply whether or not the account exists / is already active,
+        # so this endpoint can't be used to discover registered emails.
         user = User.objects.filter(email=email).first()
-        if not user:
-            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not user or user.is_active:
+            return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
 
-        if user.is_active:
-            return Response({"error": "Account is already active."}, status=status.HTTP_400_BAD_REQUEST)
-
-        otp_code = str(random.randint(100000, 999999))
-        cache.set(f"otp_{email}", otp_code, timeout=600)
+        try:
+            otp_code = issue_otp("verify", email)
+        except OtpRateLimited:
+            return otp_rate_limited_response()
 
         try:
             send_mail("Verify your CampusFlow Account", f"Your verification code is: {otp_code}", None, [email])
-            return Response({"message": "OTP resent successfully."}, status=status.HTTP_200_OK)
+            return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
         except Exception:
             return Response({"error": "Failed to send email."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -356,6 +478,8 @@ class StudentOnboardRequestOTPView(APIView):
     Onboarding: Request a 6-digit OTP for pre-created student accounts.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
@@ -385,9 +509,10 @@ class StudentOnboardRequestOTPView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Generate 6-digit OTP
-        otp_code = str(random.randint(100000, 999999))
-        cache.set(f"onboard_otp_{email}", otp_code, timeout=600)
+        try:
+            otp_code = issue_otp("onboard", email)
+        except OtpRateLimited:
+            return otp_rate_limited_response()
 
         # Send Email with HTML template
         try:
@@ -419,10 +544,7 @@ class StudentOnboardRequestOTPView(APIView):
                 )
                 return Response({"message": "OTP sent successfully to your college email (text fallback)."}, status=status.HTTP_200_OK)
             except Exception as ex:
-                return Response(
-                    {"error": f"Failed to send email. Please check configuration. Detail: {str(ex)}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+                return Response({"error": "Failed to send email. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class StudentOnboardVerifyPasswordView(APIView):
@@ -430,6 +552,8 @@ class StudentOnboardVerifyPasswordView(APIView):
     Onboarding: Verify OTP, set new password, and log user in (returning JWT token).
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp_verify'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
@@ -462,15 +586,17 @@ class StudentOnboardVerifyPasswordView(APIView):
         if is_demo_tenant():
             return demo_block_response()
 
-        # Verify OTP
-        cached_otp = cache.get(f"onboard_otp_{email}")
-        if not cached_otp or cached_otp != otp_provided:
-            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
-
         # Fetch student user
         user = User.objects.filter(email=email).first()
         if not user or not hasattr(user, 'student_profile'):
-            return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        error = password_error_response(password, user)
+        if error:
+            return error
+
+        if not check_otp("onboard", email, otp_provided):
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         student_profile = user.student_profile
 
@@ -486,8 +612,6 @@ class StudentOnboardVerifyPasswordView(APIView):
         student_profile.consent_version = 'v1.0'
         student_profile.save(update_fields=['consent_given', 'consent_timestamp', 'consent_version'])
 
-        # Cleanup OTP cache
-        cache.delete(f"onboard_otp_{email}")
 
         # Automatically log the student in and return JWT tokens for seamless access
         from rest_framework_simplejwt.tokens import RefreshToken
@@ -509,6 +633,8 @@ class ForgotPasswordRequestOTPView(APIView):
     Password Recovery: Step 1: Send a password reset OTP over college email.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
@@ -533,17 +659,16 @@ class ForgotPasswordRequestOTPView(APIView):
         if is_demo_tenant():
             return demo_block_response()
 
-        # Check if the user exists
+        # Same reply whether or not the account exists, so this endpoint
+        # can't be used to discover registered emails.
         user = User.objects.filter(email=email).first()
         if not user:
-            return Response(
-                {"error": "No user account exists with this email address."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
 
-        # Generate 6-digit OTP
-        otp_code = str(random.randint(100000, 999999))
-        cache.set(f"forgot_otp_{email}", otp_code, timeout=600)
+        try:
+            otp_code = issue_otp("forgot", email)
+        except OtpRateLimited:
+            return otp_rate_limited_response()
 
         # Send Email
         try:
@@ -563,7 +688,7 @@ class ForgotPasswordRequestOTPView(APIView):
             msg.attach_alternative(html_content, "text/html")
             msg.send()
 
-            return Response({"message": "Password reset OTP sent to your email."}, status=status.HTTP_200_OK)
+            return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
         except Exception as e:
             try:
                 send_mail(
@@ -572,12 +697,9 @@ class ForgotPasswordRequestOTPView(APIView):
                     None,
                     [email]
                 )
-                return Response({"message": "Password reset OTP sent to your email (fallback)."}, status=status.HTTP_200_OK)
-            except Exception as ex:
-                return Response(
-                    {"error": f"Failed to send email. Detail: {str(ex)}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+                return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
+            except Exception:
+                return Response({"error": "Failed to send email. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class ForgotPasswordVerifyOTPView(APIView):
@@ -585,6 +707,8 @@ class ForgotPasswordVerifyOTPView(APIView):
     Password Recovery: Step 2: Verify OTP and return a temporary single-use Reset Token.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp_verify'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
@@ -611,15 +735,12 @@ class ForgotPasswordVerifyOTPView(APIView):
         if is_demo_tenant():
             return demo_block_response()
 
-        # Check OTP
-        cached_otp = cache.get(f"forgot_otp_{email}")
-        if not cached_otp or cached_otp != otp_provided:
+        if not check_otp("forgot", email, otp_provided):
             return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Generate a secure single-use reset token
-        reset_token = uuid.uuid4().hex
-        cache.set(f"reset_token_{email}", reset_token, timeout=600)
-        cache.delete(f"forgot_otp_{email}")
+        reset_token = secrets.token_urlsafe(32)
+        cache.set(f"reset_token:{connection.schema_name}:{email}", reset_token, timeout=600)
 
         return Response({
             "message": "OTP verified successfully. You can now set your new password.",
@@ -632,6 +753,8 @@ class ForgotPasswordResetView(APIView):
     Password Recovery: Step 3: Complete password reset using the token.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp_verify'
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
@@ -663,21 +786,26 @@ class ForgotPasswordResetView(APIView):
             return demo_block_response()
 
         # Verify the reset token
-        cached_token = cache.get(f"reset_token_{email}")
-        if not cached_token or cached_token != reset_token:
+        token_key = f"reset_token:{connection.schema_name}:{email}"
+        cached_token = cache.get(token_key)
+        if not cached_token or not hmac.compare_digest(cached_token, reset_token):
             return Response({"error": "Invalid, expired, or compromised reset token."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get User
         user = User.objects.filter(email=email).first()
         if not user:
-            return Response({"error": "User account not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Invalid, expired, or compromised reset token."}, status=status.HTTP_400_BAD_REQUEST)
+
+        error = password_error_response(password, user)
+        if error:
+            return error
 
         # Update Password
         user.set_password(password)
         user.save()
 
-        # Cleanup token cache
-        cache.delete(f"reset_token_{email}")
+        # Single use
+        cache.delete(token_key)
 
         return Response({"message": "Password reset completed successfully. You can now log in with your new password."}, status=status.HTTP_200_OK)
 
@@ -1109,6 +1237,49 @@ class TeachingStaffUserProfileView(APIView):
             return Response({"error": "Faculty profile not found."}, status=status.HTTP_404_NOT_FOUND)
             
         return helper_delete_employee_profile(profile)
+
+
+# Staff roles whose day job involves looking students up without being
+# faculty (e.g. the Scholarship Officer adding a scholarship record).
+STUDENT_LOOKUP_MODULES = {"scholarship", "fees", "library", "hostel", "clearance", "tpo", "admissions", "bus-tracking"}
+
+
+class StudentLookupView(APIView):
+    """
+    GET /api/students/lookup/?search=<text>
+    Minimal student search for pickers: id, user_id, student_id, name and
+    department only (no PII). Open to Faculty-and-above, plus non-teaching
+    staff whose role has one of STUDENT_LOOKUP_MODULES — the full
+    student/user/ list stays Faculty-and-above.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Q
+        from .module_permissions import get_effective_allowed_modules
+
+        user = request.user
+        if get_user_group(user) in ('student', 'guardian') or not (
+            is_faculty_or_above(user) or STUDENT_LOOKUP_MODULES & get_effective_allowed_modules(user)
+        ):
+            return Response({"error": "You do not have permission to look up students."}, status=status.HTTP_403_FORBIDDEN)
+
+        search = (request.query_params.get('search') or '').strip()
+        if len(search) < 2:
+            return Response({"results": []}, status=status.HTTP_200_OK)
+
+        qs = StudentProfile.objects.select_related('user', 'department').filter(
+            Q(student_id__icontains=search) | Q(user__username__icontains=search)
+            | Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search)
+            | Q(user__email__icontains=search)
+        )[:25]
+        return Response({"results": [{
+            "id": s.id,
+            "user_id": s.user_id,
+            "student_id": s.student_id,
+            "name": s.user.get_full_name() or s.user.username,
+            "department": s.department.name if s.department else None,
+        } for s in qs]}, status=status.HTTP_200_OK)
 
 
 class StudentUserProfileView(APIView):

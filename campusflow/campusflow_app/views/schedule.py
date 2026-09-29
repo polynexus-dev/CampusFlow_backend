@@ -9,12 +9,12 @@ from ..models.schedule import Schedule
 from ..models.lecture import Lecture
 from ..models.attendance import Attendance
 from ..serializers import ScheduleSerializer
-from ..permissions import get_user_group, is_saas_admin, IsFacultyOrAbove
+from ..permissions import RequiresModule, get_user_group, is_saas_admin, IsFacultyOrAbove
 from ..utils.tenant_utils import ensure_tenant_schema
 
 
 class ScheduleListView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("schedule")]
 
     def get(self, request):
         # Ensure we're on the correct tenant schema (JWT fallback for IP-based requests)
@@ -103,7 +103,7 @@ class TeacherTodayScheduleView(APIView):
     attendance-marked count so the Teacher App's timetable screen can show
     "attendance pending" the way the design does.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("schedule")]
 
     def get(self, request):
         ensure_tenant_schema(request)

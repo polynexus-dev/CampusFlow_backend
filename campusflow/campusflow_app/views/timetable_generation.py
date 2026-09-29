@@ -113,3 +113,44 @@ class DiscardTimetableGenerationRunView(APIView):
         run.save(update_fields=["status"])
 
         return Response(TimetableGenerationRunSerializer(run).data)
+
+
+DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+class TimetableGenerationRunDraftView(APIView):
+    """
+    GET /timetable-generation-runs/<int:pk>/draft-schedules/
+    The slots a run produced, so an admin can review them before applying.
+    Returns the run's schedule rows whether still draft or already applied.
+    """
+    permission_classes = TIMETABLE_PERMS
+
+    def get(self, request, pk):
+        try:
+            run = TimetableGenerationRun.objects.get(pk=pk)
+        except TimetableGenerationRun.DoesNotExist:
+            return Response({"error": "Generation run not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        rows = (
+            Schedule.objects.filter(generation_run=run)
+            .select_related("course", "faculty", "classroom")
+        )
+        slots = sorted(
+            (
+                {
+                    "id": r.id,
+                    "day_of_week": r.day_of_week,
+                    "start_time": r.start_time.strftime("%H:%M"),
+                    "end_time": r.end_time.strftime("%H:%M"),
+                    "course_code": r.course.course_code,
+                    "course_name": r.course.course_name,
+                    "faculty": r.faculty.get_full_name() or r.faculty.username,
+                    "classroom": r.classroom.name if r.classroom else None,
+                    "is_draft": r.is_draft,
+                }
+                for r in rows
+            ),
+            key=lambda x: (DAY_ORDER.index(x["day_of_week"]) if x["day_of_week"] in DAY_ORDER else 99, x["start_time"]),
+        )
+        return Response({"run_id": run.id, "status": run.status, "slots": slots}, status=status.HTTP_200_OK)

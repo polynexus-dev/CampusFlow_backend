@@ -28,6 +28,7 @@ from ..models.attendance_log import FaceAttendanceLog
 from ..models.lecture import Lecture
 from ..models.attendance import Attendance
 from ..models.profile import StudentProfile
+from ..permissions import RequiresModule
 from ..serializers import (
     FaceRegistrationSerializer,
     MarkAttendanceSerializer,
@@ -62,7 +63,7 @@ class FaceRegistrationView(APIView):
     embeddings, and store them in the database.
     """
 
-    permission_classes = [IsStudent]
+    permission_classes = [IsStudent, RequiresModule("attendance")]
 
     @transaction.atomic
     def post(self, request):
@@ -168,7 +169,7 @@ class LivenessChallengeView(APIView):
     Issue a random, single-use liveness challenge for the upcoming attendance capture.
     """
 
-    permission_classes = [IsStudent]
+    permission_classes = [IsStudent, RequiresModule("attendance")]
 
     def get(self, request):
         challenge_type = secrets.choice(_CHALLENGE_TYPES)
@@ -196,7 +197,7 @@ class MarkAttendanceView(APIView):
     the attendance log.
     """
 
-    permission_classes = [IsStudent]
+    permission_classes = [IsStudent, RequiresModule("attendance")]
 
     def post(self, request):
         serializer = MarkAttendanceSerializer(data=request.data)
@@ -509,7 +510,7 @@ class AttendanceHistoryView(generics.ListAPIView):
     """
 
     serializer_class = FaceAttendanceLogSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, RequiresModule("attendance")]
 
     def get_queryset(self):
         user = self.request.user
@@ -544,7 +545,7 @@ class StudentRequestManualAttendanceView(APIView):
     POST /api/student/request-manual-attendance/
     Allows a student to request manual attendance review from the lecturer.
     """
-    permission_classes = [permissions.IsAuthenticated, IsStudent]
+    permission_classes = [permissions.IsAuthenticated, IsStudent, RequiresModule("attendance")]
 
     def post(self, request):
         lecture_id = request.data.get("lecture_id")
@@ -589,7 +590,7 @@ class StudentManualRequestStatusView(APIView):
     GET /api/student/manual-request-status/?lecture_id=...
     Checks the status of the student's manual attendance request for a specific lecture.
     """
-    permission_classes = [permissions.IsAuthenticated, IsStudent]
+    permission_classes = [permissions.IsAuthenticated, IsStudent, RequiresModule("attendance")]
 
     def get(self, request):
         lecture_id = request.query_params.get("lecture_id")

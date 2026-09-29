@@ -370,6 +370,8 @@ class ABCCreditEntryTests(_SharedFixtureMixin, TenantTestCase):
             self.assertIsNone(record_credit_entry(result_without_term))
 
     def test_publish_results_creates_credit_entry_idempotently(self):
+        self.tenant.subscribed_modules = ["exams"]
+        self.tenant.save(update_fields=["subscribed_modules"])
         with schema_context(self.tenant.schema_name):
             from .models.academics import Term
             term = Term.objects.create(

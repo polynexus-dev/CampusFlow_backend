@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import StudentProfile, FaceEmbedding, StudentConsent, Department
-from ..permissions import IsSaaSOrCollegeAdmin
+from ..permissions import RequiresModule, IsSaaSOrCollegeAdmin
 from ..face_utils import extract_embedding_with_pose
 
 ALL_ANGLES = ["front", "left", "right"]
@@ -35,7 +35,7 @@ class FaceRegistrationQueueView(APIView):
     """
     GET /api/face-registration/queue/?department_id=
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("attendance")]
 
     def get(self, request):
         dept_id = request.query_params.get("department_id")
@@ -88,7 +88,7 @@ class FaceRegistrationCaptureView(APIView):
     POST /api/face-registration/<student_id>/capture/
     Any subset of front/left/right image files in request.FILES.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("attendance")]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, student_id):
@@ -138,7 +138,7 @@ class FaceRegistrationRetakeView(APIView):
     POST /api/face-registration/<student_id>/retake/<angle>/
     Deletes one angle's stored embedding so the queue shows it as partial again.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("attendance")]
 
     def post(self, request, student_id, angle):
         if angle not in ALL_ANGLES:

@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from ..models.assignment import Assignment
 from ..models.submission import AssignmentSubmission
-from ..permissions import IsFacultyOrAbove, get_user_group, is_college_admin
+from ..permissions import RequiresModule, IsFacultyOrAbove, get_user_group, is_college_admin
 from ..utils.file_validation import validate_attachment
 
 class SubmissionListCreateView(APIView):
@@ -13,7 +13,7 @@ class SubmissionListCreateView(APIView):
     GET: List submissions for an assignment. Faculty/Admins see all; students see their own.
     POST: Submit assignment answers (students only, supports multipart attachments).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("assignments")]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request, assignment_id):
@@ -93,7 +93,7 @@ class SubmissionGradeView(APIView):
     """
     POST/PUT: Grade a student submission (Faculty/HOD/Admin only).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("assignments")]
 
     def post(self, request, pk):
         if not IsFacultyOrAbove().has_permission(request, self):

@@ -19,6 +19,7 @@ from rest_framework.views import APIView
 from ..models import StudentProfile, GuardianProfile, ParentLinkRequest
 from ..permissions import IsSaaSOrCollegeAdmin
 from ..services.notifications import notify_user
+from ..throttling import AuthScopedRateThrottle
 
 
 def _serialize(req):
@@ -40,21 +41,34 @@ def _serialize(req):
 class ParentLinkRequestCreateView(APIView):
     """
     POST /api/parent-link-requests/
-    Payload: {student_id, claimed_relationship, contact_phone}
+    Payload: {student_code | student_id, claimed_relationship, contact_phone}
+    student_code is the student ID printed on ID cards (e.g. "STU001") — what
+    a parent actually knows. student_id (the internal database id) still works.
     """
     permission_classes = [IsAuthenticated]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = "parent_link"
 
     def post(self, request):
+        student_code = (request.data.get("student_code") or "").strip()
         student_id = request.data.get("student_id")
         contact_phone = (request.data.get("contact_phone") or "").strip()
 
-        if not student_id:
-            return Response({"error": "student_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not student_code and not student_id:
+            return Response({"error": "student_code is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            student = StudentProfile.objects.get(id=student_id)
-        except StudentProfile.DoesNotExist:
+        if student_code:
+            student = StudentProfile.objects.filter(student_id=student_code).first()
+        else:
+            student = StudentProfile.objects.filter(id=student_id).first()
+        if student is None:
             return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if ParentLinkRequest.objects.filter(
+            requested_by=request.user, student=student,
+            status__in=[ParentLinkRequest.STATUS_PENDING, ParentLinkRequest.STATUS_ID_REQUESTED],
+        ).exists():
+            return Response({"error": "You already have a pending request for this student."}, status=status.HTTP_400_BAD_REQUEST)
 
         existing_phones = set(
             student.guardians.exclude(contact_number="").exclude(contact_number__isnull=True)
