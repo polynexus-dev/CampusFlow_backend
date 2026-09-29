@@ -8,19 +8,38 @@ and payslip viewing for employees and admins.
 import calendar
 from decimal import Decimal
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth.models import User
+from django.db import connection
 from ..models.payroll import SalaryStructure, Payslip
 from ..models.attendance import Attendance
 from ..models.leave import LeaveRequest
 from ..permissions import (
     IsCollegeAdmin, IsNotStudent, RequiresModule,
-    get_user_group, is_college_admin
+    get_user_group, is_college_admin, is_saas_admin
 )
 
 PAYROLL_ADMIN_PERMS = [IsAuthenticated, IsCollegeAdmin, RequiresModule("payroll")]
+
+
+class CanViewPayslips(BasePermission):
+    """
+    Admins need the payroll module (they see everyone's payslips). Any other
+    employee can always see their OWN payslips as long as the college has
+    subscribed to payroll — viewing your own salary isn't "running payroll",
+    so it shouldn't depend on the role's module assignment.
+    """
+    message = "Payroll is not enabled for your college."
+
+    def has_permission(self, request, view):
+        if is_college_admin(request.user):
+            return RequiresModule("payroll")().has_permission(request, view)
+        if is_saas_admin(request.user):
+            return True
+        subscribed = getattr(connection.tenant, 'subscribed_modules', None) or []
+        return "payroll" in {m.lower().replace(" ", "-") for m in subscribed}
 
 
 class SalaryStructureListView(APIView):
@@ -314,13 +333,16 @@ class PayslipListView(APIView):
     GET: List payslips.
     - Admin: All payslips (filterable by month/year/user).
     - Employee: Own payslips only.
+    - ?mine=1: Own payslips only, even for Admins (used by the mobile app's
+      personal Payslips screen so nobody sees someone else's salary there).
     """
-    permission_classes = [IsAuthenticated, IsNotStudent, RequiresModule("payroll")]
+    permission_classes = [IsAuthenticated, IsNotStudent, CanViewPayslips]
 
     def get(self, request):
         user = request.user
+        mine_only = request.query_params.get('mine') in ('1', 'true')
 
-        if is_college_admin(user):
+        if is_college_admin(user) and not mine_only:
             qs = Payslip.objects.all()
             target_user_id = request.query_params.get('user_id')
             if target_user_id:

@@ -45,7 +45,7 @@ class TenantCreateSerializer(serializers.ModelSerializer):
         with schema_context(tenant.schema_name):
             # A. Create necessary Role Groups
             roles = [
-                'student', 'Faculty', 'Management', 'Administrator', 'Department Head', 'guardian',
+                'student', 'Faculty', 'Management', 'Administrator', 'Principal', 'Department Head', 'guardian',
                 *NON_TEACHING_STAFF_ROLES,
             ]
             for role_name in roles:

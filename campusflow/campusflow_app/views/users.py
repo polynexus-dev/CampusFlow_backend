@@ -33,6 +33,7 @@ from ..models.profile import (
     DepartmentHeadProfile,
     ManagementProfile,
     NonTeachingStaffProfile,
+    PrincipalProfile,
     StudentProfile,
     TeachingStaffProfile,
 )
@@ -339,7 +340,7 @@ class StaffRegistrationView(generics.CreateAPIView):
         user = request.user
 
         # ── Role Validation ──
-        valid_staff_roles = ('Faculty', 'Department Head', 'Administrator', 'Management', *NON_TEACHING_STAFF_ROLES)
+        valid_staff_roles = ('Faculty', 'Department Head', 'Principal', 'Administrator', 'Management', *NON_TEACHING_STAFF_ROLES)
         if role not in valid_staff_roles:
             return Response(
                 {"error": f"Invalid role for staff registration. Must be one of: {', '.join(valid_staff_roles)}"},
@@ -352,6 +353,11 @@ class StaffRegistrationView(generics.CreateAPIView):
         
         if role == 'Administrator' and not (is_saas_admin(user) or get_user_group(user) == 'Management'):
             return Response({"error": "Insufficient permissions to create Administrator accounts."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Principal outranks HODs and approves their leave, so an Administrator
+        # (office staff) can't appoint one — same gate as Administrator itself.
+        if role == 'Principal' and not (is_saas_admin(user) or get_user_group(user) == 'Management'):
+            return Response({"error": "Only Management can create a Principal account."}, status=status.HTTP_403_FORBIDDEN)
 
         # ── Domain Check ──
         email = request.data.get('email', '').strip().lower()
@@ -1120,6 +1126,82 @@ class AdministratorUserProfileView(APIView):
         except (AdministratorProfile.DoesNotExist, ValueError, TypeError):
             return Response({"error": "Administrator profile not found."}, status=status.HTTP_404_NOT_FOUND)
             
+        return helper_delete_employee_profile(profile)
+
+
+class PrincipalUserProfileView(APIView):
+    """
+    List/edit/remove Principal profiles.
+    GET: any College Admin. PUT/DELETE: Management or SaaS Admin only — the
+    same people who may create a Principal (see StaffRegistrationView).
+    """
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+
+    PROFILE_FIELDS = [
+        'middle_name', 'date_of_birth', 'gender', 'aadhaar_number',
+        'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
+        'contact_number', 'current_address_line1', 'current_address_line2',
+        'current_city', 'current_district', 'current_state', 'current_pincode',
+        'permanent_address_line1', 'permanent_address_line2', 'permanent_city',
+        'permanent_district', 'permanent_state', 'permanent_pincode',
+        'date_of_joining', 'designation', 'employee_type',
+        'bank_account_number', 'pan_number', 'staff_role', 'status',
+        'assigned_responsibilities',
+    ]
+
+    def _can_manage(self, user):
+        return is_saas_admin(user) or get_user_group(user) == 'Management'
+
+    def _get_profile(self, employee_id):
+        profile = PrincipalProfile.objects.filter(employee_id=employee_id).first()
+        if not profile:
+            try:
+                profile = PrincipalProfile.objects.get(id=employee_id)
+            except (PrincipalProfile.DoesNotExist, ValueError, TypeError):
+                return None
+        return profile
+
+    def get(self, request):
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": PrincipalProfile.objects.count()}, status=status.HTTP_200_OK)
+
+        result = []
+        for prof in PrincipalProfile.objects.all().select_related('user'):
+            item = {
+                "user": {
+                    "username": prof.user.username, "email": prof.user.email,
+                    "first_name": prof.user.first_name, "last_name": prof.user.last_name
+                },
+                "role": "Principal",
+                "employee_id": prof.employee_id,
+                "department": None,
+                "profile_picture": prof.profile_picture.url if prof.profile_picture else None,
+            }
+            for field in self.PROFILE_FIELDS:
+                item[field] = getattr(prof, field)
+            result.append(item)
+        return Response(result, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        if not self._can_manage(request.user):
+            return Response({"detail": "Only Management can edit Principal profiles."}, status=status.HTTP_403_FORBIDDEN)
+        employee_id = request.data.get('id') or request.data.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        profile = self._get_profile(employee_id)
+        if not profile:
+            return Response({"error": "Principal profile not found."}, status=status.HTTP_404_NOT_FOUND)
+        return helper_update_employee_profile(profile, request, self.PROFILE_FIELDS)
+
+    def delete(self, request):
+        if not self._can_manage(request.user):
+            return Response({"detail": "Only Management can remove a Principal."}, status=status.HTTP_403_FORBIDDEN)
+        employee_id = request.query_params.get('id') or request.query_params.get('employee_id')
+        if not employee_id:
+            return Response({"error": "Employee profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        profile = self._get_profile(employee_id)
+        if not profile:
+            return Response({"error": "Principal profile not found."}, status=status.HTTP_404_NOT_FOUND)
         return helper_delete_employee_profile(profile)
 
 
@@ -1897,6 +1979,35 @@ class UserProfileView(APIView):
             # Mask Aadhaar
             profile_data["aadhaar_number"] = mask_sensitive_field(profile.aadhaar_number)
 
+        elif usergroup == 'Principal':
+            profile = PrincipalProfile.objects.filter(user=user).first()
+            if not profile:
+                return Response({"detail": "Principal profile not found."}, status=status.HTTP_404_NOT_FOUND)
+            profile_data = {
+                "user": {"username": user.username, "email": user.email, "first_name": user.first_name, "last_name": user.last_name},
+                "role": usergroup, "tenant": tenant_name,
+                "employee_id": profile.employee_id,
+                "department": None,
+                "middle_name": profile.middle_name, "date_of_birth": profile.date_of_birth,
+                "gender": profile.gender,
+                "emergency_contact_name": profile.emergency_contact_name,
+                "emergency_contact_relationship": profile.emergency_contact_relationship,
+                "emergency_contact_phone": profile.emergency_contact_phone,
+                "contact_number": profile.contact_number,
+                "current_address_line1": profile.current_address_line1, "current_address_line2": profile.current_address_line2,
+                "current_city": profile.current_city, "current_district": profile.current_district,
+                "current_state": profile.current_state, "current_pincode": profile.current_pincode,
+                "permanent_address_line1": profile.permanent_address_line1, "permanent_address_line2": profile.permanent_address_line2,
+                "permanent_city": profile.permanent_city, "permanent_district": profile.permanent_district,
+                "permanent_state": profile.permanent_state, "permanent_pincode": profile.permanent_pincode,
+                "date_of_joining": profile.date_of_joining, "designation": profile.designation,
+                "employee_type": profile.employee_type, "bank_account_number": mask_sensitive_field(profile.bank_account_number),
+                "pan_number": mask_sensitive_field(profile.pan_number), "staff_role": profile.staff_role, "status": profile.status,
+                "profile_picture": profile.profile_picture.url if profile.profile_picture else None,
+                "assigned_responsibilities": profile.assigned_responsibilities,
+                "aadhaar_number": mask_sensitive_field(profile.aadhaar_number),
+            }
+
         elif usergroup == 'Department Head':
             profile = DepartmentHeadProfile.objects.filter(user=user).first()
             if not profile:
@@ -2046,12 +2157,13 @@ def get_user_profile_by_user(user):
     if group in NON_TEACHING_STAFF_ROLES: return getattr(user, 'non_teaching_staff_profile', None)
     if group == 'Management': return getattr(user, 'management_profile', None)
     if group == 'Administrator': return getattr(user, 'administrator_profile', None)
+    if group == 'Principal': return getattr(user, 'principal_profile', None)
     if group == 'Department Head': return getattr(user, 'department_head_profile', None)
     if group == 'CA': return getattr(user, 'auditor_profile', None)
     if group == 'guardian': return getattr(user, 'guardian_profile', None)
 
     # Fallback to direct reverse relations if group is not set on the user yet
-    for attr in ('teaching_staff_profile', 'department_head_profile', 'non_teaching_staff_profile', 'student_profile', 'management_profile', 'administrator_profile', 'auditor_profile', 'guardian_profile'):
+    for attr in ('teaching_staff_profile', 'department_head_profile', 'non_teaching_staff_profile', 'student_profile', 'management_profile', 'administrator_profile', 'principal_profile', 'auditor_profile', 'guardian_profile'):
         profile = getattr(user, attr, None)
         if profile is not None:
             return profile
@@ -2501,7 +2613,7 @@ class UserDataErasureView(APIView):
             profile.status = 'deleted'
             profile.save()
 
-        elif group in ('Management', 'Administrator', 'Department Head', *NON_TEACHING_STAFF_ROLES):
+        elif group in ('Management', 'Administrator', 'Principal', 'Department Head', *NON_TEACHING_STAFF_ROLES):
             profile.aadhaar_number = None
             profile.pan_number = None
             profile.bank_account_number = None

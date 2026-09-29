@@ -4,7 +4,7 @@ from campusflow_app.views.department import DepartmentView, DepartmentDetailView
 from campusflow_app.views.users import (
     StudentUserProfileView, StudentLookupView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView,
     MyObtainTokenPairView, LogoutAPIView, UserProfileView,
-    ManagementUserProfileView, AdministratorUserProfileView,
+    ManagementUserProfileView, AdministratorUserProfileView, PrincipalUserProfileView,
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
     ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
     DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
@@ -270,6 +270,8 @@ urlpatterns = [
     path('management/user/', ManagementUserProfileView.as_view(), name='management_user_profile'),
     # GET all administrator profiles (Management / SaaS Admin only)
     path('administrator/user/', AdministratorUserProfileView.as_view(), name='administrator_user_profile'),
+    # GET all principal profiles (College Admins); PUT/DELETE Management only
+    path('principal/user/', PrincipalUserProfileView.as_view(), name='principal_user_profile'),
     # GET all teaching staff profiles (College Admins / SaaS Admin only)
     path('teaching-staff/user/', TeachingStaffUserProfileView.as_view(), name='teaching_staff_user_profile'),
     # GET all department head profiles (College Admins / SaaS Admin only)

@@ -9,15 +9,56 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.db import transaction
 from django.utils import timezone
 from ..models.leave import LeaveType, LeaveBalance, LeaveRequest
 from ..permissions import (
-    IsCollegeAdmin, IsNotStudent, RequiresModule,
-    get_user_group, is_saas_admin, is_college_admin
+    IsCollegeAdmin, IsNotStudent, RequiresModule, PRINCIPAL_ROLE,
+    get_user_group, is_saas_admin, is_college_admin, is_principal
 )
 
 LEAVE_ADMIN_PERMS = [IsAuthenticated, IsCollegeAdmin, RequiresModule("leave")]
 LEAVE_STAFF_PERMS = [IsAuthenticated, IsNotStudent, RequiresModule("leave")]
+
+
+# ─────────────────────────────────────────────────────────────
+# Approval routing
+#   Faculty / staff leave → their HOD (College Admins can also act)
+#   HOD leave             → the Principal only
+#                           (College Admins act only if the college has no
+#                            active Principal, so requests never get stuck)
+#   Principal leave       → College Admins
+#   Nobody can act on their own request.
+# ─────────────────────────────────────────────────────────────
+
+def _department_staff_ids(hod_user):
+    """User ids of the teaching + non-teaching staff in this HOD's department."""
+    hod_profile = getattr(hod_user, 'department_head_profile', None)
+    if not hod_profile or not hod_profile.department:
+        return set()
+    from ..models.profile import TeachingStaffProfile, NonTeachingStaffProfile
+    ids = set(TeachingStaffProfile.objects.filter(department=hod_profile.department).values_list('user_id', flat=True))
+    ids |= set(NonTeachingStaffProfile.objects.filter(department=hod_profile.department).values_list('user_id', flat=True))
+    return ids
+
+
+def _college_has_active_principal():
+    from ..models.profile import PrincipalProfile
+    return PrincipalProfile.objects.filter(
+        status='active', user__is_active=True, user__groups__name=PRINCIPAL_ROLE
+    ).exists()
+
+
+def _can_act_on(user, leave_req, requester_group, has_principal, dept_staff_ids):
+    """Whether `user` may approve/reject `leave_req` under the routing above."""
+    if leave_req.user_id == user.id:
+        return False
+    is_admin = is_college_admin(user) or is_saas_admin(user)
+    if requester_group == 'Department Head':
+        return is_principal(user) or (is_admin and not has_principal)
+    if is_admin:
+        return True
+    return get_user_group(user) == 'Department Head' and leave_req.user_id in dept_staff_ids
 
 
 # ─────────────────────────────────────────────────────────────
@@ -30,6 +71,12 @@ class LeaveTypeListCreateView(APIView):
     POST: Create a new leave type (College Admin only).
     """
     permission_classes = LEAVE_ADMIN_PERMS
+
+    def get_permissions(self):
+        # Staff need to read leave types to apply for leave; only admins create them
+        if self.request.method == 'GET':
+            return [perm() if isinstance(perm, type) else perm for perm in LEAVE_STAFF_PERMS]
+        return super().get_permissions()
 
     def get(self, request):
         leave_types = LeaveType.objects.filter(is_active=True)
@@ -237,9 +284,11 @@ class LeaveRequestCreateView(APIView):
 class LeaveRequestListView(APIView):
     """
     GET: List leave requests.
-    - Admin: All pending/approved/rejected requests.
+    - Admin: All requests (oversight), even ones only the Principal can decide.
+    - Principal: Requests from Department Heads.
     - HOD: Requests from their department.
     - Others: Their own requests.
+    Each item carries `can_act` — whether the caller may approve/reject it.
     """
     permission_classes = LEAVE_STAFF_PERMS
 
@@ -247,30 +296,25 @@ class LeaveRequestListView(APIView):
         user = request.user
         user_group = get_user_group(user)
         status_filter = request.query_params.get('status')
+        dept_staff_ids = _department_staff_ids(user) if user_group == 'Department Head' else set()
 
         if is_college_admin(user) or is_saas_admin(user):
             qs = LeaveRequest.objects.all()
-        elif user_group == 'Department Head':
-            # HOD sees requests from their department
-            hod_profile = getattr(user, 'department_head_profile', None)
-            if hod_profile and hod_profile.department:
-                from ..models.profile import TeachingStaffProfile, NonTeachingStaffProfile
-                dept_user_ids = set()
-                for p in TeachingStaffProfile.objects.filter(department=hod_profile.department):
-                    dept_user_ids.add(p.user_id)
-                for p in NonTeachingStaffProfile.objects.filter(department=hod_profile.department):
-                    dept_user_ids.add(p.user_id)
-                qs = LeaveRequest.objects.filter(user_id__in=dept_user_ids)
-            else:
-                qs = LeaveRequest.objects.filter(user=user)
+        elif user_group == PRINCIPAL_ROLE:
+            qs = LeaveRequest.objects.filter(user__groups__name='Department Head')
+        elif user_group == 'Department Head' and dept_staff_ids:
+            qs = LeaveRequest.objects.filter(user_id__in=dept_staff_ids)
         else:
             qs = LeaveRequest.objects.filter(user=user)
 
         if status_filter:
             qs = qs.filter(status=status_filter)
 
+        has_principal = _college_has_active_principal()
         data = []
-        for lr in qs.select_related('user', 'leave_type', 'approved_by'):
+        for lr in qs.select_related('user', 'leave_type', 'approved_by').prefetch_related('user__groups'):
+            requester_groups = list(lr.user.groups.all())
+            requester_group = requester_groups[0].name if requester_groups else None
             data.append({
                 "id": lr.id,
                 "user_id": lr.user.id,
@@ -287,15 +331,19 @@ class LeaveRequestListView(APIView):
                 "rejection_reason": lr.rejection_reason,
                 "applied_on": lr.applied_on.isoformat(),
                 "reviewed_on": lr.reviewed_on.isoformat() if lr.reviewed_on else None,
+                "requester_role": requester_group,
+                "can_act": lr.status == 'pending' and _can_act_on(
+                    user, lr, requester_group, has_principal, dept_staff_ids
+                ),
             })
         return Response(data, status=status.HTTP_200_OK)
 
 
 class LeaveRequestActionView(APIView):
     """
-    POST: Approve or reject a leave request.
-    - Admin can approve/reject any request.
-    - HOD can approve/reject requests from their department.
+    POST: Approve or reject a leave request, following the routing rules at
+    the top of this module (HOD leave → Principal; staff leave → their HOD
+    or a College Admin; never your own request).
     """
     permission_classes = LEAVE_STAFF_PERMS
 
@@ -310,33 +358,31 @@ class LeaveRequestActionView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            leave_req = LeaveRequest.objects.get(id=leave_id, status='pending')
-        except LeaveRequest.DoesNotExist:
-            return Response({"error": "Pending leave request not found."}, status=status.HTTP_404_NOT_FOUND)
+        # Row lock: if two approvers act at the same moment, the second waits,
+        # then finds the request no longer pending — so the leave balance is
+        # only charged once.
+        with transaction.atomic():
+            try:
+                leave_req = LeaveRequest.objects.select_for_update().get(id=leave_id, status='pending')
+            except LeaveRequest.DoesNotExist:
+                return Response({"error": "Pending leave request not found. It may already have been decided."}, status=status.HTTP_404_NOT_FOUND)
 
-        user = request.user
-        user_group = get_user_group(user)
+            user = request.user
+            requester_group = get_user_group(leave_req.user)
+            dept_staff_ids = _department_staff_ids(user) if get_user_group(user) == 'Department Head' else set()
 
-        # Authorization check
-        authorized = False
-        if is_college_admin(user) or is_saas_admin(user):
-            authorized = True
-        elif user_group == 'Department Head':
-            hod_profile = getattr(user, 'department_head_profile', None)
-            if hod_profile and hod_profile.department:
-                from ..models.profile import TeachingStaffProfile, NonTeachingStaffProfile
-                dept_user_ids = set()
-                for p in TeachingStaffProfile.objects.filter(department=hod_profile.department):
-                    dept_user_ids.add(p.user_id)
-                for p in NonTeachingStaffProfile.objects.filter(department=hod_profile.department):
-                    dept_user_ids.add(p.user_id)
-                if leave_req.user_id in dept_user_ids:
-                    authorized = True
+            if not _can_act_on(user, leave_req, requester_group, _college_has_active_principal(), dept_staff_ids):
+                if leave_req.user_id == user.id:
+                    error = "You cannot approve or reject your own leave request."
+                elif requester_group == 'Department Head':
+                    error = "Leave requests from a Head of Department are decided by the Principal."
+                else:
+                    error = "You are not authorized to act on this leave request."
+                return Response({"error": error}, status=status.HTTP_403_FORBIDDEN)
 
-        if not authorized:
-            return Response({"error": "You are not authorized to act on this leave request."}, status=status.HTTP_403_FORBIDDEN)
+            return self._decide(leave_req, user, action, rejection_reason)
 
+    def _decide(self, leave_req, user, action, rejection_reason):
         if action == 'approve':
             leave_req.status = 'approved'
             leave_req.approved_by = user

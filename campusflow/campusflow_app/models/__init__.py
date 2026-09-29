@@ -10,6 +10,7 @@ from .profile import (
     ManagementProfile,
     AdministratorProfile,
     DepartmentHeadProfile,
+    PrincipalProfile,
     GuardianProfile,
 )
 from .attendance import Attendance
