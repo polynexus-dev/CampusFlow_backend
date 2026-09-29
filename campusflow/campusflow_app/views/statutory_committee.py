@@ -1,5 +1,6 @@
 from django.utils import timezone
 from rest_framework import status, viewsets
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -34,7 +35,16 @@ class StatutoryCommitteeViewSet(viewsets.ModelViewSet):
     """Admin-managed: which committees exist for which academic year."""
     queryset = StatutoryCommittee.objects.select_related("academic_year").all()
     serializer_class = StatutoryCommitteeSerializer
-    permission_classes = COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]
+
+    def get_permissions(self):
+        # Reading the committee list is open to everyone: students and staff
+        # need it to pick a committee when filing a complaint (a statutory
+        # channel, so it isn't gated by the compliance-center module either).
+        # It only holds committee type / year / dates, nothing confidential.
+        # Creating, editing and deleting committees stays admin-only.
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated()]
+        return [permission() for permission in COMPLIANCE_ADMIN_PERMS + [IsNotDemoTenant]]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -114,6 +124,29 @@ class CommitteeMeetingViewSet(viewsets.ModelViewSet):
         if committee:
             qs = qs.filter(committee_id=committee)
         return qs
+
+    def _check_can_record(self, serializer):
+        # IsCommitteeMember only runs object-level checks, which DRF never
+        # calls on create — so check the target committee explicitly here,
+        # and on update too, since a PATCH could move a meeting to another
+        # committee.
+        committee = serializer.validated_data.get("committee") or getattr(serializer.instance, "committee", None)
+        user = self.request.user
+        if not is_saas_or_college_admin(user) and not CommitteeMembership.objects.filter(
+            committee=committee, user=user
+        ).exists():
+            raise PermissionDenied("Only members of this committee can record its meetings.")
+        attendees = serializer.validated_data.get("attendees") or []
+        if any(a.committee_id != committee.id for a in attendees):
+            raise ValidationError({"attendees": "Attendees must be members of this committee."})
+
+    def perform_create(self, serializer):
+        self._check_can_record(serializer)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._check_can_record(serializer)
+        serializer.save()
 
 
 class CommitteeAnnualReportView(APIView):

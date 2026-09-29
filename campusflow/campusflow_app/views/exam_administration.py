@@ -23,7 +23,7 @@ from ..models.academics import AcademicYear
 from ..models.clearance import ClearanceRequest
 from ..models.exam_administration import ConvocationRequest, MigrationRequest, RevaluationRequest
 from ..models.result import StudentExamResult
-from ..permissions import IsHMOrAbove, IsSaaSOrCollegeAdmin, is_college_admin
+from ..permissions import IsHMOrAbove, IsSaaSOrCollegeAdmin, is_college_admin, is_faculty_or_above
 from ..services.clearance import is_student_cleared
 from ..services.detention import get_detention_settings
 
@@ -87,6 +87,10 @@ class RevaluationRequestCreateView(APIView):
             result = StudentExamResult.objects.select_related("exam", "student__user").get(id=result_id)
         except StudentExamResult.DoesNotExist:
             return Response({"error": "Result not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # A student may only ask for revaluation of their own marks.
+        if getattr(result.student, "user_id", None) != request.user.id and not is_faculty_or_above(request.user):
+            return Response({"error": "You can only request revaluation of your own result."}, status=status.HTTP_403_FORBIDDEN)
 
         if not result.exam.results_published:
             return Response({"error": "Results for this exam aren't published yet."}, status=status.HTTP_400_BAD_REQUEST)

@@ -95,20 +95,23 @@ class TenantDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
         return super().destroy(request, *args, **kwargs)
 
 
+from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
+from campusflow_app.permissions import IsCollegeAdmin
 from .models import Invoice
 from .serializers import InvoiceSerializer, InvoiceUploadReceiptSerializer
 
 class InvoiceListAPIView(APIView):
     """
     List invoices for the active tenant and display Polynexus bank details.
+    College Admins only: these are the college's own subscription invoices.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCollegeAdmin]
 
     def get(self, request):
         active_tenant = connection.tenant
@@ -118,17 +121,10 @@ class InvoiceListAPIView(APIView):
         invoices = Invoice.objects.filter(tenant=active_tenant).order_by('-created_at')
         serializer = InvoiceSerializer(invoices, many=True)
 
-        bank_details = {
-            "bank_name": "State Bank of India",
-            "account_name": "Polynexus Technologies Private Limited",
-            "account_number": "41234567890",
-            "ifsc_code": "SBIN0001234",
-            "branch": "Nagpur Main Branch"
-        }
-
         return Response({
             "invoices": serializer.data,
-            "bank_details": bank_details,
+            # None until the POLYNEXUS_BANK_* env vars are set (see settings.py).
+            "bank_details": settings.POLYNEXUS_BANK_DETAILS,
             "subscription_status": active_tenant.subscription_status,
             "subscription_end_date": active_tenant.subscription_end_date,
             "trial_end_date": active_tenant.trial_end_date
@@ -138,8 +134,9 @@ class InvoiceListAPIView(APIView):
 class InvoiceUploadReceiptAPIView(APIView):
     """
     Upload NEFT/RTGS transaction receipt image and UTR transaction number.
+    College Admins only.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCollegeAdmin]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, pk):

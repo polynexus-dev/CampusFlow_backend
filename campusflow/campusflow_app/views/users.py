@@ -1161,6 +1161,7 @@ class StudentUserProfileView(APIView):
         for stud in student_profiles:
             result.append({
                 "id": stud.id,
+                "user_id": stud.user.id,
                 "user": {
                     "username": stud.user.username, "email": stud.user.email,
                     "first_name": stud.user.first_name, "last_name": stud.user.last_name
@@ -1876,9 +1877,10 @@ def get_user_profile_by_user(user):
     if group == 'Administrator': return getattr(user, 'administrator_profile', None)
     if group == 'Department Head': return getattr(user, 'department_head_profile', None)
     if group == 'CA': return getattr(user, 'auditor_profile', None)
+    if group == 'guardian': return getattr(user, 'guardian_profile', None)
 
     # Fallback to direct reverse relations if group is not set on the user yet
-    for attr in ('teaching_staff_profile', 'department_head_profile', 'non_teaching_staff_profile', 'student_profile', 'management_profile', 'administrator_profile', 'auditor_profile'):
+    for attr in ('teaching_staff_profile', 'department_head_profile', 'non_teaching_staff_profile', 'student_profile', 'management_profile', 'administrator_profile', 'auditor_profile', 'guardian_profile'):
         profile = getattr(user, attr, None)
         if profile is not None:
             return profile

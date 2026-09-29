@@ -1,5 +1,6 @@
 import datetime
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
+from django.test import override_settings
 from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -18,6 +19,15 @@ class DictCache:
         self.data[key] = value
     def delete(self, key):
         self.data.pop(key, None)
+
+TEST_BANK_DETAILS = {
+    "bank_name": "Test Bank",
+    "account_name": "Polynexus Technologies Private Limited",
+    "account_number": "000111222333",
+    "ifsc_code": "TEST0000001",
+    "branch": "Test Branch",
+}
+
 
 class BillingSystemTests(TenantTestCase):
     def setUp(self):
@@ -62,13 +72,18 @@ class BillingSystemTests(TenantTestCase):
         self.cache_patcher.stop()
         super().tearDown()
 
-    def test_invoice_list_and_bank_details(self):
-        # Authenticate a normal tenant user
+    def _tenant_token(self, username, group_name):
         with schema_context(self.tenant.schema_name):
-            user = User.objects.create_user(username='col_admin', email='admin@college.edu', password='Password123')
+            user = User.objects.create_user(username=username, email=f'{username}@college.edu', password='Password123')
+            group, _ = Group.objects.get_or_create(name=group_name)
+            user.groups.add(group)
             token = RefreshToken.for_user(user)
             token['tenant_schema'] = self.tenant.schema_name
-            access_token = str(token.access_token)
+            return str(token.access_token)
+
+    @override_settings(POLYNEXUS_BANK_DETAILS=TEST_BANK_DETAILS)
+    def test_invoice_list_and_bank_details(self):
+        access_token = self._tenant_token('col_admin', 'Management')
         
         # Test GET client invoice list inside tenant schema
         url = reverse('invoice_list')
@@ -78,15 +93,34 @@ class BillingSystemTests(TenantTestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('bank_details', response.data)
-        self.assertEqual(response.data['bank_details']['bank_name'], 'State Bank of India')
+        self.assertEqual(response.data['bank_details']['bank_name'], 'Test Bank')
         self.assertEqual(len(response.data['invoices']), 1)
 
+    @override_settings(POLYNEXUS_BANK_DETAILS=None)
+    def test_invoice_list_hides_unconfigured_bank_details(self):
+        access_token = self._tenant_token('col_admin3', 'Administrator')
+        response = self.client.get(reverse('invoice_list'), HTTP_AUTHORIZATION=f'Bearer {access_token}')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data['bank_details'])
+
+    def test_student_cannot_view_or_upload_subscription_invoices(self):
+        access_token = self._tenant_token('some_student', 'student')
+        response = self.client.get(reverse('invoice_list'), HTTP_AUTHORIZATION=f'Bearer {access_token}')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        fake_receipt = SimpleUploadedFile(name="receipt.pdf", content=b"x", content_type="application/pdf")
+        response = self.client.post(
+            reverse('invoice_upload_receipt', kwargs={'pk': self.invoice.pk}),
+            {'bank_receipt': fake_receipt, 'utr_number': 'UTR999'},
+            HTTP_AUTHORIZATION=f'Bearer {access_token}',
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'pending_payment')
+
     def test_upload_invoice_receipt(self):
-        with schema_context(self.tenant.schema_name):
-            user = User.objects.create_user(username='col_admin2', email='admin2@college.edu', password='Password123')
-            token = RefreshToken.for_user(user)
-            token['tenant_schema'] = self.tenant.schema_name
-            access_token = str(token.access_token)
+        access_token = self._tenant_token('col_admin2', 'Management')
 
         # Create fake screenshot file
         fake_receipt = SimpleUploadedFile(

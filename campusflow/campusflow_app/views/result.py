@@ -9,7 +9,7 @@ from ..models.exam import Exam
 from ..models.offerings import CourseOffering, StudentCourseRegistration
 from ..models.profile import StudentProfile
 from ..serializers import StudentExamResultSerializer
-from ..permissions import IsFacultyOrAbove, get_user_group
+from ..permissions import IsFacultyOrAbove, get_user_group, is_faculty_or_above
 from ..services.notifications import notify_guardians_of_student
 from ..services.abc_credit import record_credit_entry
 
@@ -35,7 +35,12 @@ class StudentExamResultViewSet(viewsets.ModelViewSet):
         ).all()
         user = self.request.user
         if get_user_group(user) == 'student':
-            qs = qs.filter(student__user=user)
+            # Draft marks stay internal until the exam's results are published.
+            return qs.filter(student__user=user, exam__results_published=True)
+        if not is_faculty_or_above(user):
+            # Guardians use views/guardian.py; other roles have no need for
+            # marks. Previously every non-student role got everyone's marks.
+            return qs.none()
         return qs
 
     def perform_create(self, serializer):

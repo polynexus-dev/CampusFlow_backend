@@ -479,6 +479,20 @@ EMAIL_BACKEND = "campusflow_app.email_backend.DemoAwareEmailBackend"
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "CampusNexus <noreply@campusnexus.in>")
 
+# Polynexus bank account shown to colleges on the Subscription Billing page
+# for NEFT/RTGS payments. Left unset, the API returns bank_details=None and
+# the page tells the college to contact Polynexus, so a made-up account
+# number is never shown to someone who might transfer money to it.
+_bank_account_number = os.environ.get("POLYNEXUS_BANK_ACCOUNT_NUMBER", "")
+_bank_ifsc = os.environ.get("POLYNEXUS_BANK_IFSC", "")
+POLYNEXUS_BANK_DETAILS = {
+    "bank_name": os.environ.get("POLYNEXUS_BANK_NAME", ""),
+    "account_name": os.environ.get("POLYNEXUS_BANK_ACCOUNT_NAME", "Polynexus Technologies Private Limited"),
+    "account_number": _bank_account_number,
+    "ifsc_code": _bank_ifsc,
+    "branch": os.environ.get("POLYNEXUS_BANK_BRANCH", ""),
+} if _bank_account_number and _bank_ifsc else None
+
 # Recipient list configuration for landing page enquiries
 CONTACT_RECIPIENT_EMAIL = os.environ.get("CONTACT_RECIPIENT_EMAIL", "hello@campusnexus.in")
 CONTACT_CC_LIST = ["sales@polynexus.in"]

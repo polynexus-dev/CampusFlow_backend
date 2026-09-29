@@ -1432,6 +1432,15 @@ class NIRFDataEntrySerializer(serializers.ModelSerializer):
 
 class StatutoryCommitteeSerializer(serializers.ModelSerializer):
     academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+    # Lets the UI offer a non-admin only the committees they sit on (e.g. for
+    # recording meetings) now that the list itself is readable by everyone.
+    is_member = serializers.SerializerMethodField()
+
+    def get_is_member(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.memberships.filter(user=request.user).exists()
 
     class Meta:
         model = StatutoryCommittee

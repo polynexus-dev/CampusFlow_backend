@@ -16,7 +16,7 @@ from campusflow_app.views.users import (
 from campusflow_app.views.location import LocationDetailView
 from campusflow_app.views.attendance import (
     AttendanceMarkView, AllAttendanceView,
-    LectureCheckinByCodeView
+    LectureCheckinByCodeView, StudentAttendanceSummaryView,
 )
 from campusflow_app.views.face_attendance import (
     FaceRegistrationView, LivenessChallengeView,
@@ -325,6 +325,7 @@ urlpatterns = [
     path('liveness-challenge/', LivenessChallengeView.as_view(), name='liveness-challenge'),
     path('mark-attendance/', MarkAttendanceView.as_view(), name='mark-attendance'),
     path('attendance-history/', AttendanceHistoryView.as_view(), name='attendance-history'),
+    path('student/attendance-summary/', StudentAttendanceSummaryView.as_view(), name='student-attendance-summary'),
     path('student/request-manual-attendance/', StudentRequestManualAttendanceView.as_view(), name='student-request-manual-attendance'),
     path('student/manual-request-status/', StudentManualRequestStatusView.as_view(), name='student-manual-request-status'),
 
