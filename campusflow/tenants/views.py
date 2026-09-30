@@ -101,14 +101,16 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
+from campusflow_app.permissions import IsSaaSOrCollegeAdmin
 from .models import Invoice
 from .serializers import InvoiceSerializer, InvoiceUploadReceiptSerializer
 
 class InvoiceListAPIView(APIView):
     """
     List invoices for the active tenant and display Polynexus bank details.
+    Restricted to College Admins (Management/Administrator) and SaaS Admin.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsSaaSOrCollegeAdmin]
 
     def get(self, request):
         active_tenant = connection.tenant
@@ -138,8 +140,9 @@ class InvoiceListAPIView(APIView):
 class InvoiceUploadReceiptAPIView(APIView):
     """
     Upload NEFT/RTGS transaction receipt image and UTR transaction number.
+    Restricted to College Admins (Management/Administrator) and SaaS Admin.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsSaaSOrCollegeAdmin]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, pk):

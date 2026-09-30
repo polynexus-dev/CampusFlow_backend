@@ -694,6 +694,14 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         if role in roles_requiring_dept and not department:
             raise serializers.ValidationError({"department_id": "A department must be assigned for this role."})
 
+        # Ensure a department cannot have more than one HOD (DepartmentHeadProfile is OneToOne with Department)
+        if role == 'Department Head' and department:
+            if DepartmentHeadProfile.objects.filter(department=department).exists():
+                dept_name = getattr(department, 'name', str(department))
+                raise serializers.ValidationError({
+                    "department_id": f"Department '{dept_name}' already has an assigned Head of Department (HOD)."
+                })
+
         if User.objects.filter(email=data['email']).exists():
             raise serializers.ValidationError({"email": "A user with this email already exists."})
         return data
