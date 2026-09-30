@@ -50,15 +50,18 @@ services:
       - POOL_MODE=session
       - MAX_CLIENT_CONN=500
       - DEFAULT_POOL_SIZE=25
+    # Bound to localhost only — never expose the database pooler publicly.
     ports:
-      - "6432:5432"
+      - "127.0.0.1:6432:5432"
     depends_on:
       - db
 
   redis:
     image: redis:7-alpine
+    # Localhost only: Redis has no password here and holds sessions, OTPs
+    # and the Channels layer.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - CampusFlow_redis_data:/data
 
@@ -103,7 +106,7 @@ services:
       - ./entrypoint_ollama.sh:/entrypoint_ollama.sh
     entrypoint: ["/bin/sh", "/entrypoint_ollama.sh"]
     ports:
-      - "${OLLAMA_HOST_PORT:-11435}:11434"
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11435}:11434"
 
 volumes:
   CampusFlow_postgres_data:

@@ -15,13 +15,21 @@ echo "✅ PostgreSQL is ready!"
 echo "📦 Syncing installed packages with requirements.txt..."
 pip install -r requirements.txt
 
-# 0. Sync & reconcile migrations dynamically to clear any drifted files or DB clashes
-echo "🔄 Running dynamic migration & schema reconciliation..."
-python migrate_sync.py
+# 0. Migration files are committed to git. migrate_sync.py rewrites/deletes
+#    migration files and is only for recovering a drifted dev database, so it
+#    no longer runs on every boot — set RUN_MIGRATION_SYNC=1 to run it once.
+if [ "${RUN_MIGRATION_SYNC:-0}" = "1" ]; then
+    echo "🔄 Running migration file reconciliation (RUN_MIGRATION_SYNC=1)..."
+    python migrate_sync.py
+fi
 
-# 0.5. Make new migrations for any model changes.
-echo "🔄 Auto-generating migrations for any updated models..."
-python manage.py makemigrations --noinput
+# 0.5. Never generate migrations on the server: a model change without a
+#      committed migration is a bug, so stop here instead of inventing one.
+echo "🔄 Checking that every model change has a committed migration..."
+if ! python manage.py makemigrations --check --dry-run; then
+    echo "❌ Model changes without a committed migration. Run makemigrations locally, commit, and redeploy."
+    exit 1
+fi
 
 # 1. Run shared (public) schema migrations
 echo "🔄 Running shared schema migrations..."
@@ -45,22 +53,32 @@ else:
     print('   ✅ Public tenant already exists.')
 "
 
-# 4. Create a default superuser in the public schema (if not exists)
-echo "🔄 Ensuring public superuser exists..."
-python manage.py shell -c "
+# 4. Create the SaaS superuser in the public schema, only from env vars.
+#    (This used to create admin/admin on every fresh database.)
+if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ] && [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
+    echo "🔄 Ensuring public superuser ${DJANGO_SUPERUSER_USERNAME} exists..."
+    python manage.py shell -c "
+import os
 from django_tenants.utils import schema_context
 from django.contrib.auth.models import User
 with schema_context('public'):
-    if not User.objects.filter(username='admin').exists():
-        User.objects.create_superuser('admin', 'admin@campusflow.com', 'admin')
-        print('   ✅ Superuser \"admin\" created (password: admin).')
+    username = os.environ['DJANGO_SUPERUSER_USERNAME']
+    if not User.objects.filter(username=username).exists():
+        User.objects.create_superuser(username, os.environ.get('DJANGO_SUPERUSER_EMAIL', ''), os.environ['DJANGO_SUPERUSER_PASSWORD'])
+        print('   ✅ Superuser created.')
     else:
-        print('   ✅ Superuser \"admin\" already exists.')
+        print('   ✅ Superuser already exists.')
 "
+else
+    echo "ℹ️  DJANGO_SUPERUSER_USERNAME/PASSWORD not set — skipping superuser creation."
+fi
 
-# 4.5. Ensure demo tenant is seeded (~2,400 students / 12 departments) once
-echo "🔄 Ensuring demo tenant data is seeded (~2,400 students / 12 departments)..."
-python seed_demo_data.py
+# 4.5. Demo tenant (~2,400 fake students) only where explicitly wanted,
+#      e.g. the public sales-demo server. Set SEED_DEMO_DATA=1 there.
+if [ "${SEED_DEMO_DATA:-0}" = "1" ]; then
+    echo "🔄 Ensuring demo tenant data is seeded (SEED_DEMO_DATA=1)..."
+    python seed_demo_data.py
+fi
 
 # 5. Collect static files for the admin panel / DRF browsable API
 echo "🔄 Collecting static files..."

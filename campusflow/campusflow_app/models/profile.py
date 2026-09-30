@@ -432,6 +432,68 @@ class ManagementProfile(models.Model):
         return f"Management: {self.user.username} ({self.employee_id})"
 
 
+class PrincipalProfile(models.Model):
+    """
+    Head of the institution (academic). Ranks above Department Head but is
+    NOT a College Admin — no user/fee/payroll administration. Approves leave
+    requests from Department Heads (see views/leave.py).
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='principal_profile')
+    employee_id = models.CharField(max_length=20, unique=True, help_text="Unique employee identifier for the principal")
+
+    # Basic Information
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
+    date_of_birth = models.DateField(blank=True, null=True)
+    gender = models.CharField(max_length=10, blank=True, null=True)
+    aadhaar_number = models.CharField(max_length=12, unique=True, blank=True, null=True, help_text="Unique Aadhaar across all users")
+    emergency_contact_name = models.CharField(max_length=255, blank=True, null=True)
+    emergency_contact_relationship = models.CharField(max_length=50, blank=True, null=True)
+    emergency_contact_phone = models.CharField(max_length=15, blank=True, null=True)
+
+    # Contact Information
+    contact_number = models.CharField(max_length=15, blank=True, null=True)
+    current_address_line1 = models.CharField(max_length=255, blank=True, null=True)
+    current_address_line2 = models.CharField(max_length=255, blank=True, null=True)
+    current_city = models.CharField(max_length=100, blank=True, null=True)
+    current_district = models.CharField(max_length=100, blank=True, null=True)
+    current_state = models.CharField(max_length=100, blank=True, null=True)
+    current_pincode = models.CharField(max_length=10, blank=True, null=True)
+    permanent_address_line1 = models.CharField(max_length=255, blank=True, null=True)
+    permanent_address_line2 = models.CharField(max_length=255, blank=True, null=True)
+    permanent_city = models.CharField(max_length=100, blank=True, null=True)
+    permanent_district = models.CharField(max_length=100, blank=True, null=True)
+    permanent_state = models.CharField(max_length=100, blank=True, null=True)
+    permanent_pincode = models.CharField(max_length=10, blank=True, null=True)
+
+    # Professional Information
+    date_of_joining = models.DateField(blank=True, null=True)
+    designation = models.CharField(max_length=100, blank=True, null=True, default='Principal')
+    employee_type = models.CharField(max_length=20, default='full_time')
+    bank_account_number = models.CharField(max_length=50, blank=True, null=True)
+    pan_number = models.CharField(max_length=10, unique=True, blank=True, null=True, help_text="Unique PAN across all users")
+
+    # Login & Security
+    staff_role = models.CharField(max_length=50, default='principal')
+    status = models.CharField(max_length=20, default='active')
+
+    # Additional
+    profile_picture = models.ImageField(upload_to='profile_pics/principal/', blank=True, null=True)
+    assigned_responsibilities = models.TextField(blank=True, null=True)
+    office_location_details = models.CharField(max_length=255, blank=True, null=True)
+
+    # DPDP Compliance
+    consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")
+    consent_timestamp = models.DateTimeField(null=True, blank=True)
+    consent_version = models.CharField(max_length=10, blank=True, null=True)
+
+    class Meta:
+        verbose_name = "Principal Profile"
+        verbose_name_plural = "Principal Profiles"
+
+    def __str__(self):
+        return f"Principal: {self.user.username} ({self.employee_id})"
+
+
 class AdministratorProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='administrator_profile')
     employee_id = models.CharField(max_length=20, unique=True, help_text="Unique employee identifier for administrators")

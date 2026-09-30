@@ -13,6 +13,13 @@ class Classroom(models.Model):
                    "against a section's size; a classroom with no capacity set skips that check.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Room boundary as [[lat, lng], ...] corners (at least 3), checked with a
+    # plain-Python point-in-polygon test (utils/geofence.py) instead of the
+    # GDAL PolygonField below, which was never enabled.
+    boundary = models.JSONField(
+        null=True, blank=True,
+        help_text="Classroom boundary as a list of [lat, lng] corners, e.g. the room's four corners.",
+    )
 
     # ── ADVANCED GEOFENCING (Bounding Box) ──
     # Top-Right and Bottom-Left coordinates define the rectangular boundary.

@@ -214,8 +214,29 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-    # ...
+    # Per-IP limits for the unauthenticated auth endpoints — see
+    # campusflow_app/throttling.py. Brute-forcing a one-time code is also
+    # capped per email (views/users.py: OTP_MAX_ATTEMPTS / _ISSUED_PER_HOUR).
+    'DEFAULT_THROTTLE_RATES': {
+        'login': os.environ.get('THROTTLE_LOGIN', '10/min'),
+        'otp': os.environ.get('THROTTLE_OTP', '5/min'),
+        'otp_verify': os.environ.get('THROTTLE_OTP_VERIFY', '10/min'),
+        'parent_link': os.environ.get('THROTTLE_PARENT_LINK', '10/hour'),
+        'sso_handoff': os.environ.get('THROTTLE_SSO_HANDOFF', '30/min'),
+    },
+    # Client IP = the last X-Forwarded-For hop added by our reverse proxy
+    # (nginx). Without this DRF trusts the whole header, which the client
+    # controls, so per-IP throttles could be dodged by spoofing it.
+    'NUM_PROXIES': int(os.environ.get('DRF_NUM_PROXIES', '1')),
 }
+
+# The test suite hits login/OTP endpoints many times from one IP; throttling
+# is off there (a dedicated test turns it back on) and on everywhere else.
+import sys as _sys
+AUTH_THROTTLE_ENABLED = (
+    os.environ.get('AUTH_THROTTLE_ENABLED', 'True').lower() in ('true', '1', 'yes')
+    and not (len(_sys.argv) > 1 and _sys.argv[1] == 'test')
+)
 
 ROOT_URLCONF = "campusflow.urls"
 
@@ -479,6 +500,20 @@ EMAIL_BACKEND = "campusflow_app.email_backend.DemoAwareEmailBackend"
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "CampusNexus <noreply@campusnexus.in>")
 
+# Polynexus bank account shown to colleges on the Subscription Billing page
+# for NEFT/RTGS payments. Left unset, the API returns bank_details=None and
+# the page tells the college to contact Polynexus, so a made-up account
+# number is never shown to someone who might transfer money to it.
+_bank_account_number = os.environ.get("POLYNEXUS_BANK_ACCOUNT_NUMBER", "")
+_bank_ifsc = os.environ.get("POLYNEXUS_BANK_IFSC", "")
+POLYNEXUS_BANK_DETAILS = {
+    "bank_name": os.environ.get("POLYNEXUS_BANK_NAME", ""),
+    "account_name": os.environ.get("POLYNEXUS_BANK_ACCOUNT_NAME", "Polynexus Technologies Private Limited"),
+    "account_number": _bank_account_number,
+    "ifsc_code": _bank_ifsc,
+    "branch": os.environ.get("POLYNEXUS_BANK_BRANCH", ""),
+} if _bank_account_number and _bank_ifsc else None
+
 # Recipient list configuration for landing page enquiries
 CONTACT_RECIPIENT_EMAIL = os.environ.get("CONTACT_RECIPIENT_EMAIL", "hello@campusnexus.in")
 CONTACT_CC_LIST = ["sales@polynexus.in"]
@@ -492,6 +527,10 @@ INSIGHTFACE_MODEL_NAME = "buffalo_l"
 INSIGHTFACE_MODEL_ROOT = os.environ.get("INSIGHTFACE_MODEL_ROOT", BASE_DIR / "models" / "insightface")
 
 LIVENESS_BLINK_THRESHOLD = 5.5
+
+# Classroom geofence (utils/geofence.py): a point this close outside a room's
+# boundary still counts as inside, to absorb normal GPS drift.
+GEOFENCE_BUFFER_METERS = float(os.environ.get("GEOFENCE_BUFFER_METERS", "10"))
 
 # ── Adaptive face-template learning ──────────────────────────────────────────
 # The ArcFace backbone (buffalo_l) itself is frozen and NOT retrained — instead

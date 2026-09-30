@@ -11,6 +11,7 @@ from rest_framework import status
 from campusflow_app.models import StudentFeeInvoice, FeePayment, PaymentGatewayTransaction
 from campusflow_app.payment_gateways import get_adapter_for_tenant, GatewayNotImplementedError
 from tenants.models import Tenant
+from ..permissions import RequiresModule
 
 
 class CreatePaymentOrderView(APIView):
@@ -19,7 +20,7 @@ class CreatePaymentOrderView(APIView):
     Body: {"invoice_id": int, "amount": optional decimal}
     A student starts an online checkout for one of their own invoices.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("fees")]
 
     def post(self, request):
         invoice_id = request.data.get("invoice_id")
@@ -125,7 +126,7 @@ class VerifyPaymentView(APIView):
     Called by the frontend right after the gateway checkout widget succeeds.
     The webhook is the authoritative fallback if this never fires.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("fees")]
 
     def post(self, request):
         txn_id = request.data.get("transaction_id")

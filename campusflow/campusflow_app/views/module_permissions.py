@@ -57,6 +57,13 @@ ROLE_DEFAULT_MODULES = {
         "timetable-generation", "syllabus-tracker", "clearance",
         "academics", "curriculum", "transcript"
     ],
+    # Deliberately small: a College Admin widens it per college from Module
+    # Assignment (the 'Principal' group shows up there automatically). Kept to
+    # modules whose APIs already accept Principal via is_faculty_or_above /
+    # is_hm_or_above, so nothing in the sidebar leads to a 403.
+    "Principal": [
+        "dashboard", "settings", "leave", "announcements", "exams", "analytics"
+    ],
     "Faculty": [
         "dashboard", "attendance", "schedule", "settings", "leave", "exams",
         "announcements", "analytics", "assignments", "valuation", "ai-valuation",

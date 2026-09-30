@@ -1,10 +1,14 @@
 import datetime
 from django.db import connection
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from django.core.cache import cache
+
+from ..throttling import AuthScopedRateThrottle
 
 from ..models.profile import GuardianProfile, StudentProfile
 from ..models.attendance import Attendance
@@ -17,6 +21,20 @@ from ..models.submission import AssignmentSubmission
 from ..models.bus_tracking import BusSubscription, BusLocation, BusRoute
 from ..models.announcement import Announcement
 from django.contrib.auth.models import User
+from ..models.lecture import Lecture
+from ..services.detention import compute_attendance_rate
+
+# Linking by DOB/admission number is a guessable secret, so failed attempts are
+# capped per guardian (on top of the per-IP 'parent_link' throttle).
+LINK_MAX_FAILURES_PER_DAY = 5
+LINK_FAILED_MESSAGE = "We couldn't verify that student. Check the student ID and date of birth or admission number."
+# A BusLocation older than this isn't "live".
+BUS_LIVE_WINDOW = datetime.timedelta(minutes=15)
+
+
+def _class_display(student):
+    parts = [p for p in (student.current_semester_year, student.section_division) if p]
+    return "-".join(parts) or None
 
 
 class ParentLinkChildView(APIView):
@@ -25,6 +43,8 @@ class ParentLinkChildView(APIView):
     Required fields: student_id, verification_key (can be date_of_birth or admission_number).
     """
     permission_classes = [IsAuthenticated]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'parent_link'
 
     def post(self, request):
         user = request.user
@@ -38,23 +58,30 @@ class ParentLinkChildView(APIView):
         if not student_id or not verification_key:
             return Response({"error": "student_id and verification_key (DOB or Admission Number) are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Lookup student
-        student = StudentProfile.objects.filter(student_id=student_id).first()
-        if not student:
-            return Response({"error": "Student with the specified ID not found."}, status=status.HTTP_404_NOT_FOUND)
+        failures_key = f"parent_link_failures:{connection.schema_name}:{user.id}"
+        failures = cache.get(failures_key) or 0
+        if failures >= LINK_MAX_FAILURES_PER_DAY:
+            return Response(
+                {"error": "Too many failed attempts. Try again tomorrow or contact the college office."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
-        # Verification check (DOB or admission_number)
+        # Lookup student — "not found" and "wrong key" get the same reply so
+        # this can't be used to probe which student IDs exist.
+        student = StudentProfile.objects.filter(student_id=student_id).first()
         dob_match = False
-        if student.date_of_birth:
+        if student and student.date_of_birth:
             if isinstance(student.date_of_birth, datetime.date):
                 dob_match = student.date_of_birth.strftime('%Y-%m-%d') == verification_key
             else:
                 dob_match = str(student.date_of_birth) == verification_key
 
-        admission_match = student.admission_number == verification_key
+        admission_match = bool(student and student.admission_number and student.admission_number == verification_key)
 
         if not (dob_match or admission_match):
-            return Response({"error": "Verification failed. Incorrect Date of Birth or Admission Number."}, status=status.HTTP_400_BAD_REQUEST)
+            cache.set(failures_key, failures + 1, timeout=24 * 3600)
+            return Response({"error": LINK_FAILED_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+        cache.delete(failures_key)
 
         # Check if already linked
         if guardian_profile.students.filter(id=student.id).exists():
@@ -63,12 +90,12 @@ class ParentLinkChildView(APIView):
         # Link child
         guardian_profile.students.add(student)
         return Response({
-            "message": f"Successfully linked student {student.user.get_full_name()} (Class {student.current_semester_year}-{student.section_division}) to your account.",
+            "message": f"Successfully linked {student.user.get_full_name() or student.student_id} to your account.",
             "child": {
                 "id": student.id,
                 "name": student.user.get_full_name(),
                 "student_id": student.student_id,
-                "class": f"{student.current_semester_year}-{student.section_division}",
+                "class": _class_display(student),
             }
         }, status=status.HTTP_200_OK)
 
@@ -111,15 +138,17 @@ class ParentChildrenListView(APIView):
             bus_status = None
             bus_sub = BusSubscription.objects.filter(user=child.user, status='active').first()
             if bus_sub:
-                # Look for live location of driver
-                live_loc = BusLocation.objects.filter(route=bus_sub.route).first()
-                # Return real route info and mock live stop status for visual fidelity
+                # Live = a GPS update from the route's bus in the last few
+                # minutes. (This used to return a hardcoded "ETA 7:48 AM".)
+                is_live = BusLocation.objects.filter(
+                    route=bus_sub.route, updated_at__gte=timezone.now() - BUS_LIVE_WINDOW,
+                ).exists()
                 bus_status = {
                     "route_name": bus_sub.route.name,
                     "boarding_stop": bus_sub.boarding_stop,
-                    "is_live": bool(live_loc),
-                    "status_message": "Bus is 2 stops away – ETA 7:48 AM" if live_loc else "Bus route not started yet",
-                    "eta": "7:48 AM" if live_loc else "TBD"
+                    "is_live": is_live,
+                    "status_message": "Bus is running" if is_live else "Bus route not started yet",
+                    "eta": None,
                 }
 
             # 3. Fee summary banner
@@ -156,9 +185,9 @@ class ParentChildrenListView(APIView):
                 "id": child.id,
                 "name": child.user.get_full_name(),
                 "student_id": child.student_id,
-                "class_grade": child.current_semester_year or "7",
-                "section": child.section_division or "A",
-                "class_display": f"Class {child.current_semester_year or '7'}-{child.section_division or 'A'}",
+                "class_grade": child.current_semester_year or None,
+                "section": child.section_division or None,
+                "class_display": _class_display(child),
                 "profile_picture": profile_pic,
                 "attendance_status": attendance_status,
                 "bus_tracking": bus_status,
@@ -184,25 +213,33 @@ class ParentChildAttendanceView(APIView):
 
         student = StudentProfile.objects.get(id=student_id)
         
-        # Monthly details (past 30 days logs)
-        thirty_days_ago = datetime.date.today() - datetime.timedelta(days=30)
-        logs = Attendance.objects.filter(user=student.user, check_in_time__date__gte=thirty_days_ago)
+        # Last 30 days, judged against lectures actually held for the child's
+        # department (same basis as the detention rule), not a fixed 22-day
+        # school month. A day with no lectures is a "Holiday".
+        today = datetime.date.today()
+        start = today - datetime.timedelta(days=29)
+        attended_dates = set(
+            Attendance.objects.filter(
+                user=student.user, check_in_time__date__gte=start,
+            ).values_list("check_in_time__date", flat=True)
+        )
+        lecture_dates = set()
+        if student.department_id:
+            lecture_dates = set(
+                Lecture.objects.filter(
+                    faculty__teaching_staff_profile__department_id=student.department_id,
+                    start_time__date__gte=start, start_time__date__lte=today,
+                ).exclude(code__isnull=True).exclude(code="").values_list("start_time__date", flat=True)
+            )
 
-        # Generate list of days
         days = []
         present_count = 0
-        total_days = 30 # standard visual check
-
-        for i in range(total_days):
-            day_date = datetime.date.today() - datetime.timedelta(days=i)
-            # Skip Sundays/Saturdays for standard school weekend mapping
-            is_weekend = day_date.weekday() in (5, 6)
-            
-            att = logs.filter(check_in_time__date=day_date).first()
-            if att:
+        for i in range(30):
+            day_date = today - datetime.timedelta(days=i)
+            if day_date in attended_dates:
                 status_str = "Present"
                 present_count += 1
-            elif is_weekend:
+            elif day_date not in lecture_dates:
                 status_str = "Holiday"
             else:
                 # Check leaves
@@ -220,13 +257,16 @@ class ParentChildAttendanceView(APIView):
                 "status": status_str
             })
 
-        percentage = round((present_count / (total_days - 8)) * 100, 1) if (total_days - 8) > 0 else 100.0
-        percentage = min(100.0, percentage)
+        rate, _, held = (None, 0, 0)
+        if student.department_id:
+            rate, _, held = compute_attendance_rate(student, start, today)
 
         return Response({
-            "percentage": percentage,
+            # Lecture-level %, None when no lectures were held in the window.
+            "percentage": round(rate, 1) if rate is not None else None,
             "present_days": present_count,
-            "total_days_evaluated": total_days - 8,
+            "total_days_evaluated": len(lecture_dates),
+            "lectures_held": held,
             "calendar": days
         }, status=status.HTTP_200_OK)
 

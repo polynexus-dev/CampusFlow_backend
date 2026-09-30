@@ -36,9 +36,16 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
     Bus Driver connects  → sends {lat, lng} every N seconds
     Admin/Viewer connects → receives live bus position broadcasts
 
-    Groups:
-      "bus_admins"           – all admin watchers (receive broadcasts)
-      "bus_<user_id>"        – individual driver (receives ack)
+    Groups (every name is prefixed with the college's schema, because the
+    Redis channel layer is shared by all colleges — unprefixed names used to
+    broadcast one college's buses to every other college's admins):
+      "bus_<schema>_admins"          – admin watchers (receive broadcasts)
+      "bus_<schema>_user_<user_id>"  – individual driver (receives ack)
+      "bus_<schema>_route_<route_id>" – students tracking one route
+
+    Auth: a JWT access token is required (?token=). The college comes from
+    the token's own signed tenant_schema claim; a ?schema= that disagrees is
+    rejected, so a token from one college can't open a socket on another.
     """
 
     JITTER_THRESHOLD_M = 8.0       # ignore movement < 8 metres (GPS noise)
@@ -53,49 +60,42 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
         # Parse query parameters for mobile auth & schema routing
         query_params = parse_qs(self.scope.get("query_string", b"").decode("utf-8"))
         token = query_params.get("token", [None])[0]
-        schema = query_params.get("schema", [None])[0] or "public"
+        requested_schema = query_params.get("schema", [None])[0]
 
-        self.schema = schema
         self.user = None
         self.mock_task = None
 
-        print(f"[WS Connect] Initiating connection. Schema: {schema}, Token present: {bool(token)}")
+        if not token:
+            await self.close()
+            return
+        try:
+            from rest_framework_simplejwt.tokens import AccessToken
+            access_token = AccessToken(token)  # verifies signature and expiry
+        except Exception:
+            await self.close()
+            return
 
-        if token:
-            try:
-                from rest_framework_simplejwt.tokens import AccessToken
-                access_token = AccessToken(token)
-                user_id = access_token["user_id"]
-                self.user = await self._get_user_by_id(user_id, schema)
-                if self.user:
-                    print(f"[WS Connect] Token authenticated successfully. User: {self.user.username} (ID: {self.user.id})")
-                else:
-                    print(f"[WS Connect] Token decoded to user ID {user_id} but user not found in schema {schema}")
-            except Exception as e:
-                print(f"[WS Connect] Token auth failed/invalid: {e}")
+        token_schema = access_token.get("tenant_schema")
+        if not token_schema or token_schema == "public" or (requested_schema and requested_schema != token_schema):
+            await self.close()
+            return
 
-        # Fallback to standard session auth
-        if not self.user:
-            self.user = self.scope.get("user")
-            if self.user and not self.user.is_anonymous:
-                print(f"[WS Connect] Authenticated via session cookie. User: {self.user.username}")
-
-        if not self.user or self.user.is_anonymous:
-            print("[WS Connect] Rejected connection: Anonymous / Unauthenticated user.")
+        self.schema = token_schema
+        self.user = await self._get_user_by_id(access_token["user_id"], self.schema)
+        if not self.user or not self.user.is_active:
             await self.close()
             return
 
         self.is_driver = await self._is_bus_driver(self.schema)
-        self.is_admin  = self.user.is_staff or self.user.is_superuser
+        self.is_admin = await self._is_bus_admin(self.schema)
         self.tracked_groups = []
 
         if self.is_admin:
-            await self.channel_layer.group_add("bus_admins", self.channel_name)
+            await self.channel_layer.group_add(self._admins_group(), self.channel_name)
         elif self.is_driver:
-            await self.channel_layer.group_add(f"bus_{self.user.id}", self.channel_name)
+            await self.channel_layer.group_add(self._user_group(), self.channel_name)
 
         await self.accept()
-        print(f"[WS Connect] Accepted connection. User: {self.user.username}, IsDriver: {self.is_driver}, IsAdmin: {self.is_admin}")
 
         # Send initial state to admin on connect
         if self.is_admin:
@@ -104,10 +104,10 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         print(f"[WS Disconnect] Connection closed with code {close_code}.")
-        if hasattr(self, "is_admin") and self.is_admin:
-            await self.channel_layer.group_discard("bus_admins", self.channel_name)
-        elif hasattr(self, "user") and hasattr(self, "is_driver") and self.is_driver:
-            await self.channel_layer.group_discard(f"bus_{self.user.id}", self.channel_name)
+        if getattr(self, "is_admin", False):
+            await self.channel_layer.group_discard(self._admins_group(), self.channel_name)
+        elif getattr(self, "is_driver", False):
+            await self.channel_layer.group_discard(self._user_group(), self.channel_name)
 
         if hasattr(self, "tracked_groups"):
             for group_name in self.tracked_groups:
@@ -140,7 +140,7 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
                         }))
                         return
 
-                    group_name = f"bus_route_{route_id}"
+                    group_name = self._route_group(route_id)
                     await self.channel_layer.group_add(group_name, self.channel_name)
                     if group_name not in self.tracked_groups:
                         self.tracked_groups.append(group_name)
@@ -151,8 +151,11 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
                     }))
 
                     # Check if there is already an active driver for this route
+                    # The simulator exists for the public sales demo only. On a
+                    # real college it used to broadcast a fake moving bus to
+                    # every student on the route whenever no driver was live.
                     has_driver = await self._has_active_driver(route_id, self.schema)
-                    if not has_driver:
+                    if not has_driver and await self._is_demo_college(self.schema):
                         # Cancel existing mock task if any
                         if self.mock_task:
                             self.mock_task.cancel()
@@ -186,12 +189,12 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
             }
 
             # Broadcast to all admins
-            await self.channel_layer.group_send("bus_admins", payload)
+            await self.channel_layer.group_send(self._admins_group(), payload)
 
             # Broadcast to route group
             if route_info:
                 route_id = route_info.get("id")
-                route_group = f"bus_route_{route_id}"
+                route_group = self._route_group(route_id)
                 await self.channel_layer.group_send(route_group, payload)
 
                 # Check geofences
@@ -206,7 +209,7 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
                         "message": f"Bus is approaching stop '{alert['stop_name']}' ({alert['distance']:.0f}m away)."
                     }
                     await self.channel_layer.group_send(route_group, alert_payload)
-                    await self.channel_layer.group_send("bus_admins", alert_payload)
+                    await self.channel_layer.group_send(self._admins_group(), alert_payload)
 
             # Ack back to the driver
             await self.send(text_data=json.dumps({**payload, "type": "location_ack"}))
@@ -227,6 +230,31 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
     # ------------------------------------------------------------------ #
     # Database and Geofencing helpers
     # ------------------------------------------------------------------ #
+
+    # Group names — always scoped to this connection's college.
+    def _admins_group(self):
+        return f"bus_{self.schema}_admins"
+
+    def _user_group(self):
+        return f"bus_{self.schema}_user_{self.user.id}"
+
+    def _route_group(self, route_id):
+        return f"bus_{self.schema}_route_{route_id}"
+
+    @database_sync_to_async
+    def _is_demo_college(self, s_name):
+        from tenants.models import Tenant
+        return Tenant.objects.filter(schema_name=s_name, is_demo=True).exists() or s_name == "demo"
+
+    @database_sync_to_async
+    def _is_bus_admin(self, s_name):
+        """College admins and the Transport Coordinator watch every bus.
+        (This used to be is_staff, which isn't a role in this app.)"""
+        from campusflow_app.permissions import get_user_group, is_college_admin
+        with schema_context(s_name):
+            if self.user.is_superuser or is_college_admin(self.user):
+                return True
+            return get_user_group(self.user) == "Transport Coordinator"
 
     @database_sync_to_async
     def _get_user_by_id(self, uid, s_name):
@@ -486,11 +514,12 @@ class BusTrackingConsumer(AsyncWebsocketConsumer):
                         "name": route_name,
                         "stops": stops
                     },
-                    "last_seen": timezone.now().isoformat()
+                    "last_seen": timezone.now().isoformat(),
+                    "simulated": True,
                 }
                 
                 # Broadcast update to the route group (notifying student app)
-                await self.channel_layer.group_send(f"bus_route_{route_id}", payload)
+                await self.channel_layer.group_send(self._route_group(route_id), payload)
                 
                 # Sleep for 10 seconds before moving to the next simulated coordinate
                 await asyncio.sleep(10)

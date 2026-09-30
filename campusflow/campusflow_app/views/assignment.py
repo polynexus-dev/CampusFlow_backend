@@ -1,3 +1,4 @@
+from django.db.models import Count
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -45,10 +46,17 @@ class AssignmentListCreateView(APIView):
                 qs = qs.filter(department=profile.department)
             else:
                 qs = qs.none()
+        # Faculty see the assignments they posted; HODs/Admins keep the full list
+        elif user_group == 'Faculty':
+            qs = qs.filter(created_by=user)
+
+        is_staff_view = user_group != 'student'
+        if is_staff_view:
+            qs = qs.annotate(submission_count=Count('submissions'))
 
         data = []
         for a in qs:
-            data.append({
+            item = {
                 "id": a.id,
                 "title": a.title,
                 "description": a.description,
@@ -61,7 +69,10 @@ class AssignmentListCreateView(APIView):
                 "attachment": a.attachment.url if a.attachment else None,
                 "created_by": a.created_by.get_full_name() or a.created_by.username,
                 "created_at": a.created_at.isoformat()
-            })
+            }
+            if is_staff_view:
+                item["submission_count"] = a.submission_count
+            data.append(item)
         return Response(data, status=status.HTTP_200_OK)
 
     def post(self, request):

@@ -671,7 +671,7 @@ class BusLiveLocationsView(generics.ListAPIView):
             loc = BusLocation.objects.filter(route=r, updated_at__gte=cutoff).first()
             if loc:
                 serializer = self.get_serializer(loc)
-                buses.append(serializer.data)
+                buses.append({**serializer.data, "is_live": True})
             else:
                 # Build a placeholder location at the first stop of the route
                 first_stop = r.stops[0] if r.stops else {"name": "Terminus", "lat": 21.1458, "lng": 79.0882}
@@ -693,7 +693,10 @@ class BusLiveLocationsView(generics.ListAPIView):
                         "name": r.name,
                         "stops": r.stops
                     },
-                    "last_seen": timezone.now().isoformat()
+                    "last_seen": timezone.now().isoformat(),
+                    # Placeholder parked at the first stop, not a real GPS
+                    # fix — clients must not present it as a running bus.
+                    "is_live": False,
                 })
         return Response(buses)
 

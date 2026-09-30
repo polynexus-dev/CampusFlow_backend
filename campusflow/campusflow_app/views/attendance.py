@@ -201,3 +201,37 @@ class LectureCheckinByCodeView(APIView):
         )
 
         return Response({"detail": "Attendance marked successfully!"}, status=status.HTTP_201_CREATED)
+
+
+class StudentAttendanceSummaryView(APIView):
+    """
+    GET /api/student/attendance-summary/
+    The logged-in student's attendance % for the current term (the same
+    calculation the detention rule uses), plus the detention minimum when
+    that rule is switched on. Returns percentage=None when there's no
+    current term or no lectures held yet.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from ..models.academics import Term
+        from ..services.detention import compute_attendance_rate, get_detention_settings
+
+        profile = getattr(request.user, "student_profile", None)
+        if profile is None:
+            return Response({"error": "Only students have an attendance summary."}, status=status.HTTP_403_FORBIDDEN)
+
+        term = Term.objects.filter(is_current=True).first()
+        empty = {"percentage": None, "attended": 0, "held": 0, "term_name": term.name if term else None}
+        if term is None or not profile.department_id:
+            return Response({**empty, "minimum_required": None}, status=status.HTTP_200_OK)
+
+        rate, attended, held = compute_attendance_rate(profile, term.start_date, term.end_date)
+        detention = get_detention_settings()
+        return Response({
+            "percentage": round(rate, 1) if rate is not None else None,
+            "attended": attended,
+            "held": held,
+            "term_name": term.name,
+            "minimum_required": float(detention.minimum_attendance_percent) if detention.is_enabled else None,
+        }, status=status.HTTP_200_OK)

@@ -66,7 +66,7 @@ def _resolve_student_profile(request):
         return None, Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
-def _compute_student_progress(profile):
+def _compute_student_progress(profile, published_only=True):
     """
     The body of StudentProgressView, factored out so
     run_student_insight_generation (tasks.py) can recompute the same payload
@@ -74,6 +74,8 @@ def _compute_student_progress(profile):
     Returns the same dict StudentProgressView.get() responds with.
     """
     qs = StudentExamResult.objects.filter(student=profile).select_related('exam', 'exam__course')
+    if published_only:
+        qs = qs.filter(exam__results_published=True)
 
     # percentage isn't a stored DB column, so aggregate in Python over the
     # (typically small) per-student result set rather than in SQL.
@@ -195,7 +197,9 @@ class StudentProgressView(APIView):
         profile, error = _resolve_student_profile(request)
         if error:
             return error
-        return Response(_compute_student_progress(profile), status=status.HTTP_200_OK)
+        # Students and guardians only see published marks; staff also see drafts.
+        published_only = not is_faculty_or_above(request.user)
+        return Response(_compute_student_progress(profile, published_only), status=status.HTTP_200_OK)
 
 
 class StudentTopicPerformanceView(APIView):
@@ -220,10 +224,11 @@ class StudentTopicPerformanceView(APIView):
         profile, error = _resolve_student_profile(request)
         if error:
             return error
-        return Response(_compute_student_topic_performance(profile), status=status.HTTP_200_OK)
+        published_only = not is_faculty_or_above(request.user)
+        return Response(_compute_student_topic_performance(profile, published_only), status=status.HTTP_200_OK)
 
 
-def _compute_student_topic_performance(profile):
+def _compute_student_topic_performance(profile, published_only=True):
     """
     The body of StudentTopicPerformanceView, factored out so
     run_student_insight_generation (tasks.py) can recompute the same payload
@@ -235,6 +240,8 @@ def _compute_student_topic_performance(profile):
         .filter(student=profile, status='Evaluated')
         .select_related('session__exam')
     )
+    if published_only:
+        papers = papers.filter(session__exam__results_published=True)
 
     topics = {}
         # Keyed by (course_id, co_code): a CO code is only unique within its

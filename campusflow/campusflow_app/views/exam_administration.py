@@ -23,14 +23,14 @@ from ..models.academics import AcademicYear
 from ..models.clearance import ClearanceRequest
 from ..models.exam_administration import ConvocationRequest, MigrationRequest, RevaluationRequest
 from ..models.result import StudentExamResult
-from ..permissions import IsHMOrAbove, IsSaaSOrCollegeAdmin, is_college_admin
+from ..permissions import RequiresModule, IsHMOrAbove, IsSaaSOrCollegeAdmin, is_college_admin, is_faculty_or_above
 from ..services.clearance import is_student_cleared
 from ..services.detention import get_detention_settings
 
 
 class AttendanceDetentionSettingsView(APIView):
     """GET/PATCH the tenant's minimum-attendance detention rule."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("exams")]
 
     def get(self, request):
         settings_row = get_detention_settings()
@@ -75,7 +75,7 @@ def _serialize_revaluation(req):
 
 class RevaluationRequestCreateView(APIView):
     """POST /api/exam-administration/revaluation-requests/ — {result_id, reason}"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("exams")]
 
     def post(self, request):
         result_id = request.data.get("result_id")
@@ -87,6 +87,10 @@ class RevaluationRequestCreateView(APIView):
             result = StudentExamResult.objects.select_related("exam", "student__user").get(id=result_id)
         except StudentExamResult.DoesNotExist:
             return Response({"error": "Result not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # A student may only ask for revaluation of their own marks.
+        if getattr(result.student, "user_id", None) != request.user.id and not is_faculty_or_above(request.user):
+            return Response({"error": "You can only request revaluation of your own result."}, status=status.HTTP_403_FORBIDDEN)
 
         if not result.exam.results_published:
             return Response({"error": "Results for this exam aren't published yet."}, status=status.HTTP_400_BAD_REQUEST)
@@ -101,7 +105,7 @@ class RevaluationRequestCreateView(APIView):
 class RevaluationRequestListView(APIView):
     """GET /api/exam-administration/revaluation-requests/?exam_id= — pending requests,
     department-scoped for a Department Head, unscoped for College/SaaS Admin."""
-    permission_classes = [IsAuthenticated, IsHMOrAbove]
+    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("exams")]
 
     def get(self, request):
         qs = RevaluationRequest.objects.filter(status=RevaluationRequest.STATUS_PENDING).select_related(
@@ -122,7 +126,7 @@ class RevaluationRequestActionView(APIView):
     """POST /api/exam-administration/revaluation-requests/<id>/action/
     Payload: {action: "approve" | "reject", revised_marks?}
     revised_marks is required on approve — the reviewer's own re-checked mark."""
-    permission_classes = [IsAuthenticated, IsHMOrAbove]
+    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("exams")]
 
     def post(self, request, pk):
         try:
@@ -179,7 +183,7 @@ def _serialize_migration(req):
 
 class MigrationRequestCreateView(APIView):
     """POST /api/exam-administration/migration-requests/ — {destination_institution, reason?}"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("exams")]
 
     def post(self, request):
         student_profile = getattr(request.user, "student_profile", None)
@@ -199,7 +203,7 @@ class MigrationRequestCreateView(APIView):
 
 class MigrationRequestListView(APIView):
     """GET /api/exam-administration/migration-requests/?status= — Admin only."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("exams")]
 
     def get(self, request):
         qs = MigrationRequest.objects.select_related("student__user").all()
@@ -217,7 +221,7 @@ class MigrationRequestActionView(APIView):
     outstanding library/hostel/fee dues) — same override escape hatch
     PromoteClassView already uses for the equivalent clearance gate.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("exams")]
 
     def post(self, request, pk):
         try:
@@ -270,7 +274,7 @@ def _serialize_convocation(req):
 
 class ConvocationRequestCreateView(APIView):
     """POST /api/exam-administration/convocation-requests/ — {academic_year_id, remarks?}"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresModule("exams")]
 
     def post(self, request):
         student_profile = getattr(request.user, "student_profile", None)
@@ -293,7 +297,7 @@ class ConvocationRequestCreateView(APIView):
 
 class ConvocationRequestListView(APIView):
     """GET /api/exam-administration/convocation-requests/?status=&academic_year= — Admin only."""
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("exams")]
 
     def get(self, request):
         qs = ConvocationRequest.objects.select_related("student__user", "academic_year").all()
@@ -312,7 +316,7 @@ class ConvocationRequestActionView(APIView):
     Payload: {action: "approve" | "reject", override?}
     Same final-exit clearance gate as MigrationRequestActionView.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("exams")]
 
     def post(self, request, pk):
         try:

@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import Department, StudentProfile, PromotionBatch, PromotionRecord
-from ..permissions import IsSaaSOrCollegeAdmin
+from ..permissions import RequiresModule, IsSaaSOrCollegeAdmin
 from ..services.clearance import is_student_cleared
 
 REVERT_WINDOW = timedelta(days=7)
@@ -37,7 +37,7 @@ class PromoteClassView(APIView):
     }
     Students in the from-class not listed in `decisions` default to "promote".
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("academics")]
 
     @transaction.atomic
     def post(self, request):
@@ -162,7 +162,7 @@ class PromoteClassRevertView(APIView):
     POST /api/students/promote/<batch_id>/revert/
     Only allowed within 7 days of the original promotion.
     """
-    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("academics")]
 
     @transaction.atomic
     def post(self, request, batch_id):

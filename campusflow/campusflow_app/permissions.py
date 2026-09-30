@@ -11,7 +11,11 @@ Auth Flow:
      → created only by College Admin (Management/Administrator) AFTER a department exists
 
 Role hierarchy (highest → lowest):
-  SaaS Admin (is_superuser) > Management > Administrator > Department Head > Faculty > Support Staff > Student
+  SaaS Admin (is_superuser) > Management > Administrator > Principal > Department Head > Faculty > Support Staff > Student
+
+  Principal is the academic head: above Department Head for academic/approval
+  purposes (e.g. approves HOD leave) but NOT a College Admin — they cannot
+  create users or run fees/payroll. Created only by Management or SaaS Admin.
 """
 
 from rest_framework.permissions import BasePermission
@@ -54,18 +58,26 @@ def is_saas_or_college_admin(user):
     return is_saas_admin(user) or is_college_admin(user)
 
 
+PRINCIPAL_ROLE = 'Principal'
+
+
+def is_principal(user):
+    """Principal = the college's academic head (see module docstring)."""
+    return user.is_authenticated and get_user_group(user) == PRINCIPAL_ROLE
+
+
 def is_faculty_or_above(user):
-    """Faculty, Department Head, Administrator, Management, or SaaS Admin."""
+    """Faculty, Department Head, Principal, Administrator, Management, or SaaS Admin."""
     if not user.is_authenticated:
         return False
     if is_saas_admin(user):
         return True
     group = get_user_group(user)
-    return group in ('Management', 'Administrator', 'Department Head', 'Faculty')
+    return group in ('Management', 'Administrator', PRINCIPAL_ROLE, 'Department Head', 'Faculty')
 
 
 def is_hm_or_above(user):
-    """Department Head, Administrator, Management, or SaaS Admin — NOT plain Faculty.
+    """Department Head, Principal, Administrator, Management, or SaaS Admin — NOT plain Faculty.
     Used to gate HM-level re-approval actions (e.g. post-publish marks corrections)
     that a regular teacher should not be able to self-approve."""
     if not user.is_authenticated:
@@ -73,7 +85,7 @@ def is_hm_or_above(user):
     if is_saas_admin(user):
         return True
     group = get_user_group(user)
-    return group in ('Management', 'Administrator', 'Department Head')
+    return group in ('Management', 'Administrator', PRINCIPAL_ROLE, 'Department Head')
 
 
 # ─────────────────────────────────────────────
@@ -121,8 +133,14 @@ class IsHMOrAbove(BasePermission):
 
 
 class IsNotStudent(BasePermission):
-    """Any authenticated user except students."""
+    """Any authenticated staff user — not students, and not guardians either
+    (who are also outside the college's staff hierarchy)."""
     message = "Students are not allowed to access this resource."
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        return get_user_group(request.user) not in ('student', 'guardian')
 
 
 class IsCommitteeMember(BasePermission):

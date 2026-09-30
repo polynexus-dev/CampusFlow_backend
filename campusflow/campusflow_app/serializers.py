@@ -40,6 +40,7 @@ from .models.profile import (
     DepartmentHeadProfile,
     ManagementProfile,
     NonTeachingStaffProfile,
+    PrincipalProfile,
     StudentProfile,
     TeachingStaffProfile,
     GuardianProfile,
@@ -87,8 +88,17 @@ from .demo_guard import is_demo_tenant
 class ClassroomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Classroom
-        fields = ('id', 'name', 'code', 'capacity')
+        fields = ('id', 'name', 'code', 'capacity', 'boundary')
         read_only_fields = ('id',)
+
+    def validate_boundary(self, value):
+        from .utils.geofence import validate_boundary
+        if value is None:
+            return value
+        error = validate_boundary(value)
+        if error:
+            raise serializers.ValidationError(error)
+        return [[float(lat), float(lng)] for lat, lng in value]
 
 class LectureSerializer(serializers.ModelSerializer):
     classroom_name = serializers.CharField(source='classroom.name', read_only=True)
@@ -126,6 +136,10 @@ class LocationValidationSerializer(serializers.Serializer):
     classroom_id = serializers.IntegerField()
     latitude = serializers.DecimalField(max_digits=9, decimal_places=6)
     longitude = serializers.DecimalField(max_digits=9, decimal_places=6)
+
+LOGIN_MAX_FAILURES = 10
+LOGIN_LOCKOUT_SECONDS = 15 * 60
+
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -247,14 +261,35 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                             cache.set(cache_key, tenant.schema_name, 86400)
                             break
 
+        # Same message for "no such user" and "wrong password", so the login
+        # form can't be used to discover which usernames/emails exist.
         if not user:
-            raise serializers.ValidationError(f"{username} does not exist", code='not_found')
+            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
 
         # Switch context to the target tenant's schema for the rest of this request
         if target_tenant and target_tenant.schema_name != connection.schema_name:
             connection.set_tenant(target_tenant)
             # Re-fetch user in the active tenant connection context
             user = User.objects.get(id=user.id)
+
+        # Password first, before anything below reveals account status or
+        # auto-creates groups/profiles. Accounts lock for LOGIN_LOCKOUT_SECONDS
+        # after LOGIN_MAX_FAILURES wrong passwords, on top of the per-IP throttle.
+        lockout_key = f"login_failures:{connection.schema_name}:{user.id}"
+        failures = cache.get(lockout_key) or 0
+        if failures >= LOGIN_MAX_FAILURES:
+            raise serializers.ValidationError(
+                "Too many failed login attempts. Please try again in 15 minutes or reset your password.",
+                code='account_locked',
+            )
+        if not user.check_password(password):
+            cache.set(lockout_key, failures + 1, timeout=LOGIN_LOCKOUT_SECONDS)
+            log_account_event(
+                user, 'LOGIN_FAILED', request=request, ip_address=client_ip, user_agent=user_agent_string,
+                object_repr=f"Failed login attempt for {user.username} (wrong password)",
+            )
+            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
+        cache.delete(lockout_key)
 
         profile_data = None
         user_group = None
@@ -269,6 +304,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                     detected_role = 'Management'
                 elif AdministratorProfile.objects.filter(user=user).exists():
                     detected_role = 'Administrator'
+                elif PrincipalProfile.objects.filter(user=user).exists():
+                    detected_role = 'Principal'
                 elif TeachingStaffProfile.objects.filter(user=user).exists():
                     detected_role = 'Faculty'
                 elif StudentProfile.objects.filter(user=user).exists():
@@ -320,6 +357,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 profile_data = AdministratorProfile.objects.filter(user=user).first()
             elif user_group.name == 'Department Head':
                 profile_data = DepartmentHeadProfile.objects.filter(user=user).first()
+            elif user_group.name == 'Principal':
+                profile_data = PrincipalProfile.objects.filter(user=user).first()
             elif user_group.name == 'guardian':
                 profile_data = GuardianProfile.objects.filter(user=user).first()
             elif user_group.name == 'CA':
@@ -339,6 +378,13 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                         user=user,
                         employee_id=f"ADMIN-{uuid.uuid4().hex[:6].upper()}",
                         designation="System Administrator",
+                        status="active"
+                    )
+                elif user_group.name == 'Principal':
+                    profile_data = PrincipalProfile.objects.create(
+                        user=user,
+                        employee_id=f"PRIN-{uuid.uuid4().hex[:6].upper()}",
+                        designation="Principal",
                         status="active"
                     )
                 elif user_group.name == 'student':
@@ -382,13 +428,6 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                     f"Your account status is '{profile_data.status}'. Please contact administration.",
                     code='account_inactive'
                 )
-
-        if not user.check_password(password):
-            log_account_event(
-                user, 'LOGIN_FAILED', request=request, ip_address=client_ip, user_agent=user_agent_string,
-                object_repr=f"Failed login attempt for {user.username} (wrong password)",
-            )
-            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
 
         attrs['username'] = user.username
         data = super().validate(attrs)
@@ -479,7 +518,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 data['profile']['program_enrolled_in'] = profile_data.program_enrolled_in if hasattr(profile_data, 'program_enrolled_in') else None
                 data['profile']['is_face_registered'] = getattr(profile_data, 'is_face_registered', False)
                 data['profile']['locked_device_id'] = getattr(profile_data, 'locked_device_id', None)
-            elif user_group.name in ('Faculty', 'Management', 'Administrator', 'Department Head', *NON_TEACHING_STAFF_ROLES):
+            elif user_group.name in ('Faculty', 'Management', 'Administrator', 'Principal', 'Department Head', *NON_TEACHING_STAFF_ROLES):
                 data['profile']['employee_id'] = profile_data.employee_id
             elif user_group.name == 'guardian':
                 data['profile']['guardian_id'] = profile_data.guardian_id
@@ -647,7 +686,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         role = data.get('role')
         student_id = data.get('student_id')
         employee_id = data.get('employee_id')
-        valid_roles = ['student', 'Faculty', *NON_TEACHING_STAFF_ROLES, 'Management', 'Administrator', 'Department Head', 'guardian']
+        valid_roles = ['student', 'Faculty', *NON_TEACHING_STAFF_ROLES, 'Management', 'Administrator', 'Principal', 'Department Head', 'guardian']
         if role not in valid_roles:
             raise serializers.ValidationError({"role": f"Invalid role. Must be one of: {', '.join(valid_roles)}."})
         
@@ -676,13 +715,14 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({
                         "parent_guardian_name": "Parent or guardian details (name and email) are required for students under 18 years of age."
                     })
-        elif role in ('Faculty', 'Management', 'Administrator', 'Department Head', *NON_TEACHING_STAFF_ROLES):
+        elif role in ('Faculty', 'Management', 'Administrator', 'Principal', 'Department Head', *NON_TEACHING_STAFF_ROLES):
             if not employee_id:
                 raise serializers.ValidationError({"employee_id": "Employee ID is required for staff/admin/HOD members."})
             if (TeachingStaffProfile.objects.filter(employee_id=employee_id).exists() or
                 NonTeachingStaffProfile.objects.filter(employee_id=employee_id).exists() or
                 ManagementProfile.objects.filter(employee_id=employee_id).exists() or
                 AdministratorProfile.objects.filter(employee_id=employee_id).exists() or
+                PrincipalProfile.objects.filter(employee_id=employee_id).exists() or
                 DepartmentHeadProfile.objects.filter(employee_id=employee_id).exists()):
                 raise serializers.ValidationError({"employee_id": "An employee with this ID already exists."})
             if student_id:
@@ -805,6 +845,11 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             fields['status'] = 'active'
             AdministratorProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'Administrator')
+        elif role == 'Principal':
+            fields = {k: v for k, v in profile_data.items() if hasattr(PrincipalProfile, k)}
+            fields['status'] = 'active'  # Created directly by Management, like Administrator
+            PrincipalProfile.objects.create(user=user, **fields)
+            assign_role_permissions(user, 'Principal')
         elif role == 'Department Head':
             fields = {k: v for k, v in profile_data.items() if hasattr(DepartmentHeadProfile, k)}
             fields['status'] = 'pending'
@@ -1440,6 +1485,15 @@ class NIRFDataEntrySerializer(serializers.ModelSerializer):
 
 class StatutoryCommitteeSerializer(serializers.ModelSerializer):
     academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+    # Lets the UI offer a non-admin only the committees they sit on (e.g. for
+    # recording meetings) now that the list itself is readable by everyone.
+    is_member = serializers.SerializerMethodField()
+
+    def get_is_member(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.memberships.filter(user=request.user).exists()
 
     class Meta:
         model = StatutoryCommittee
