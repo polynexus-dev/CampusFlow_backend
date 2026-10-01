@@ -10,8 +10,11 @@ Auth Flow:
   4. All other users (Faculty, Support Staff, Department Head, Student)
      → created only by College Admin (Management/Administrator) AFTER a department exists
 
-Role hierarchy (highest → lowest):
-  SaaS Admin (is_superuser) > Management > Administrator > Principal > Department Head > Faculty > Support Staff > Student
+ * Role hierarchy (highest → lowest):
+ *   SaaS Admin (is_superuser) > Management > Supervisor > Administrator > Principal > Department Head > Faculty > Support Staff > Student
+ *
+ *   Supervisor: same as College Admin for all day-to-day operations.
+ *   Cannot create, approve, or delete Management-level accounts.
 
   Principal is the academic head: above Department Head for academic/approval
   purposes (e.g. approves HOD leave) but NOT a College Admin — they cannot
@@ -47,11 +50,11 @@ def is_saas_admin(user):
 
 
 def is_college_admin(user):
-    """College Admin = Management or Administrator group in a tenant schema."""
+    """College Admin = Management, Administrator, OR Supervisor group in a tenant schema."""
     if not user.is_authenticated:
         return False
     group = get_user_group(user)
-    return group in ('Management', 'Administrator')
+    return group in ('Management', 'Administrator', SUPERVISOR_ROLE)
 
 
 def is_saas_or_college_admin(user):
@@ -59,6 +62,12 @@ def is_saas_or_college_admin(user):
 
 
 PRINCIPAL_ROLE = 'Principal'
+SUPERVISOR_ROLE = 'Supervisor'
+
+
+def is_supervisor(user):
+    """Supervisor has College-Admin-level access except over Management accounts."""
+    return user.is_authenticated and get_user_group(user) == SUPERVISOR_ROLE
 
 
 def is_principal(user):
@@ -67,25 +76,23 @@ def is_principal(user):
 
 
 def is_faculty_or_above(user):
-    """Faculty, Department Head, Principal, Administrator, Management, or SaaS Admin."""
+    """Faculty, Department Head, Principal, Administrator, Supervisor, Management, or SaaS Admin."""
     if not user.is_authenticated:
         return False
     if is_saas_admin(user):
         return True
     group = get_user_group(user)
-    return group in ('Management', 'Administrator', PRINCIPAL_ROLE, 'Department Head', 'Faculty')
+    return group in ('Management', SUPERVISOR_ROLE, 'Administrator', PRINCIPAL_ROLE, 'Department Head', 'Faculty')
 
 
 def is_hm_or_above(user):
-    """Department Head, Principal, Administrator, Management, or SaaS Admin — NOT plain Faculty.
-    Used to gate HM-level re-approval actions (e.g. post-publish marks corrections)
-    that a regular teacher should not be able to self-approve."""
+    """Department Head, Principal, Administrator, Supervisor, Management, or SaaS Admin — NOT plain Faculty."""
     if not user.is_authenticated:
         return False
     if is_saas_admin(user):
         return True
     group = get_user_group(user)
-    return group in ('Management', 'Administrator', PRINCIPAL_ROLE, 'Department Head')
+    return group in ('Management', SUPERVISOR_ROLE, 'Administrator', PRINCIPAL_ROLE, 'Department Head')
 
 
 # ─────────────────────────────────────────────
@@ -109,11 +116,28 @@ class IsCollegeAdmin(BasePermission):
 
 
 class IsSaaSOrCollegeAdmin(BasePermission):
-    """SaaS Admin OR College Admin can access this endpoint (e.g. department management)."""
+    """SaaS Admin OR College Admin (Management/Administrator/Supervisor) can access this endpoint."""
     message = "Only SaaS Admin or College Admins can perform this action."
 
     def has_permission(self, request, view):
         return request.user.is_authenticated and is_saas_or_college_admin(request.user)
+
+
+class IsSupervisor(BasePermission):
+    """Only the Supervisor role."""
+    message = "Only a Supervisor can perform this action."
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and is_supervisor(request.user)
+
+
+class IsSupervisorOrCollegeAdmin(BasePermission):
+    """Supervisor OR College Admin (Management/Administrator). Equivalent to IsCollegeAdmin
+    since is_college_admin() already includes Supervisor."""
+    message = "Only Supervisors or College Admins can perform this action."
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and is_college_admin(request.user)
 
 
 class IsFacultyOrAbove(BasePermission):
