@@ -38,8 +38,8 @@ class ClassroomCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
 
 
-class ClassroomDetailView(generics.RetrieveUpdateAPIView):
-    """GET any authenticated user; PATCH/PUT (e.g. to set the boundary) College Admins only."""
+class ClassroomDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET any authenticated user; PATCH/PUT/DELETE (e.g. to set the boundary or remove) College Admins only."""
     queryset = Classroom.objects.all()
     serializer_class = ClassroomSerializer
 
