@@ -233,13 +233,12 @@ class RequestOTPView(APIView):
 
 class StudentRegistrationView(generics.CreateAPIView):
     """
-    Public self-registration for Students.
-    Requires OTP verification after registration.
+    Admin-only student registration.
+    Only College Admins (Management / Administrator) or SaaS Admins can create student accounts.
+    The created student still receives an OTP email and must verify via /verify-account/.
     """
     serializer_class = UserRegistrationSerializer
-    permission_classes = [AllowAny]
-    throttle_classes = [AuthScopedRateThrottle]
-    throttle_scope = 'otp'
+    permission_classes = [IsAuthenticated, IsCollegeAdmin]
 
     def post(self, request, *args, **kwargs):
         # Force the role to 'student' to prevent role escalation
@@ -2299,6 +2298,7 @@ class ApproveUserView(APIView):
     - HOD: Approved by Admin.
     - Faculty: Approved by HOD.
     - Support Staff / other non-teaching roles: Approved by Admin or HOD.
+    - Student: Approved/Rejected by Admin (bypasses OTP-based flow).
     """
     permission_classes = [IsAuthenticated, IsNotStudent]
 
@@ -2331,7 +2331,12 @@ class ApproveUserView(APIView):
             elif hasattr(target_user, 'administrator_profile'):
                 target_group = 'Administrator'
 
-        if not target_profile or target_profile.status != 'pending':
+        # Students are activated via OTP (is_active flag), not via the pending queue.
+        # All other roles must be in 'pending' state before being approved/rejected.
+        is_student_target = target_group == 'student'
+        if not target_profile:
+            return Response({"error": "User profile not found."}, status=status.HTTP_400_BAD_REQUEST)
+        if not is_student_target and target_profile.status != 'pending':
             return Response({"error": "User is not in a pending state."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Requester info
@@ -2369,6 +2374,11 @@ class ApproveUserView(APIView):
             elif is_hod and target_profile.department == hod_dept:
                 authorized = True
         
+        elif is_student_target:
+            # Students can only be approved/rejected by Admins
+            if is_admin:
+                authorized = True
+
         if not authorized:
             return Response(
                 {"error": f"You do not have permission to {action} this '{target_group}' user."},
@@ -2384,9 +2394,14 @@ class ApproveUserView(APIView):
                 group_obj, _ = Group.objects.get_or_create(name=target_group)
                 target_user.groups.add(group_obj)
             msg = f"User {target_user.username} has been approved."
-        else:
-            target_profile.status = 'rejected'
-            target_user.is_active = False
+        else:  # reject
+            if is_student_target:
+                # For students, rejection deactivates the account without changing status
+                target_user.is_active = False
+                target_profile.status = 'inactive'
+            else:
+                target_profile.status = 'rejected'
+                target_user.is_active = False
             msg = f"User {target_user.username} has been rejected."
         
         target_user.save()
@@ -2724,3 +2739,23 @@ class UserGrantConsentView(APIView):
             return Response({"message": "Consent successfully registered and account activated."}, status=status.HTTP_200_OK)
         
         return Response({"message": "Consent already given."}, status=status.HTTP_200_OK)
+
+
+class RolesListView(APIView):
+    """
+    Returns a flat list of all available roles in the system.
+    Accessible by any authenticated user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        roles = [
+            "Faculty",
+            "Department Head",
+            "Principal",
+            *NON_TEACHING_STAFF_ROLES,
+            "Management",
+            "Administrator",
+            "student",
+        ]
+        return Response({"roles": roles}, status=status.HTTP_200_OK)

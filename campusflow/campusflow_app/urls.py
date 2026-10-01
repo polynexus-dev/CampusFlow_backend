@@ -11,7 +11,8 @@ from campusflow_app.views.users import (
     CollegeEmployeesListView, UserPermissionsDetailView, ActiveTenantSettingsView,
     GuardianConsentApprovalView, UserDataErasureView, UserWithdrawConsentView, UserGrantConsentView,
     StudentOnboardRequestOTPView, StudentOnboardVerifyPasswordView,
-    ForgotPasswordRequestOTPView, ForgotPasswordVerifyOTPView, ForgotPasswordResetView
+    ForgotPasswordRequestOTPView, ForgotPasswordVerifyOTPView, ForgotPasswordResetView,
+    RolesListView
 )
 from campusflow_app.views.location import LocationDetailView
 from campusflow_app.views.attendance import (
@@ -260,6 +261,9 @@ urlpatterns = [
     # ── Approvals ──
     path('approvals/pending/', PendingApprovalsView.as_view(), name='pending_approvals'),
     path('approvals/action/', ApproveUserView.as_view(), name='approve_user_action'),
+
+    # ── Roles ──
+    path('roles/', RolesListView.as_view(), name='roles_list'),
 
     # ── Profiles ─────────────────────────────────────────────────────
     # GET own profile (any authenticated user)
