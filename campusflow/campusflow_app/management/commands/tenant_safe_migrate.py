@@ -50,6 +50,27 @@ def _broaden_soft_apply(executor):
             migration.initial = True
 
 
+def _detect_soft_applied_once(original):
+    """
+    Wraps MigrationExecutor.detect_soft_applied. Django's version returns the
+    state *after* mutating it with the migration even when it decides the
+    migration was NOT soft-applied, and apply_migration then applies the same
+    operations to that state a second time. For a real initial migration
+    (CreateModel/AddField) that's harmless, but _broaden_soft_apply also
+    makes later migrations eligible, and a second RemoveField/RenameField
+    crashes -- e.g. KeyError: 'jti' on token_blacklist.0005 in a fresh
+    schema. Hand back the untouched state in that case, so the migration's
+    state changes are applied exactly once.
+    """
+    def detect_soft_applied(self, project_state, migration):
+        applied, state = original(self, project_state, migration)
+        if applied or project_state is None:
+            return applied, state
+        return False, project_state
+
+    return detect_soft_applied
+
+
 def _find_dependency_holes(executor, app_label=None):
     """
     A "hole" is a migration that is NOT recorded applied in this schema even
@@ -100,12 +121,14 @@ class Command(BaseMigrateCommand):
             cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}";')
 
         original_init = MigrationExecutor.__init__
+        original_detect = MigrationExecutor.detect_soft_applied
 
         def patched_init(executor_self, connection, progress_callback=None):
             original_init(executor_self, connection, progress_callback)
             _broaden_soft_apply(executor_self)
 
         MigrationExecutor.__init__ = patched_init
+        MigrationExecutor.detect_soft_applied = _detect_soft_applied_once(original_detect)
         try:
             # self.verbosity is normally set by the base handle() itself,
             # but _heal_dependency_holes() (which uses it via the shared
@@ -116,6 +139,7 @@ class Command(BaseMigrateCommand):
             return super().handle(*args, **options)
         finally:
             MigrationExecutor.__init__ = original_init
+            MigrationExecutor.detect_soft_applied = original_detect
 
     def _heal_dependency_holes(self, options):
         connection = connections[options.get("database") or DEFAULT_DB_ALIAS]
