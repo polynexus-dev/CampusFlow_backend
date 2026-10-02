@@ -31,6 +31,12 @@ if ! python manage.py makemigrations --check --dry-run; then
     exit 1
 fi
 
+# 0.9. Create any schema migrate_schemas expects but Postgres doesn't have
+#      (public, or a tenant whose schema was dropped / not restored), which
+#      would otherwise fail with "no schema has been selected to create in".
+echo "🔄 Ensuring every tenant schema exists..."
+python manage.py ensure_schemas
+
 # 1. Run shared (public) schema migrations
 echo "🔄 Running shared schema migrations..."
 python manage.py migrate_schemas --shared --fake-initial
