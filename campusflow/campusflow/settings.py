@@ -509,6 +509,14 @@ WA_OTP_TEMPLATE = os.environ.get("WA_OTP_TEMPLATE") or "otp_login"
 WA_OTP_LANGUAGE = os.environ.get("WA_OTP_LANGUAGE") or "en"  # must match the template's language exactly
 WA_META_API_VERSION = os.environ.get("WA_META_API_VERSION") or "v20.0"
 
+# Demo accounts (username starts with one of these prefixes) get their OTP on
+# these WhatsApp numbers instead of the profile number. Comma-separated; empty
+# turns the redirect off and demo accounts behave like everyone else.
+DEMO_USERNAME_PREFIXES = tuple(
+    p.strip().lower() for p in (os.environ.get("DEMO_USERNAME_PREFIXES") or "dummy_,demo_").split(",") if p.strip()
+)
+DEMO_OTP_PHONES = [p.strip() for p in os.environ.get("DEMO_OTP_PHONES", "").split(",") if p.strip()]
+
 # Polynexus bank account shown to colleges on the Subscription Billing page
 # for NEFT/RTGS payments. Left unset, the API returns bank_details=None and
 # the page tells the college to contact Polynexus, so a made-up account

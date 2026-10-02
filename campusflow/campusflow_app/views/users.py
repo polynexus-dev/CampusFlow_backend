@@ -7,6 +7,7 @@ import secrets
 import uuid
 
 # ── Django Core Imports ──────────────────────────────────────────────────────
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
@@ -58,7 +59,10 @@ from ..services import whatsapp
 from ..serializers import (
     LogoutSerializer,
     MyTokenObtainPairSerializer,
+    OTPLoginSerializer,
     UserRegistrationSerializer,
+    find_login_user,
+    login_otp_identifier,
 )
 from ..utils import mask_sensitive_field
 from ..throttling import AuthScopedRateThrottle
@@ -144,21 +148,36 @@ def send_email_otp(email, subject, text, html_template=None, context=None):
     send_mail(subject, text, None, [email], fail_silently=False)
 
 
+def otp_phones(user, phone=None):
+    """
+    WhatsApp numbers to send `user`'s code to. Demo accounts (username starts
+    with a DEMO_USERNAME_PREFIXES prefix) always go to DEMO_OTP_PHONES, so the
+    team receives every demo code; everyone else gets `phone` or the number
+    on their profile.
+    """
+    if settings.DEMO_OTP_PHONES and user.username.lower().startswith(settings.DEMO_USERNAME_PREFIXES):
+        return list(settings.DEMO_OTP_PHONES)
+    if phone is None:
+        phone = getattr(get_user_profile_by_user(user), 'contact_number', None)
+    return [phone] if phone else []
+
+
 def deliver_otp(user, code, phone=None, *, subject, text, html_template=None):
     """
-    Send `code` on WhatsApp to `phone` (or the student's number on file),
-    falling back to email. Returns "whatsapp" or "email"; raises
-    OtpDeliveryFailed if neither channel worked.
+    Send `code` on WhatsApp to the numbers from otp_phones(), falling back to
+    email. Returns "whatsapp" (if at least one number got it) or "email";
+    raises OtpDeliveryFailed if neither channel worked.
     """
-    if phone is None:
-        profile = getattr(user, 'student_profile', None)
-        phone = getattr(profile, 'contact_number', None)
-    if phone and whatsapp.is_enabled():
-        try:
-            whatsapp.send_otp(phone, code)
+    if whatsapp.is_enabled():
+        sent = False
+        for number in otp_phones(user, phone):
+            try:
+                whatsapp.send_otp(number, code)
+                sent = True
+            except (whatsapp.WhatsAppError, ValueError):
+                pass  # logged by the service; try the next number / email
+        if sent:
             return "whatsapp"
-        except (whatsapp.WhatsAppError, ValueError):
-            pass  # logged by the service; fall back to email
     try:
         send_email_otp(user.email, subject, text, html_template, {'otp_code': code})
         return "email"
@@ -223,6 +242,57 @@ class MyObtainTokenPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
     throttle_classes = [AuthScopedRateThrottle]
     throttle_scope = 'login'
+
+
+class LoginOTPRequestView(APIView):
+    """
+    OTP login, step 1: POST {username} (username or email, as for /login/).
+    Sends a one-time login code to the WhatsApp number on the user's profile,
+    or to their email if there's no number or WhatsApp fails.
+    Step 2 is POST /login/otp/verify/ {username, otp}.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp'
+
+    def post(self, request):
+        username = str(request.data.get('username', '')).strip()
+        if not username:
+            return Response({"error": "username is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Same reply whether or not the account exists, so this endpoint
+        # can't be used to discover usernames.
+        sent = {"message": "If an account exists for this username, a login code has been sent."}
+        user, _ = find_login_user(username)
+        if not user or not user.is_active:
+            return Response(sent, status=status.HTTP_200_OK)
+
+        try:
+            otp_code = issue_otp("login", login_otp_identifier(user))
+        except OtpRateLimited:
+            return otp_rate_limited_response()
+        try:
+            deliver_otp(
+                user, otp_code,
+                subject="Your CampusNexus login code",
+                text=f"Your CampusNexus login code is: {otp_code}\n\nIt expires in 10 minutes. "
+                     "If you didn't try to log in, ignore this email.",
+            )
+        except OtpDeliveryFailed:
+            return Response({"error": "Failed to send login code. Please try again later."},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(sent, status=status.HTTP_200_OK)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class LoginOTPVerifyView(TokenObtainPairView):
+    """
+    OTP login, step 2: POST {username, otp, device_id?}. Returns exactly what
+    /login/ returns (tokens, role, tenant, profile, ...).
+    """
+    serializer_class = OTPLoginSerializer
+    throttle_classes = [AuthScopedRateThrottle]
+    throttle_scope = 'otp_verify'
 
 
 class VerifyTokenView(APIView):

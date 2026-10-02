@@ -3,7 +3,7 @@ from tenants.views import InvoiceListAPIView, InvoiceUploadReceiptAPIView
 from campusflow_app.views.department import DepartmentView, DepartmentDetailView
 from campusflow_app.views.users import (
     StudentUserProfileView, StudentLookupView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView,
-    MyObtainTokenPairView, LogoutAPIView, UserProfileView,
+    MyObtainTokenPairView, LoginOTPRequestView, LoginOTPVerifyView, LogoutAPIView, UserProfileView,
     ManagementUserProfileView, AdministratorUserProfileView, PrincipalUserProfileView,
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
     ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
@@ -241,6 +241,9 @@ urlpatterns = [
     path('user/forgot-password/verify-otp/', ForgotPasswordVerifyOTPView.as_view(), name='forgot_password_verify_otp'),
     path('user/forgot-password/reset/', ForgotPasswordResetView.as_view(), name='forgot_password_reset'),
     path('login/', MyObtainTokenPairView.as_view(), name='token_obtain_pair'),
+    # Login with a one-time code (WhatsApp, else email) instead of the password.
+    path('login/otp/request/', LoginOTPRequestView.as_view(), name='login_otp_request'),
+    path('login/otp/verify/', LoginOTPVerifyView.as_view(), name='login_otp_verify'),
     path('logout/', LogoutAPIView.as_view(), name='logout'),
     path('token/verify/', VerifyTokenView.as_view(), name='verify-token'),
     # Renew an access token from a refresh token (web/mobile call this on 401).

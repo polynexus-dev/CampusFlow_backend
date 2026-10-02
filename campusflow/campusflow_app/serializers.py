@@ -141,6 +141,70 @@ LOGIN_MAX_FAILURES = 10
 LOGIN_LOCKOUT_SECONDS = 15 * 60
 
 
+def find_login_user(username):
+    """
+    Find the user for a login identifier (username or email), searching every
+    college from the public portal, and switch the connection to that
+    college's schema. Returns (user, tenant); user is None if not found.
+    """
+    from tenants.models import Tenant
+
+    user = None
+    target_tenant = None
+    user_key = (username or "").strip().lower()
+
+    # 1. Try finding user in current schema
+    user = User.objects.filter(Q(username=username) | Q(email=username)).first()
+    if user:
+        target_tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
+    elif connection.schema_name == 'public':
+        # 2. Check high-speed cache for previously resolved user tenant schema
+        cache_key = f"user_tenant_schema:{user_key}"
+        cached_schema = cache.get(cache_key)
+
+        if cached_schema and cached_schema != 'public':
+            cached_tenant = Tenant.objects.filter(schema_name=cached_schema).first()
+            if cached_tenant:
+                from django_tenants.utils import schema_context
+                with schema_context(cached_schema):
+                    u = User.objects.filter(Q(username=username) | Q(email=username)).first()
+                    if u:
+                        user = u
+                        target_tenant = cached_tenant
+
+        # 3. Direct email-domain tenant resolution (0 ms lookup by domain)
+        if not user and '@' in user_key:
+            email_domain = user_key.split('@')[-1]
+            domain_tenant = Tenant.objects.filter(permitted_email_domain__iexact=email_domain).first()
+            if domain_tenant and domain_tenant.schema_name != 'public':
+                from django_tenants.utils import schema_context
+                with schema_context(domain_tenant.schema_name):
+                    u = User.objects.filter(Q(username=username) | Q(email=username)).first()
+                    if u:
+                        user = u
+                        target_tenant = domain_tenant
+                        cache.set(cache_key, domain_tenant.schema_name, 86400)
+
+        # 4. Fallback search across remaining tenant schemas and cache result
+        if not user:
+            from django_tenants.utils import schema_context
+            for tenant in Tenant.objects.exclude(schema_name='public'):
+                with schema_context(tenant.schema_name):
+                    u = User.objects.filter(Q(username=username) | Q(email=username)).first()
+                    if u:
+                        user = u
+                        target_tenant = tenant
+                        cache.set(cache_key, tenant.schema_name, 86400)
+                        break
+
+    # Switch context to the target tenant's schema for the rest of this request
+    if user and target_tenant and target_tenant.schema_name != connection.schema_name:
+        connection.set_tenant(target_tenant)
+        # Re-fetch user in the active tenant connection context
+        user = User.objects.get(id=user.id)
+    return user, target_tenant
+
+
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
@@ -150,10 +214,35 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['tenant_schema'] = connection.schema_name
         return token
 
+    def check_credentials(self, user, attrs, client_ip, user_agent_string):
+        """Password check. Accounts lock for LOGIN_LOCKOUT_SECONDS after
+        LOGIN_MAX_FAILURES wrong passwords, on top of the per-IP throttle."""
+        request = self.context.get('request')
+        password = attrs.get('password')
+        if not password or " " in password:
+            raise serializers.ValidationError("Password cannot contain spaces.", code='invalid_password')
+        lockout_key = f"login_failures:{connection.schema_name}:{user.id}"
+        failures = cache.get(lockout_key) or 0
+        if failures >= LOGIN_MAX_FAILURES:
+            raise serializers.ValidationError(
+                "Too many failed login attempts. Please try again in 15 minutes or reset your password.",
+                code='account_locked',
+            )
+        if not user.check_password(password):
+            cache.set(lockout_key, failures + 1, timeout=LOGIN_LOCKOUT_SECONDS)
+            log_account_event(
+                user, 'LOGIN_FAILED', request=request, ip_address=client_ip, user_agent=user_agent_string,
+                object_repr=f"Failed login attempt for {user.username} (wrong password)",
+            )
+            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
+        cache.delete(lockout_key)
+
+    def issue_tokens(self, user, attrs):
+        return super().validate(attrs)
+
     def validate(self, attrs):
         request = self.context.get('request')
         username = attrs.get('username')
-        password = attrs.get('password')
 
         # --- BLOCK LOGIN FROM A TENANT SUBDOMAIN ---
         # Login must always happen via the base/public URL (the frontend doesn't
@@ -208,88 +297,16 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             "device_model": device_model, "device_description": device_description,
         }
 
-        if not password or " " in password:
-            raise serializers.ValidationError("Password cannot contain spaces.", code='invalid_password')
-
-        from tenants.models import Tenant
-
-        user = None
-        target_tenant = None
-        user_key = (username or "").strip().lower()
-
-        # 1. Try finding user in current schema
-        user = User.objects.filter(Q(username=username) | Q(email=username)).first()
-        if user:
-            target_tenant = Tenant.objects.filter(schema_name=connection.schema_name).first()
-        elif connection.schema_name == 'public':
-            # 2. Check high-speed cache for previously resolved user tenant schema
-            cache_key = f"user_tenant_schema:{user_key}"
-            cached_schema = cache.get(cache_key)
-
-            if cached_schema and cached_schema != 'public':
-                cached_tenant = Tenant.objects.filter(schema_name=cached_schema).first()
-                if cached_tenant:
-                    from django_tenants.utils import schema_context
-                    with schema_context(cached_schema):
-                        u = User.objects.filter(Q(username=username) | Q(email=username)).first()
-                        if u:
-                            user = u
-                            target_tenant = cached_tenant
-
-            # 3. Direct email-domain tenant resolution (0 ms lookup by domain)
-            if not user and '@' in user_key:
-                email_domain = user_key.split('@')[-1]
-                domain_tenant = Tenant.objects.filter(permitted_email_domain__iexact=email_domain).first()
-                if domain_tenant and domain_tenant.schema_name != 'public':
-                    from django_tenants.utils import schema_context
-                    with schema_context(domain_tenant.schema_name):
-                        u = User.objects.filter(Q(username=username) | Q(email=username)).first()
-                        if u:
-                            user = u
-                            target_tenant = domain_tenant
-                            cache.set(cache_key, domain_tenant.schema_name, 86400)
-
-            # 4. Fallback search across remaining tenant schemas and cache result
-            if not user:
-                from django_tenants.utils import schema_context
-                for tenant in Tenant.objects.exclude(schema_name='public'):
-                    with schema_context(tenant.schema_name):
-                        u = User.objects.filter(Q(username=username) | Q(email=username)).first()
-                        if u:
-                            user = u
-                            target_tenant = tenant
-                            cache.set(cache_key, tenant.schema_name, 86400)
-                            break
+        user, target_tenant = find_login_user(username)
 
         # Same message for "no such user" and "wrong password", so the login
         # form can't be used to discover which usernames/emails exist.
         if not user:
             raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
 
-        # Switch context to the target tenant's schema for the rest of this request
-        if target_tenant and target_tenant.schema_name != connection.schema_name:
-            connection.set_tenant(target_tenant)
-            # Re-fetch user in the active tenant connection context
-            user = User.objects.get(id=user.id)
-
-        # Password first, before anything below reveals account status or
-        # auto-creates groups/profiles. Accounts lock for LOGIN_LOCKOUT_SECONDS
-        # after LOGIN_MAX_FAILURES wrong passwords, on top of the per-IP throttle.
-        lockout_key = f"login_failures:{connection.schema_name}:{user.id}"
-        failures = cache.get(lockout_key) or 0
-        if failures >= LOGIN_MAX_FAILURES:
-            raise serializers.ValidationError(
-                "Too many failed login attempts. Please try again in 15 minutes or reset your password.",
-                code='account_locked',
-            )
-        if not user.check_password(password):
-            cache.set(lockout_key, failures + 1, timeout=LOGIN_LOCKOUT_SECONDS)
-            log_account_event(
-                user, 'LOGIN_FAILED', request=request, ip_address=client_ip, user_agent=user_agent_string,
-                object_repr=f"Failed login attempt for {user.username} (wrong password)",
-            )
-            raise serializers.ValidationError("Invalid Credentials", code='INVALID_CREDENTIALS')
-        cache.delete(lockout_key)
+        # Credentials first, before anything below reveals account status or
+        # auto-creates groups/profiles.
+        self.check_credentials(user, attrs, client_ip, user_agent_string)
 
         profile_data = None
         user_group = None
@@ -430,7 +447,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 )
 
         attrs['username'] = user.username
-        data = super().validate(attrs)
+        data = self.issue_tokens(user, attrs)
         log_account_event(
             user, 'LOGIN', request=request, ip_address=client_ip, user_agent=user_agent_string,
             object_repr=f"{user.username} logged in",
@@ -540,7 +557,52 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['device_info'] = self.device_info
         data['consent_given'] = getattr(profile_data, 'consent_given', True)
         return data
- 
+
+
+def login_otp_identifier(user):
+    """Cache key for a user's login code (by id: not every account has an email)."""
+    return f"user:{user.pk}"
+
+
+class OTPLoginSerializer(MyTokenObtainPairSerializer):
+    """
+    Login with {username, otp} instead of {username, password}: the code comes
+    from POST /login/otp/request/. Everything else (college lookup, role and
+    status checks, device binding, response shape) is the password login's.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields.pop('password', None)
+        self.fields['otp'] = serializers.CharField(write_only=True)
+
+    def check_credentials(self, user, attrs, client_ip, user_agent_string):
+        from .views.users import check_otp
+
+        otp = str(attrs.get('otp') or '').strip()
+        # check_otp burns the code after OTP_MAX_ATTEMPTS wrong guesses.
+        if not check_otp("login", login_otp_identifier(user), otp):
+            log_account_event(
+                user, 'LOGIN_FAILED', request=self.context.get('request'), ip_address=client_ip,
+                user_agent=user_agent_string,
+                object_repr=f"Failed login attempt for {user.username} (wrong or expired OTP)",
+            )
+            raise serializers.ValidationError("Invalid or expired OTP.", code='INVALID_OTP')
+
+    def issue_tokens(self, user, attrs):
+        # What TokenObtainPairSerializer.validate does after authenticate().
+        from django.contrib.auth.models import update_last_login
+        from rest_framework_simplejwt.exceptions import AuthenticationFailed
+        from rest_framework_simplejwt.settings import api_settings
+
+        if not api_settings.USER_AUTHENTICATION_RULE(user):
+            raise AuthenticationFailed("No active account found with the given credentials", code='no_active_account')
+        self.user = user
+        refresh = self.get_token(user)
+        if api_settings.UPDATE_LAST_LOGIN:
+            update_last_login(None, user)
+        return {'refresh': str(refresh), 'access': str(refresh.access_token)}
+
 
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()
