@@ -54,21 +54,7 @@ from ..permissions import (
     is_saas_admin,
     is_supervisor,
 )
-# WhatsApp OTP utility (whatapp.py at project root)
-try:
-    import sys, os as _os
-    _wa_path = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-    if _wa_path not in sys.path:
-        sys.path.insert(0, _wa_path)
-    from whatapp import send_otp as wa_send_otp, verify_otp as wa_verify_otp, normalize_phone, OTPError as WAOTPError
-    WA_AVAILABLE = True
-except Exception:
-    WA_AVAILABLE = False
-    WAOTPError = Exception
-    def wa_send_otp(*a, **kw): raise RuntimeError("WhatsApp not configured")
-    def wa_verify_otp(*a, **kw): return False
-    def normalize_phone(p): return p
-
+from ..services import whatsapp
 from ..serializers import (
     LogoutSerializer,
     MyTokenObtainPairSerializer,
@@ -131,6 +117,76 @@ def otp_rate_limited_response():
         {"error": "Too many codes requested for this email. Please try again in an hour."},
         status=status.HTTP_429_TOO_MANY_REQUESTS,
     )
+
+
+# ── OTP delivery: WhatsApp first, email fallback ─────────────────────────────
+# WhatsApp is only a delivery channel; the code itself always comes from
+# issue_otp() and is checked with check_otp() against the user's email key,
+# whichever channel carried it.
+
+class OtpDeliveryFailed(Exception):
+    pass
+
+
+def send_email_otp(email, subject, text, html_template=None, context=None):
+    """Send by email, as HTML from `html_template` when given. Raises on failure."""
+    if html_template:
+        try:
+            from django.core.mail import EmailMultiAlternatives
+            from django.template.loader import render_to_string
+
+            msg = EmailMultiAlternatives(subject=subject, body=text, from_email=None, to=[email])
+            msg.attach_alternative(render_to_string(html_template, context or {}), "text/html")
+            msg.send()
+            return
+        except Exception:
+            pass  # retry as plain text below
+    send_mail(subject, text, None, [email], fail_silently=False)
+
+
+def deliver_otp(user, code, phone=None, *, subject, text, html_template=None):
+    """
+    Send `code` on WhatsApp to `phone` (or the student's number on file),
+    falling back to email. Returns "whatsapp" or "email"; raises
+    OtpDeliveryFailed if neither channel worked.
+    """
+    if phone is None:
+        profile = getattr(user, 'student_profile', None)
+        phone = getattr(profile, 'contact_number', None)
+    if phone and whatsapp.is_enabled():
+        try:
+            whatsapp.send_otp(phone, code)
+            return "whatsapp"
+        except (whatsapp.WhatsAppError, ValueError):
+            pass  # logged by the service; fall back to email
+    try:
+        send_email_otp(user.email, subject, text, html_template, {'otp_code': code})
+        return "email"
+    except Exception as e:
+        raise OtpDeliveryFailed() from e
+
+
+def resolve_student_by_phone(phone):
+    """
+    Find the student on this college's schema whose contact number is `phone`.
+    Returns (user, error_response); user is None when there isn't exactly
+    one match. Phone lookups need a college schema: on the public schema we
+    can't tell which college to search, so the caller must send an email.
+    """
+    try:
+        normalized = whatsapp.normalize_phone(phone)
+    except ValueError as e:
+        return None, Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    if connection.schema_name == 'public':
+        return None, Response(
+            {"error": "Please use your college email, or open the app from your college's address."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    matches = list(
+        StudentProfile.objects.filter(contact_number__in=whatsapp.phone_variants(normalized))
+        .select_related('user')[:2]
+    )
+    return (matches[0].user if len(matches) == 1 else None), None
 
 
 def route_to_tenant_by_email(email):
@@ -270,13 +326,10 @@ class StudentRegistrationView(generics.CreateAPIView):
             return Response({"error": "phone_number is required for student registration."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Validate phone early (before creating the user)
-        if WA_AVAILABLE:
-            try:
-                normalized_phone = normalize_phone(phone_number)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            normalized_phone = phone_number
+        try:
+            normalized_phone = whatsapp.normalize_phone(phone_number)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         # ── Auto-tenant routing by email domain ──
         if connection.schema_name == 'public':
@@ -342,29 +395,18 @@ class StudentRegistrationView(generics.CreateAPIView):
         except OtpRateLimited:
             return otp_rate_limited_response()
 
-        # ── Send OTP via WhatsApp (primary) ──
-        wa_sent = False
-        if WA_AVAILABLE:
-            try:
-                wa_send_otp(normalized_phone, "campusnexus")
-                wa_sent = True
-            except WAOTPError as e:
-                pass  # fall through to email
-            except Exception:
-                pass
-
-        # ── Fallback: send OTP via Email ──
-        if not wa_sent:
-            try:
-                send_mail(
-                    "Verify your CampusFlow Account",
-                    f"Hello {new_user.first_name},\n\nYour student verification code is: {otp_code}",
-                    None, [new_user.email]
-                )
-            except Exception:
-                pass
-
-        channel = "WhatsApp" if wa_sent else "email"
+        # ── Send OTP: WhatsApp first, email fallback ──
+        # Best effort: the account exists either way, and resend-otp can
+        # deliver a new code.
+        try:
+            channel = deliver_otp(
+                new_user, otp_code, normalized_phone,
+                subject="Verify your CampusFlow Account",
+                text=f"Hello {new_user.first_name},\n\nYour student verification code is: {otp_code}",
+            )
+            channel = "WhatsApp" if channel == "whatsapp" else "email"
+        except OtpDeliveryFailed:
+            channel = "email"
         return Response(
             {
                 "message": f"Student registration successful. OTP sent via {channel}.",
@@ -458,7 +500,8 @@ class StaffRegistrationView(generics.CreateAPIView):
 class VerifyAccountView(APIView):
     """
     Verify the OTP and activate the student account.
-    Accepts OTP sent via WhatsApp (keyed by phone) OR email.
+    Identify the account by email, or by phone_number (the student's number
+    on file). The code is the same whether it arrived on WhatsApp or email.
     """
     permission_classes = [AllowAny]
     throttle_classes = [AuthScopedRateThrottle]
@@ -474,50 +517,18 @@ class VerifyAccountView(APIView):
         if not email and not phone:
             return Response({"error": "email or phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── WhatsApp OTP path (phone provided) ──
-        if phone and WA_AVAILABLE:
-            try:
-                norm_phone = normalize_phone(phone)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                verified = wa_verify_otp(norm_phone, "campusnexus", otp_provided)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-            if not verified:
-                return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Resolve user via phone stored in StudentProfile
-            from ..models.profile import StudentProfile as SP
-            try:
-                sp = SP.objects.get(contact_number=norm_phone)
-                user = sp.user
-            except SP.DoesNotExist:
-                # Fallback: resolve by email
-                if email:
-                    error = route_to_tenant_by_email(email)
-                    if error:
-                        return error
-                    user = User.objects.filter(email=email).first()
-                    if not user:
-                        return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
-                else:
-                    return Response({"error": "Could not find account for this phone number."}, status=status.HTTP_404_NOT_FOUND)
-
-        else:
-            # ── Email OTP path ──
-            if not email:
-                return Response({"error": "email is required when phone_number is not provided."}, status=status.HTTP_400_BAD_REQUEST)
+        if email:
             error = route_to_tenant_by_email(email)
             if error:
                 return error
-            if not check_otp("verify", email, otp_provided):
-                return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
             user = User.objects.filter(email=email).first()
-            if not user:
-                return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            user, error = resolve_student_by_phone(phone)
+            if error:
+                return error
+
+        if not user or not check_otp("verify", user.email.lower(), otp_provided):
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         # ── Activate account ──
         if user.is_active:
@@ -538,7 +549,7 @@ class VerifyAccountView(APIView):
 
 class ResendOTPView(APIView):
     """
-    Resend the activation OTP via WhatsApp (if phone on file) or email.
+    Resend the activation OTP via WhatsApp (if a phone is on file) or email.
     """
     permission_classes = [AllowAny]
     throttle_classes = [AuthScopedRateThrottle]
@@ -551,75 +562,42 @@ class ResendOTPView(APIView):
         if not email and not phone:
             return Response({"error": "email or phone_number is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── Resolve user ──
-        if phone and WA_AVAILABLE:
-            try:
-                norm_phone = normalize_phone(phone)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        if email:
+            error = route_to_tenant_by_email(email)
+            if error:
+                return error
+            user = User.objects.filter(email=email).first()
+        else:
+            user, error = resolve_student_by_phone(phone)
+            if error:
+                return error
 
-            from ..models.profile import StudentProfile as SP
-            try:
-                sp = SP.objects.get(contact_number=norm_phone)
-                user = sp.user
-            except SP.DoesNotExist:
-                # Generic response so we don't expose registered numbers
-                return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
-
-            if user.is_active:
-                return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
-
-            # Generate OTP (email-keyed in cache for consistency)
-            try:
-                otp_code = issue_otp("verify", user.email.lower())
-            except OtpRateLimited:
-                return otp_rate_limited_response()
-
-            try:
-                wa_send_otp(norm_phone, "campusnexus")
-                return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-            except Exception:
-                pass  # fall through to email
-
-        # ── Email path ──
-        if not email:
-            return Response({"error": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        error = route_to_tenant_by_email(email)
-        if error:
-            return error
-
-        user = User.objects.filter(email=email).first()
+        # Same reply whether or not the account exists, so this endpoint
+        # can't be used to discover registered emails or numbers.
         if not user or user.is_active:
             return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
 
         try:
-            otp_code = issue_otp("verify", email)
+            otp_code = issue_otp("verify", user.email.lower())
         except OtpRateLimited:
             return otp_rate_limited_response()
 
-        # Try WhatsApp first if phone is on profile
-        profile = getattr(user, 'student_profile', None)
-        if profile and profile.contact_number and WA_AVAILABLE:
-            try:
-                wa_send_otp(profile.contact_number, "campusnexus")
-                return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
-            except Exception:
-                pass  # fall through to email
-
         try:
-            send_mail("Verify your CampusFlow Account", f"Your verification code is: {otp_code}", None, [email])
-            return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
-        except Exception:
+            deliver_otp(
+                user, otp_code,
+                subject="Verify your CampusFlow Account",
+                text=f"Your verification code is: {otp_code}",
+            )
+        except OtpDeliveryFailed:
             return Response({"error": "Failed to send OTP."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"message": GENERIC_OTP_SENT}, status=status.HTTP_200_OK)
 
 
 class StudentOnboardRequestOTPView(APIView):
     """
     Onboarding: Request a 6-digit OTP for pre-created student accounts.
-    Accepts phone_number (WhatsApp OTP) or email (email OTP).
+    Accepts phone_number or email. The code goes to the student's WhatsApp
+    number on file when there is one, otherwise to their email.
     """
     permission_classes = [AllowAny]
     throttle_classes = [AuthScopedRateThrottle]
@@ -632,147 +610,50 @@ class StudentOnboardRequestOTPView(APIView):
         if not email and not phone:
             return Response({"error": "phone_number or email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── Phone (WhatsApp) path ──
-        if phone and WA_AVAILABLE:
-            try:
-                norm_phone = normalize_phone(phone)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-            from ..models.profile import StudentProfile as SP
-            try:
-                sp = SP.objects.get(contact_number=norm_phone)
-                user = sp.user
-            except SP.DoesNotExist:
+        if email:
+            error = route_to_tenant_by_email(email)
+            if error:
+                return error
+            user = User.objects.filter(email=email).first()
+            if not user or not hasattr(user, 'student_profile'):
+                return Response(
+                    {"error": "This email is not pre-registered. Please contact your college administrator."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            user, error = resolve_student_by_phone(phone)
+            if error:
+                return error
+            if not user:
                 return Response(
                     {"error": "This phone number is not pre-registered. Please contact your college administrator."},
                     status=status.HTTP_404_NOT_FOUND
                 )
-
-            # Generate OTP (keyed by email in cache)
-            try:
-                otp_code = issue_otp("onboard", user.email.lower())
-            except OtpRateLimited:
-                return otp_rate_limited_response()
-
-            # Send via WhatsApp
-            try:
-                wa_send_otp(norm_phone, "campusnexus")
-                return Response({"message": "OTP sent successfully to your WhatsApp."}, status=status.HTTP_200_OK)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-            except Exception:
-                # Fall through to email if WhatsApp fails
-                try:
-                    send_mail(
-                        "Verify your CampusNexus Account",
-                        f"Welcome to CampusNexus. Your verification code is: {otp_code}",
-                        None, [user.email]
-                    )
-                    return Response({"message": "OTP sent to your registered email (WhatsApp unavailable)."}, status=status.HTTP_200_OK)
-                except Exception:
-                    return Response({"error": "Failed to send OTP. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # ── Phone provided but WA not available → look up user by phone, send OTP via email ──
-        if phone and not WA_AVAILABLE:
-            from ..models.profile import StudentProfile as SP
-            try:
-                sp = SP.objects.get(contact_number=phone)
-                user = sp.user
-            except SP.DoesNotExist:
-                return Response(
-                    {"error": "This phone number is not pre-registered. Please contact your college administrator."},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            try:
-                otp_code = issue_otp("onboard", user.email.lower())
-            except OtpRateLimited:
-                return otp_rate_limited_response()
-            try:
-                send_mail(
-                    "Verify your CampusNexus Account",
-                    f"Welcome to CampusNexus. Your verification code is: {otp_code}",
-                    None, [user.email]
-                )
-                return Response({"message": "OTP sent to your registered email."}, status=status.HTTP_200_OK)
-            except Exception:
-                return Response({"error": "Failed to send OTP. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # ── Email path ──
-        if not email:
-            return Response({"error": "phone_number or email is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Auto-tenant routing by email domain
-        if connection.schema_name == 'public':
-            if '@' not in email:
-                return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
-            email_domain = email.split('@')[-1]
-
-            from tenants.models import Tenant
-            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
-            if not target_tenant:
-                return Response(
-                    {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            connection.set_tenant(target_tenant)
-
-        # Verify student exists
-        user = User.objects.filter(email=email).first()
-        if not user or not hasattr(user, 'student_profile'):
-            return Response(
-                {"error": "This email is not pre-registered. Please contact your college administrator."},
-                status=status.HTTP_404_NOT_FOUND
-            )
 
         try:
-            otp_code = issue_otp("onboard", email)
+            otp_code = issue_otp("onboard", user.email.lower())
         except OtpRateLimited:
             return otp_rate_limited_response()
 
-        # Try WhatsApp first if phone is on profile
-        profile = user.student_profile
-        if profile.contact_number and WA_AVAILABLE:
-            try:
-                wa_send_otp(profile.contact_number, "campusnexus")
-                return Response({"message": "OTP sent successfully to your WhatsApp."}, status=status.HTTP_200_OK)
-            except Exception:
-                pass  # fall through to email
-
-        # Send Email with HTML template
         try:
-            from django.core.mail import EmailMultiAlternatives
-            from django.template.loader import render_to_string
-
-            context = {'otp_code': otp_code}
-            html_content = render_to_string('emails/student_onboarding_otp.html', context)
-            text_content = f"Welcome to CampusNexus. Your verification code is: {otp_code}"
-
-            msg = EmailMultiAlternatives(
+            channel = deliver_otp(
+                user, otp_code,
                 subject="Verify your CampusNexus Account",
-                body=text_content,
-                from_email=None,
-                to=[email]
+                text=f"Welcome to CampusNexus. Your verification code is: {otp_code}",
+                html_template='emails/student_onboarding_otp.html',
             )
-            msg.attach_alternative(html_content, "text/html")
-            msg.send()
-            return Response({"message": "OTP sent successfully to your college email."}, status=status.HTTP_200_OK)
-        except Exception:
-            try:
-                send_mail(
-                    "Verify your CampusNexus Account",
-                    f"Welcome to CampusNexus. Your verification code is: {otp_code}",
-                    None, [email]
-                )
-                return Response({"message": "OTP sent successfully to your college email."}, status=status.HTTP_200_OK)
-            except Exception:
-                return Response({"error": "Failed to send OTP. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except OtpDeliveryFailed:
+            return Response({"error": "Failed to send OTP. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if channel == "whatsapp":
+            return Response({"message": "OTP sent successfully to your WhatsApp."}, status=status.HTTP_200_OK)
+        return Response({"message": "OTP sent successfully to your college email."}, status=status.HTTP_200_OK)
 
 
 class StudentOnboardVerifyPasswordView(APIView):
     """
     Onboarding: Verify OTP, set new password, and log user in (returning JWT token).
-    Accepts phone_number (WhatsApp OTP) or email (email OTP).
+    Accepts phone_number or email to identify the student.
     """
     permission_classes = [AllowAny]
     throttle_classes = [AuthScopedRateThrottle]
@@ -794,57 +675,25 @@ class StudentOnboardVerifyPasswordView(APIView):
         if password != confirm_password:
             return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── Phone (WhatsApp) path ──
-        if phone and WA_AVAILABLE:
-            try:
-                norm_phone = normalize_phone(phone)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-            from ..models.profile import StudentProfile as SP
-            try:
-                sp = SP.objects.get(contact_number=norm_phone)
-                user = sp.user
-            except SP.DoesNotExist:
-                return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Verify OTP via WhatsApp store
-            try:
-                verified = wa_verify_otp(norm_phone, "campusnexus", otp_provided)
-            except WAOTPError as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-            if not verified:
-                # Fallback: try email-keyed OTP
-                if not check_otp("onboard", user.email.lower(), otp_provided):
-                    return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
-
-        else:
-            # ── Email path ──
-            if not email:
-                return Response({"error": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Auto-tenant routing by email domain
-            if connection.schema_name == 'public':
-                if '@' not in email:
-                    return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
-                email_domain = email.split('@')[-1]
-
-                from tenants.models import Tenant
-                target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
-                if not target_tenant:
-                    return Response(
-                        {"error": f"No college registration is configured for the email domain '@{email_domain}'."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                connection.set_tenant(target_tenant)
-
+        if email:
+            error = route_to_tenant_by_email(email)
+            if error:
+                return error
             user = User.objects.filter(email=email).first()
-            if not user or not hasattr(user, 'student_profile'):
-                return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            user, error = resolve_student_by_phone(phone)
+            if error:
+                return error
 
-            if not check_otp("onboard", email, otp_provided):
-                return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        if not user or not hasattr(user, 'student_profile'):
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+        error = password_error_response(password, user)
+        if error:
+            return error
+
+        if not check_otp("onboard", user.email.lower(), otp_provided):
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         student_profile = user.student_profile
 

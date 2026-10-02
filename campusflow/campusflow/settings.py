@@ -500,6 +500,15 @@ EMAIL_BACKEND = "campusflow_app.email_backend.DemoAwareEmailBackend"
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "CampusNexus <noreply@campusnexus.in>")
 
+# WhatsApp OTP delivery (AWS End User Messaging Social), see
+# campusflow_app/services/whatsapp.py. Empty WA_ORIGINATION_ID disables it and
+# OTPs go by email. Empty values below fall back to the defaults.
+WA_ORIGINATION_ID = os.environ.get("WA_ORIGINATION_ID", "").strip()
+WA_AWS_REGION = os.environ.get("WA_AWS_REGION") or os.environ.get("AWS_REGION") or "ap-south-1"
+WA_OTP_TEMPLATE = os.environ.get("WA_OTP_TEMPLATE") or "otp_login"
+WA_OTP_LANGUAGE = os.environ.get("WA_OTP_LANGUAGE") or "en"  # must match the template's language exactly
+WA_META_API_VERSION = os.environ.get("WA_META_API_VERSION") or "v20.0"
+
 # Polynexus bank account shown to colleges on the Subscription Billing page
 # for NEFT/RTGS payments. Left unset, the API returns bank_details=None and
 # the page tells the college to contact Polynexus, so a made-up account

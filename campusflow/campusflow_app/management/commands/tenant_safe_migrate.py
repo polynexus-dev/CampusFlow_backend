@@ -94,6 +94,11 @@ class Command(BaseMigrateCommand):
     """
 
     def handle(self, *args, **options):
+        connection = connections[options.get("database") or DEFAULT_DB_ALIAS]
+        schema_name = getattr(connection, "schema_name", None) or "public"
+        with connection.cursor() as cursor:
+            cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}";')
+
         original_init = MigrationExecutor.__init__
 
         def patched_init(executor_self, connection, progress_callback=None):

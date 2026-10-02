@@ -28,6 +28,7 @@ sqlparse==0.5.5
 # ── Caching ──────────────────────────────────────────────────────────────────
 django-redis==5.4.0
 redis==5.0.1
+boto3>=1.35.0  # WhatsApp OTP via AWS End User Messaging Social
 
 # ── WebSockets (Django Channels) ───────────────────────────────
 channels==4.2.2
