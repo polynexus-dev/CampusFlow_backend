@@ -64,8 +64,10 @@ ROLE_DEFAULT_MODULES = {
     "Principal": [
         "dashboard", "settings", "leave", "announcements", "exams", "analytics"
     ],
+    # "staff"/"student": faculty add Support Staff and students to their own
+    # department (see views/users.py DEPARTMENT_CREATABLE_ROLES).
     "Faculty": [
-        "dashboard", "attendance", "schedule", "settings", "leave", "exams",
+        "dashboard", "staff", "student", "attendance", "schedule", "settings", "leave", "exams",
         "announcements", "analytics", "assignments", "valuation", "ai-valuation",
         "at-risk-prediction", "transcript", "syllabus-tracker", "clearance"
     ],

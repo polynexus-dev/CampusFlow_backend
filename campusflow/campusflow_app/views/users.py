@@ -374,19 +374,54 @@ class RequestOTPView(APIView):
             return Response({"error": "Failed to send email. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# Staff roles a HOD / Faculty member may add to their own department.
+DEPARTMENT_CREATABLE_ROLES = {
+    'Department Head': ('Faculty', 'Support Staff'),
+    'Faculty': ('Support Staff',),
+}
+
+
+def own_department_id(user, roles=('Department Head', 'Faculty')):
+    """
+    Department a non-admin creator is confined to, or None if they may not
+    create users at all. Hierarchy for account creation:
+      College Admin (Management/Administrator/Supervisor) -> anyone, any department
+      Department Head -> Faculty, Support Staff + students, own department only
+      Faculty         -> Support Staff + students, own department only
+    (Functional office roles - Librarian, Fee Counter, Payroll Officer, ... -
+    carry college-wide fee/payroll access, so only College Admins create them.)
+    """
+    group = get_user_group(user)
+    if group not in roles:
+        return None
+    if group == 'Department Head':
+        profile = getattr(user, 'department_head_profile', None)
+    else:
+        profile = getattr(user, 'teaching_staff_profile', None)
+    return profile.department_id if profile else None
+
+
 class StudentRegistrationView(generics.CreateAPIView):
     """
-    Admin-only student registration.
-    Only College Admins (Management / Administrator) or SaaS Admins can create student accounts.
+    Student registration by College Admins (any department), or by a
+    Department Head / Faculty member (their own department only — forced
+    server-side). See own_department_id() for the hierarchy.
     Requires phone_number. The OTP is sent via WhatsApp (falls back to email if WhatsApp is unavailable).
     """
     serializer_class = UserRegistrationSerializer
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         # Force the role to 'student' to prevent role escalation
         data = request.data.copy()
         data['role'] = 'student'
+
+        if not (is_saas_admin(request.user) or is_college_admin(request.user)):
+            dept_id = own_department_id(request.user)
+            if not dept_id:
+                return Response({"detail": "Only College Admins, Heads of Department or Faculty can add students."},
+                                status=status.HTTP_403_FORBIDDEN)
+            data['department_id'] = dept_id
 
         email = data.get('email', '').strip().lower()
         phone_number = data.get('phone_number', '').strip()
@@ -493,14 +528,36 @@ class StudentRegistrationView(generics.CreateAPIView):
 class StaffRegistrationView(generics.CreateAPIView):
     """
     Restricted registration for Faculty, Support Staff, and Department Heads.
-    Must be performed by a College Admin (Management/Administrator).
+    Performed by a College Admin (Management/Administrator), or within their own
+    department by a HOD (Faculty, Support Staff) or Faculty (Support Staff) -
+    see own_department_id() and DEPARTMENT_CREATABLE_ROLES.
     """
     serializer_class = UserRegistrationSerializer
-    permission_classes = [IsAuthenticated, IsCollegeAdmin]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         role = request.data.get('role', '').strip()
         user = request.user
+
+        # ── Who may create ──
+        # HOD/Faculty may add the roles below them, only into their own
+        # department — the department is forced server-side, whatever the form sent.
+        created_in_department = False
+        if not (is_saas_admin(user) or is_college_admin(user)):
+            dept_id = own_department_id(user)
+            if not dept_id:
+                return Response({"detail": IsCollegeAdmin.message}, status=status.HTTP_403_FORBIDDEN)
+            allowed_roles = DEPARTMENT_CREATABLE_ROLES[get_user_group(user)]
+            if role not in allowed_roles:
+                return Response(
+                    {"error": f"You can only add {' or '.join(allowed_roles)} to your department."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            data = request.data.copy()
+            data['department_id'] = dept_id
+            created_in_department = True
+        else:
+            data = request.data
 
         # ── Role Validation ──
         valid_staff_roles = ('Faculty', 'Department Head', 'Principal', 'Administrator', 'Management', 'Supervisor', *NON_TEACHING_STAFF_ROLES)
@@ -544,22 +601,25 @@ class StaffRegistrationView(generics.CreateAPIView):
             if not Department.objects.exists():
                 return Response({"error": f"A department must exist to create a {role}."}, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         new_user = serializer.save()
 
-        # ── Generate OTP for staff activation (optional, but consistent) ──
-        # Best effort: the account exists either way, and a new code can be
-        # requested via resend-otp if this one isn't sent.
-        try:
-            otp_code = issue_otp("verify", new_user.email.lower())
-            send_mail("CampusFlow Staff Account Created", f"Account created for {role} role. OTP: {otp_code}", None, [new_user.email])
-        except Exception:
-            pass
+        # A College Admin / HOD created this account and set its password, so it's
+        # already vetted — activate it now instead of waiting on an emailed OTP
+        # (sent best-effort, so a lost email left the account unable to log in).
+        if not new_user.is_active:
+            new_user.is_active = True
+            new_user.save(update_fields=['is_active'])
+        # Faculty/Support Staff normally wait for HOD/Admin approval; someone
+        # added by their own department's HOD or faculty is approved by definition.
+        if created_in_department:
+            TeachingStaffProfile.objects.filter(user=new_user).update(status='active')
+            NonTeachingStaffProfile.objects.filter(user=new_user).update(status='active')
 
         return Response(
             {
-                "message": f"{role} account created successfully. OTP sent for activation.",
+                "message": f"{role} account created successfully.",
                 "username": new_user.username,
                 "role": role
             },
@@ -1366,24 +1426,65 @@ class PrincipalUserProfileView(APIView):
         return helper_delete_employee_profile(profile)
 
 
-class TeachingStaffUserProfileView(APIView):
-    """View all Teaching Staff profiles. College Admins and above only."""
+class HODCanListMixin:
+    """
+    GET is also open to a Department Head or Faculty member (their Staff page),
+    scoped by _staff_list_scope() to their own department. PUT/DELETE keep the
+    view's College-Admin-only permission_classes.
+    """
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
+
+# Fields a HOD/Faculty member may see for staff OUTSIDE their own department when
+# browsing the college-wide directory (?scope=all) — enough to find and
+# contact someone, none of the PII (Aadhaar, PAN, bank, addresses, DOB).
+STAFF_DIRECTORY_FIELDS = (
+    'id', 'user', 'role', 'employee_id', 'department', 'department_id',
+    'designation', 'staff_role', 'status', 'contact_number',
+)
+
+
+def _hod_visible(rows, dept_id):
+    """For a department-scoped caller, trim rows outside their department to STAFF_DIRECTORY_FIELDS."""
+    if not dept_id:
+        return rows
+    return [r if r.get('department_id') == dept_id else {k: r[k] for k in STAFF_DIRECTORY_FIELDS if k in r} for r in rows]
+
+
+def _staff_list_scope(user):
+    """
+    Returns (allowed, dept_id). dept_id is set when the caller is a Department
+    Head or Faculty member, meaning the listing is limited to their department.
+    """
+    if is_saas_admin(user) or get_user_group(user) in ('Management', 'Administrator'):
+        return True, None
+    dept_id = own_department_id(user)
+    return (True, dept_id) if dept_id else (False, None)
+
+
+class TeachingStaffUserProfileView(HODCanListMixin, APIView):
+    """View all Teaching Staff profiles. College Admins see all; HOD/Faculty see their own department."""
     permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
 
     def get(self, request):
-        user = request.user
-        group = get_user_group(user)
-
-        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+        allowed, dept_id = _staff_list_scope(request.user)
+        if not allowed:
             return Response(
                 {"detail": "You do not have permission to view teaching staff profiles."},
                 status=status.HTTP_403_FORBIDDEN
             )
+        # HOD/Faculty get their own department by default; ?scope=all opens the
+        # college-wide directory, trimmed by _hod_visible() below.
+        college_wide = request.query_params.get('scope') == 'all'
+        scoped = TeachingStaffProfile.objects.filter(department_id=dept_id) if dept_id and not college_wide else TeachingStaffProfile.objects.all()
 
         if request.query_params.get('count_only') == 'true':
-            return Response({"count": TeachingStaffProfile.objects.count()}, status=status.HTTP_200_OK)
+            return Response({"count": scoped.count()}, status=status.HTTP_200_OK)
 
-        teaching_staff_profiles = TeachingStaffProfile.objects.all().select_related('user', 'department')
+        teaching_staff_profiles = scoped.select_related('user', 'department')
 
         result = []
         for prof in teaching_staff_profiles:
@@ -1428,7 +1529,7 @@ class TeachingStaffUserProfileView(APIView):
                 "publications_link": prof.publications_link,
                 "replacement_availability_preferences": prof.replacement_availability_preferences,
             })
-        return Response(result, status=status.HTTP_200_OK)
+        return Response(_hod_visible(result, dept_id), status=status.HTTP_200_OK)
 
     def put(self, request):
         user = request.user
@@ -1755,24 +1856,26 @@ class StudentUserProfileView(APIView):
         return Response({"message": "Student profile deleted successfully."}, status=status.HTTP_200_OK)
 
 
-class DepartmentHeadUserProfileView(APIView):
-    """View all Department Head profiles. College Admins and above only."""
+class DepartmentHeadUserProfileView(HODCanListMixin, APIView):
+    """View all Department Head profiles. College Admins see all; HOD/Faculty see their own department's HOD."""
     permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
 
     def get(self, request):
-        user = request.user
-        group = get_user_group(user)
-
-        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+        allowed, dept_id = _staff_list_scope(request.user)
+        if not allowed:
             return Response(
                 {"detail": "You do not have permission to view department head profiles."},
                 status=status.HTTP_403_FORBIDDEN
             )
+        # HOD/Faculty get their own department by default; ?scope=all opens the
+        # college-wide directory, trimmed by _hod_visible() below.
+        college_wide = request.query_params.get('scope') == 'all'
+        scoped = DepartmentHeadProfile.objects.filter(department_id=dept_id) if dept_id and not college_wide else DepartmentHeadProfile.objects.all()
 
         if request.query_params.get('count_only') == 'true':
-            return Response({"count": DepartmentHeadProfile.objects.count()}, status=status.HTTP_200_OK)
+            return Response({"count": scoped.count()}, status=status.HTTP_200_OK)
 
-        profiles = DepartmentHeadProfile.objects.all().select_related('user', 'department')
+        profiles = scoped.select_related('user', 'department')
 
         result = []
         for prof in profiles:
@@ -1803,7 +1906,7 @@ class DepartmentHeadUserProfileView(APIView):
                 "pan_number": prof.pan_number, "staff_role": prof.staff_role, "status": prof.status,
                 "profile_picture": prof.profile_picture.url if prof.profile_picture else None,
             })
-        return Response(result, status=status.HTTP_200_OK)
+        return Response(_hod_visible(result, dept_id), status=status.HTTP_200_OK)
 
     def put(self, request):
         user = request.user
@@ -1854,24 +1957,26 @@ class DepartmentHeadUserProfileView(APIView):
         return helper_delete_employee_profile(profile)
 
 
-class NonTeachingStaffUserProfileView(APIView):
-    """View all Support Staff profiles. College Admins and above only."""
+class NonTeachingStaffUserProfileView(HODCanListMixin, APIView):
+    """View all Support Staff profiles. College Admins see all; HOD/Faculty see their own department."""
     permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin]
 
     def get(self, request):
-        user = request.user
-        group = get_user_group(user)
-
-        if not is_saas_admin(user) and group not in ('Management', 'Administrator'):
+        allowed, dept_id = _staff_list_scope(request.user)
+        if not allowed:
             return Response(
                 {"detail": "You do not have permission to view support staff profiles."},
                 status=status.HTTP_403_FORBIDDEN
             )
+        # HOD/Faculty get their own department by default; ?scope=all opens the
+        # college-wide directory, trimmed by _hod_visible() below.
+        college_wide = request.query_params.get('scope') == 'all'
+        scoped = NonTeachingStaffProfile.objects.filter(department_id=dept_id) if dept_id and not college_wide else NonTeachingStaffProfile.objects.all()
 
         if request.query_params.get('count_only') == 'true':
-            return Response({"count": NonTeachingStaffProfile.objects.count()}, status=status.HTTP_200_OK)
+            return Response({"count": scoped.count()}, status=status.HTTP_200_OK)
 
-        profiles = NonTeachingStaffProfile.objects.all().select_related('user', 'department').prefetch_related('user__groups')
+        profiles = scoped.select_related('user', 'department').prefetch_related('user__groups')
 
         result = []
         for prof in profiles:
@@ -1906,7 +2011,7 @@ class NonTeachingStaffUserProfileView(APIView):
                 "profile_picture": prof.profile_picture.url if prof.profile_picture else None,
                 "assigned_responsibilities": prof.assigned_responsibilities,
             })
-        return Response(result, status=status.HTTP_200_OK)
+        return Response(_hod_visible(result, dept_id), status=status.HTTP_200_OK)
 
     def put(self, request):
         user = request.user

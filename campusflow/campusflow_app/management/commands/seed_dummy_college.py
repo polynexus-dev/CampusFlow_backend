@@ -534,6 +534,13 @@ class Command(BaseCommand):
         made['Faculty'] = self._ensure_people('Faculty', fac_specs)
         made['student'] = self._ensure_people('student', stu_specs)
 
+        # Department-attached support staff, so a HOD's own-department staff list isn't empty.
+        # Only fills a missing department, never moves someone an admin re-assigned.
+        from campusflow_app.models import NonTeachingStaffProfile
+        for uname, dcode in (('labasst1', 'CSE'), ('labasst2', 'MECH'), ('clerk1', 'COM'), ('clerk2', 'CA'),
+                             ('librarian2', 'ENG'), ('admissions2', 'MGT')):
+            NonTeachingStaffProfile.objects.filter(user__username=U + uname, department__isnull=True).update(department=depts[dcode])
+
         for dcode, dept in depts.items():
             hod = self.users.get(f"{U}hod_{dcode.lower()}")
             if hod and dept.hod_id != hod.id:

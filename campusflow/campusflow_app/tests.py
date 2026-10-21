@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User, Group
 from django.urls import reverse
+from django.test import override_settings
 from rest_framework import status
 from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context
@@ -3721,3 +3722,153 @@ class StaffRegistrationRoleGroupTests(TenantTestCase):
                 content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
             )
             self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+
+class HODStaffDirectoryTests(TenantTestCase):
+    """A Department Head lists their own department's staff by default, can browse
+    the whole college with ?scope=all (other departments without PII), and can't edit."""
+
+    def setUp(self):
+        super().setUp()
+        from .models.profile import DepartmentHeadProfile, TeachingStaffProfile
+        with schema_context(self.tenant.schema_name):
+            for role in ('Department Head', 'Faculty', 'Administrator'):
+                Group.objects.get_or_create(name=role)
+            self.cse = Department.objects.create(name="CSE", code="CSE")
+            me = Department.objects.create(name="Mechanical", code="ME")
+            self.hod = User.objects.create_user(username='hod_cse', email='hod_cse@test.com', password='pw12345!')
+            self.hod.groups.add(Group.objects.get(name='Department Head'))
+            DepartmentHeadProfile.objects.create(user=self.hod, employee_id='HOD-1', department=self.cse)
+            for i, dept in enumerate((self.cse, self.cse, me)):
+                u = User.objects.create_user(username=f'fac{i}', email=f'fac{i}@test.com')
+                u.groups.add(Group.objects.get(name='Faculty'))
+                TeachingStaffProfile.objects.create(user=u, employee_id=f'FAC-{i}', department=dept, aadhaar_number=f'99990000000{i}')
+
+    def _get(self, path):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.hod)
+            token['tenant_schema'] = self.tenant.schema_name
+        return self.client.get(path, HTTP_AUTHORIZATION=f'Bearer {token.access_token}')
+
+    def test_hod_sees_own_department_by_default(self):
+        response = self._get(reverse('teaching_staff_user_profile'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual({r['employee_id'] for r in response.data}, {'FAC-0', 'FAC-1'})
+
+    def test_hod_college_wide_directory_hides_other_departments_pii(self):
+        response = self._get(reverse('teaching_staff_user_profile') + '?scope=all')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = {r['employee_id']: r for r in response.data}
+        self.assertEqual(set(rows), {'FAC-0', 'FAC-1', 'FAC-2'})
+        self.assertIn('aadhaar_number', rows['FAC-0'])
+        self.assertNotIn('aadhaar_number', rows['FAC-2'])
+
+    def test_hod_cannot_edit_staff(self):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.hod)
+            token['tenant_schema'] = self.tenant.schema_name
+        response = self.client.put(reverse('teaching_staff_user_profile'), {}, content_type='application/json',
+                                   HTTP_AUTHORIZATION=f'Bearer {token.access_token}')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class AccountCreationHierarchyTests(TenantTestCase):
+    """College Admin -> anyone; HOD -> Faculty, Support Staff + students of own
+    department; Faculty -> Support Staff + students of own department; created
+    staff can log in at once."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import patch
+        from .models.profile import DepartmentHeadProfile, ManagementProfile, NonTeachingStaffProfile, TeachingStaffProfile
+        self.otp_patcher = patch('campusflow_app.views.users.deliver_otp', return_value='email')
+        self.otp_patcher.start()
+        # Enabled here, not as a class decorator: TenantTestCase.setUpClass skips
+        # the hook that applies class-level override_settings.
+        self.cache_override = override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+        self.cache_override.enable()
+        with schema_context(self.tenant.schema_name):
+            for role in ('Management', 'Department Head', 'Faculty', 'Support Staff', 'student', 'Principal'):
+                Group.objects.get_or_create(name=role)
+            self.cse = Department.objects.create(name="CSE", code="CSE")
+            self.me = Department.objects.create(name="Mechanical", code="ME")
+
+            def make(username, role, profile_model, **profile):
+                u = User.objects.create_user(username=username, email=f'{username}@test.com', password='pw12345!')
+                u.groups.add(Group.objects.get(name=role))
+                profile_model.objects.create(user=u, employee_id=username.upper(), **profile)
+                return u
+            self.mgmt = make('mgmt', 'Management', ManagementProfile)
+            self.hod = make('hod_cse', 'Department Head', DepartmentHeadProfile, department=self.cse)
+            self.fac = make('fac_cse', 'Faculty', TeachingStaffProfile, department=self.cse, status='active')
+            self.support = make('clerk', 'Support Staff', NonTeachingStaffProfile)
+
+    def tearDown(self):
+        self.otp_patcher.stop()
+        self.cache_override.disable()
+        super().tearDown()
+
+    def _post(self, who, url_name, payload):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(who)
+            token['tenant_schema'] = self.tenant.schema_name
+        return self.client.post(reverse(url_name), payload, content_type='application/json',
+                                HTTP_AUTHORIZATION=f'Bearer {token.access_token}')
+
+    def _staff(self, username, role, **extra):
+        return {'username': username, 'email': f'{username}@test.com', 'password': 'Password123',
+                'password2': 'Password123', 'role': role, 'employee_id': f'E-{username}', **extra}
+
+    def _student(self, username, **extra):
+        return {'username': username, 'email': f'{username}@test.com', 'password': 'Password123',
+                'password2': 'Password123', 'student_id': f'S-{username}', 'program_enrolled_in_id': 'BTech',
+                'date_of_birth': '2004-01-01', 'phone_number': '9876543210', **extra}
+
+    def test_principal_created_by_management_can_log_in(self):
+        """Regression: created staff were left is_active=False pending a best-effort
+        emailed OTP, so login said 'No active account found'."""
+        response = self._post(self.mgmt, 'staff_registration', self._staff('new_principal', 'Principal'))
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        login = self.client.post(reverse('token_obtain_pair'), {'username': 'new_principal', 'password': 'Password123'},
+                                 content_type='application/json')
+        self.assertEqual(login.status_code, status.HTTP_200_OK, login.data)
+        self.assertEqual(login.data['roleName'], 'Principal')
+
+    def test_hod_adds_faculty_to_own_department_only(self):
+        from .models.profile import TeachingStaffProfile
+        response = self._post(self.hod, 'staff_registration', self._staff('new_fac', 'Faculty', department_id=self.me.id))
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        with schema_context(self.tenant.schema_name):
+            profile = TeachingStaffProfile.objects.get(user__username='new_fac')
+            self.assertEqual(profile.department_id, self.cse.id)  # forced to the HOD's own department
+            self.assertEqual(profile.status, 'active')  # HOD-added faculty need no further approval
+
+    def test_hod_and_faculty_add_support_staff_to_own_department(self):
+        from .models.profile import NonTeachingStaffProfile
+        for who, username in ((self.hod, 'lab_by_hod'), (self.fac, 'lab_by_fac')):
+            response = self._post(who, 'staff_registration', self._staff(username, 'Support Staff', department_id=self.me.id))
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+            with schema_context(self.tenant.schema_name):
+                profile = NonTeachingStaffProfile.objects.get(user__username=username)
+                self.assertEqual(profile.department_id, self.cse.id)
+                self.assertEqual(profile.status, 'active')
+
+    def test_department_users_cannot_add_roles_above_or_office_roles(self):
+        for who, role in ((self.hod, 'Librarian'), (self.hod, 'Department Head'), (self.fac, 'Faculty'), (self.fac, 'Fee Counter')):
+            response = self._post(who, 'staff_registration', self._staff(f'x_{who.username}_{role[:3]}'.lower(), role))
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, (who.username, role))
+
+    def test_support_staff_cannot_add_staff(self):
+        response = self._post(self.support, 'staff_registration', self._staff('new_lab', 'Support Staff'))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_hod_and_faculty_add_students_to_own_department(self):
+        for who, username in ((self.hod, 'stu_by_hod'), (self.fac, 'stu_by_fac')):
+            response = self._post(who, 'student_registration', self._student(username, department_id=self.me.id))
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+            with schema_context(self.tenant.schema_name):
+                self.assertEqual(StudentProfile.objects.get(user__username=username).department_id, self.cse.id)
+
+    def test_support_staff_cannot_add_students(self):
+        response = self._post(self.support, 'student_registration', self._student('stu_by_clerk', department_id=self.cse.id))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
