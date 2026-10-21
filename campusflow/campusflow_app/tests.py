@@ -3986,3 +3986,73 @@ class LibraryPermissionTests(TenantTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(set(r.data[0]), {'id', 'student_id', 'user', 'department'})
         self.assertEqual(self.client.get(reverse('library-borrowers'), **self._h('Support Staff')).status_code, 403)
+
+
+class FinanceRoleSplitTests(TenantTestCase):
+    """Accounts Officer: sees all fees + payroll, changes neither. Payroll Officer:
+    prepares payroll, never their own pay. Fee Counter: records fee payments."""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant.subscribed_modules = ['fees', 'payroll']
+        self.tenant.save(update_fields=['subscribed_modules'])
+        from .models.fees import StudentFeeInvoice
+        from .models.payroll import SalaryStructure
+        with schema_context(self.tenant.schema_name):
+            self.u = {}
+            for role in ('Accounts Officer', 'Payroll Officer', 'Fee Counter', 'Faculty', 'student'):
+                Group.objects.get_or_create(name=role)
+                u = User.objects.create_user(username=role.replace(' ', '_').lower(), email=f"{role[:4]}@test.com", password='pw12345!')
+                u.groups.add(Group.objects.get(name=role))
+                self.u[role] = u
+            SalaryStructure.objects.create(user=self.u['Faculty'], basic_pay=50000)
+            self.invoice = StudentFeeInvoice.objects.create(student=self.u['student'], due_date=datetime.date.today(), total_amount=1000)
+
+    def _h(self, role):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.u[role])
+            token['tenant_schema'] = self.tenant.schema_name
+        return {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+
+    def test_payroll_register_visible_to_payroll_and_accounts_only(self):
+        for role, expected in (('Accounts Officer', 200), ('Payroll Officer', 200), ('Faculty', 403), ('Fee Counter', 403)):
+            self.assertEqual(self.client.get('/api/payroll/structures/', **self._h(role)).status_code, expected, role)
+
+    def test_accounts_views_salary_without_creating_records(self):
+        from .models.payroll import SalaryStructure
+        target = self.u['Fee Counter']  # no structure yet
+        r = self.client.get(f'/api/payroll/structures/{target.id}/', **self._h('Accounts Officer'))
+        self.assertEqual(r.status_code, 200)
+        with schema_context(self.tenant.schema_name):
+            self.assertFalse(SalaryStructure.objects.filter(user=target).exists())
+
+    def test_only_payroll_officer_edits_salaries_and_never_their_own(self):
+        fac, me = self.u['Faculty'].id, self.u['Payroll Officer'].id
+        body = {'basic_pay': '60000'}
+        self.assertEqual(self.client.put(f'/api/payroll/structures/{fac}/', body, content_type='application/json',
+                                         **self._h('Payroll Officer')).status_code, 200)
+        self.assertEqual(self.client.put(f'/api/payroll/structures/{me}/', body, content_type='application/json',
+                                         **self._h('Payroll Officer')).status_code, 403)
+        self.assertEqual(self.client.put(f'/api/payroll/structures/{fac}/', body, content_type='application/json',
+                                         **self._h('Accounts Officer')).status_code, 403)
+
+    def test_running_payroll_is_payroll_officer_only(self):
+        body = {'month': 6, 'year': 2026}
+        self.assertEqual(self.client.post('/api/payroll/generate-bulk/', body, content_type='application/json',
+                                          **self._h('Accounts Officer')).status_code, 403)
+        self.assertEqual(self.client.post('/api/payroll/generate-bulk/', body, content_type='application/json',
+                                          **self._h('Payroll Officer')).status_code, 200)
+        # ...and Accounts then sees everyone's payslips, Faculty only their own.
+        all_slips = self.client.get('/api/payroll/payslips/', **self._h('Accounts Officer')).json()
+        self.assertTrue(any(p['username'] == 'faculty' for p in all_slips))
+        own = self.client.get('/api/payroll/payslips/', **self._h('Faculty')).json()
+        self.assertTrue(all(p['username'] == 'faculty' for p in own))
+
+    def test_fee_counter_collects_and_accounts_only_views(self):
+        pay = {'amount_paid': 500, 'payment_method': 'cash'}
+        url = f'/api/fees/invoices/{self.invoice.id}/pay/'
+        self.assertEqual(self.client.post(url, pay, content_type='application/json', **self._h('Accounts Officer')).status_code, 403)
+        self.assertEqual(self.client.post(url, pay, content_type='application/json', **self._h('Fee Counter')).status_code, 201)
+        r = self.client.get('/api/fees/invoices/', **self._h('Accounts Officer'))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client.get('/api/fees/payments/', **self._h('Accounts Officer')).status_code, 200)

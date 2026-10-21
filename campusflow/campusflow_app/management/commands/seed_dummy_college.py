@@ -218,6 +218,19 @@ CITIES = [('Pune', 'Pune', 'Maharashtra', '411001'), ('Mumbai', 'Mumbai', 'Mahar
 
 D = Decimal
 
+# Job titles for the non-teaching dummy accounts (username without the dmy_ prefix).
+NT_DESIGNATIONS = {
+    'driver': 'Bus Driver', 'conductor': 'Bus Conductor', 'labasst': 'Lab Assistant', 'clerk': 'Office Clerk',
+    'librarian': 'Librarian', 'warden_boys': 'Warden, Boys Hostel', 'warden_girls': 'Warden, Girls Hostel',
+    'store': 'Store Manager', 'tpo': 'Training & Placement Officer', 'fees': 'Fee Counter Clerk',
+    'transport': 'Transport Coordinator', 'payroll': 'Payroll Officer', 'admissions': 'Admissions Officer',
+    'scholarship': 'Scholarship Officer', 'accounts': 'Accounts Officer',
+}
+
+
+def nt_designation(uname):
+    return NT_DESIGNATIONS.get(uname.rstrip('0123456789'), uname.title())
+
 
 class Command(BaseCommand):
     help = "Creates/refreshes the 'dummy' tenant college with ~2,000 students and data in every model. Idempotent."
@@ -469,7 +482,7 @@ class Command(BaseCommand):
             for uname, fn in rows:
                 n += 1
                 role_specs.append({'username': U + uname, 'first_name': fn, 'last_name': LAST[n % len(LAST)], 'profile': {
-                    'employee_id': f"DMY-NT-{n:03d}", 'designation': uname.rstrip('0123456789').replace('_', ' ').title(),
+                    'employee_id': f"DMY-NT-{n:03d}", 'designation': nt_designation(uname),
                     'staff_role': role if role != 'Support Staff' else 'administrator', 'status': 'active',
                     'consent_given': True, 'date_of_joining': date(2012 + n % 10, 7, 1), **self._address(n)}})
             made[role] = self._ensure_people(role, role_specs)
@@ -534,6 +547,15 @@ class Command(BaseCommand):
         made['Department Head'] = self._ensure_people('Department Head', hod_specs)
         made['Faculty'] = self._ensure_people('Faculty', fac_specs)
         made['student'] = self._ensure_people('student', stu_specs)
+
+        # Older seeds derived the title from the username ("Labasst"); fix only those untouched rows.
+        from campusflow_app.models import NonTeachingStaffProfile
+        for role_rows in nt_rows.values():
+            for uname, _ in role_rows:
+                old = uname.rstrip('0123456789').replace('_', ' ').title()
+                if old != nt_designation(uname):
+                    NonTeachingStaffProfile.objects.filter(user__username=U + uname, designation=old).update(
+                        designation=nt_designation(uname))
 
         # Department-attached support staff, so a HOD's own-department staff list isn't empty.
         # Only fills a missing department, never moves someone an admin re-assigned.

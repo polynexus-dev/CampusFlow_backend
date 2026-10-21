@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework import serializers as drf_serializers
 from django.db import IntegrityError, transaction
@@ -16,13 +16,26 @@ from campusflow_app.models import (
 )
 from campusflow_app.models.academics import Batch, Program
 from campusflow_app.models.profile import StudentProfile
-from campusflow_app.permissions import IsSaaSOrCollegeAdmin, IsNotStudent, RequiresModule
+from campusflow_app.permissions import (
+    IsSaaSOrCollegeAdmin, IsNotStudent, RequiresModule, get_user_group, is_college_admin, is_saas_admin,
+)
 from campusflow_app.services.academic_roster import resolve_student_roster
 
 User = get_user_model()
 
 FEES_PERMS = [IsAuthenticated, RequiresModule("fees")]
 FEES_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("fees")]
+
+
+class CanCollectFees(BasePermission):
+    """Recording a payment is the Fee Counter's job (plus College Admins). The
+    Accounts Officer sees every invoice/payment but doesn't collect — separation
+    of duties between who takes the money and who reconciles it."""
+    message = "Only the Fee Counter or a College Admin can record fee payments."
+
+    def has_permission(self, request, view):
+        user = request.user
+        return is_saas_admin(user) or is_college_admin(user) or get_user_group(user) == 'Fee Counter'
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -381,7 +394,7 @@ class RecordFeePaymentView(APIView):
         "remarks": "paid online" (optional)
     }
     """
-    permission_classes = FEES_ADMIN_PERMS
+    permission_classes = [IsAuthenticated, CanCollectFees, RequiresModule("fees")]
 
     @transaction.atomic
     def post(self, request, invoice_id):

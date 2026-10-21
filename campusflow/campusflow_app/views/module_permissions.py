@@ -91,7 +91,9 @@ ROLE_DEFAULT_MODULES = {
     "Payroll Officer": ["dashboard", "settings", "leave", "announcements", "payroll"],
     "Admissions Officer": ["dashboard", "settings", "leave", "announcements", "admissions"],
     "Scholarship Officer": ["dashboard", "settings", "leave", "announcements", "scholarship"],
-    "Accounts Officer": ["dashboard", "settings", "leave", "announcements", "ledger", "clearance"],
+    # Sees every fee invoice/payment and the payroll register (read-only — the
+    # APIs enforce it); books it all in the ledger. See views/fees.py, payroll.py.
+    "Accounts Officer": ["dashboard", "settings", "leave", "announcements", "ledger", "fees", "payroll", "clearance"],
     "student": [
         "dashboard", "attendance", "schedule", "settings", "exams", "announcements",
         "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript", "clearance"

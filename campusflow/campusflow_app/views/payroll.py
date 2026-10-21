@@ -21,7 +21,37 @@ from ..permissions import (
     get_user_group, is_college_admin, is_saas_admin
 )
 
-PAYROLL_ADMIN_PERMS = [IsAuthenticated, IsCollegeAdmin, RequiresModule("payroll")]
+# Finance separation of duties: the Payroll Officer PREPARES payroll (salary
+# structures, payslips); the Accounts Officer only VIEWS it, to disburse and book
+# the payments. College Admins can do both.
+PAYROLL_PREPARER_ROLES = ('Payroll Officer',)
+PAYROLL_VIEWER_ROLES = ('Payroll Officer', 'Accounts Officer')
+
+
+def can_prepare_payroll(user):
+    return is_saas_admin(user) or is_college_admin(user) or get_user_group(user) in PAYROLL_PREPARER_ROLES
+
+
+def can_view_all_payroll(user):
+    return is_saas_admin(user) or is_college_admin(user) or get_user_group(user) in PAYROLL_VIEWER_ROLES
+
+
+class CanPreparePayroll(BasePermission):
+    message = "Only the Payroll Officer or a College Admin can prepare payroll."
+
+    def has_permission(self, request, view):
+        return can_prepare_payroll(request.user)
+
+
+class CanViewAllPayroll(BasePermission):
+    message = "Only Payroll, Accounts or a College Admin can view the payroll register."
+
+    def has_permission(self, request, view):
+        return can_view_all_payroll(request.user)
+
+
+PAYROLL_ADMIN_PERMS = [IsAuthenticated, CanPreparePayroll, RequiresModule("payroll")]
+PAYROLL_VIEW_PERMS = [IsAuthenticated, CanViewAllPayroll, RequiresModule("payroll")]
 
 
 class CanViewPayslips(BasePermission):
@@ -34,7 +64,7 @@ class CanViewPayslips(BasePermission):
     message = "Payroll is not enabled for your college."
 
     def has_permission(self, request, view):
-        if is_college_admin(request.user):
+        if can_view_all_payroll(request.user) and not is_saas_admin(request.user):
             return RequiresModule("payroll")().has_permission(request, view)
         if is_saas_admin(request.user):
             return True
@@ -44,9 +74,9 @@ class CanViewPayslips(BasePermission):
 
 class SalaryStructureListView(APIView):
     """
-    GET: List all salary structures (Admin only).
+    GET: List all salary structures (Payroll/Accounts Officer or Admin).
     """
-    permission_classes = PAYROLL_ADMIN_PERMS
+    permission_classes = PAYROLL_VIEW_PERMS
 
     def get(self, request):
         structures = SalaryStructure.objects.all().select_related('user')
@@ -77,10 +107,12 @@ class SalaryStructureListView(APIView):
 
 class SalaryStructureDetailView(APIView):
     """
-    GET: View salary structure for a specific user.
-    PUT: Update salary structure (Admin only).
+    GET: View salary structure for a specific user (Payroll/Accounts Officer or Admin).
+    PUT: Update salary structure (Payroll Officer or Admin; never your own).
     """
-    permission_classes = PAYROLL_ADMIN_PERMS
+    def get_permissions(self):
+        perms = PAYROLL_VIEW_PERMS if self.request.method == 'GET' else PAYROLL_ADMIN_PERMS
+        return [p() for p in perms]
 
     def get(self, request, user_id):
         try:
@@ -88,7 +120,8 @@ class SalaryStructureDetailView(APIView):
         except User.DoesNotExist:
             return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        structure, created = SalaryStructure.objects.get_or_create(user=target_user)
+        # Unsaved default when none exists: viewing (which Accounts may do) must not write.
+        structure = SalaryStructure.objects.filter(user=target_user).first() or SalaryStructure(user=target_user)
         data = {
             "user_id": target_user.id,
             "username": target_user.username,
@@ -113,6 +146,10 @@ class SalaryStructureDetailView(APIView):
             target_user = User.objects.exclude(groups__name='student').get(id=user_id)
         except User.DoesNotExist:
             return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # The Payroll Officer can't set their own pay — only a College Admin can.
+        if target_user == request.user and not (is_college_admin(request.user) or is_saas_admin(request.user)):
+            return Response({"error": "You can't change your own salary structure."}, status=status.HTTP_403_FORBIDDEN)
 
         structure, _ = SalaryStructure.objects.get_or_create(user=target_user)
 
@@ -331,7 +368,7 @@ class BulkPayslipGenerationView(APIView):
 class PayslipListView(APIView):
     """
     GET: List payslips.
-    - Admin: All payslips (filterable by month/year/user).
+    - Admin / Payroll Officer / Accounts Officer: All payslips (filterable by month/year/user).
     - Employee: Own payslips only.
     - ?mine=1: Own payslips only, even for Admins (used by the mobile app's
       personal Payslips screen so nobody sees someone else's salary there).
@@ -342,7 +379,7 @@ class PayslipListView(APIView):
         user = request.user
         mine_only = request.query_params.get('mine') in ('1', 'true')
 
-        if is_college_admin(user) and not mine_only:
+        if can_view_all_payroll(user) and not mine_only:
             qs = Payslip.objects.all()
             target_user_id = request.query_params.get('user_id')
             if target_user_id:
