@@ -879,13 +879,18 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
         is_demo = is_demo_tenant() or connection.schema_name == 'demo'
 
+        # High-trust roles are created directly by Management — activate immediately.
+        # Faculty, HOD, non-teaching staff still go through pending approval + OTP.
+        HIGH_TRUST_ROLES = ('Management', 'Administrator', 'Principal', 'Supervisor', 'guardian')
+        auto_activate = is_demo or role in HIGH_TRUST_ROLES
+
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
             password=password,
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
-            is_active=True if is_demo else False,  # Auto-activate for demo tenant, else OTP required
+            is_active=auto_activate,
         )
 
         if role == 'student':
