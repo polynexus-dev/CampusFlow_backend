@@ -161,7 +161,7 @@ from campusflow_app.views.university_affiliation import (
     FacultyWorkloadStatementViewSet, ReservationRosterEntryViewSet,
 )
 from campusflow_app.views.abc_credit import ABCCreditEntryListView, SyncABCCreditEntryView
-from campusflow_app.views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet
+from campusflow_app.views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet, LibraryBorrowerListView
 from campusflow_app.views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from campusflow_app.views.valuation import (
     ValuationSessionViewSet, ScannedPaperViewSet,
@@ -646,6 +646,7 @@ urlpatterns = [
     path('book-copies/<int:pk>/', BookCopyViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookcopy-detail'),
     path('book-issues/', BookIssueViewSet.as_view({'get': 'list', 'post': 'create'}), name='bookissue-list'),
     path('book-issues/<int:pk>/', BookIssueViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookissue-detail'),
+    path('library/borrowers/', LibraryBorrowerListView.as_view(), name='library-borrowers'),
 
     # Inventory & Store
     path('inventory-categories/', InventoryCategoryViewSet.as_view({'get': 'list', 'post': 'create'}), name='inventorycategory-list'),

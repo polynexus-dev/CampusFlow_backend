@@ -3941,3 +3941,48 @@ class AuditPortalAdminAndVoucherTests(TenantTestCase):
         self.assertIn('voucher:income:RCPT-1', [l['report_type'] for l in logs.data])
         self.assertEqual(self.client.get(reverse('audit-portal-access-logs'), **h).status_code, status.HTTP_403_FORBIDDEN)
 
+
+
+class LibraryPermissionTests(TenantTestCase):
+    """Only the Librarian / College Admins change library records; other roles
+    holding the 'library' module (students, support staff) can only read."""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant.subscribed_modules = ['library']
+        self.tenant.save(update_fields=['subscribed_modules'])
+        from .models.profile import NonTeachingStaffProfile
+        with schema_context(self.tenant.schema_name):
+            self.users = {}
+            for role, username in (('Librarian', 'lib'), ('student', 'stu'), ('Support Staff', 'lab')):
+                Group.objects.get_or_create(name=role)
+                u = User.objects.create_user(username=username, email=f'{username}@test.com', password='pw12345!')
+                u.groups.add(Group.objects.get(name=role))
+                self.users[role] = u
+            NonTeachingStaffProfile.objects.create(user=self.users['Librarian'], employee_id='LIB-1')
+            NonTeachingStaffProfile.objects.create(user=self.users['Support Staff'], employee_id='LAB-1')
+            StudentProfile.objects.create(user=self.users['student'], student_id='S-1')
+
+    def _h(self, role):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.users[role])
+            token['tenant_schema'] = self.tenant.schema_name
+        return {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+
+    def test_only_librarian_can_add_books(self):
+        book = {'title': 'T', 'author': 'A', 'isbn': '9780000000001'}
+        for role, expected in (('student', 403), ('Support Staff', 403), ('Librarian', 201)):
+            r = self.client.post('/api/books/', book, content_type='application/json', **self._h(role))
+            self.assertEqual(r.status_code, expected, role)
+
+    def test_module_holders_can_read_and_plain_support_staff_has_no_library(self):
+        for role in ('student', 'Librarian'):
+            self.assertEqual(self.client.get('/api/books/', **self._h(role)).status_code, 200, role)
+        # Library belongs to the Librarian role, not every support account.
+        self.assertEqual(self.client.get('/api/books/', **self._h('Support Staff')).status_code, 403)
+
+    def test_borrower_picker_is_librarian_only_and_minimal(self):
+        r = self.client.get(reverse('library-borrowers'), **self._h('Librarian'))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(set(r.data[0]), {'id', 'student_id', 'user', 'department'})
+        self.assertEqual(self.client.get(reverse('library-borrowers'), **self._h('Support Staff')).status_code, 403)

@@ -71,9 +71,11 @@ ROLE_DEFAULT_MODULES = {
         "announcements", "analytics", "assignments", "valuation", "ai-valuation",
         "at-risk-prediction", "transcript", "syllabus-tracker", "clearance"
     ],
+    # Plain Support Staff (lab assistants, clerks, drivers): their own leave,
+    # announcements, labs/rooms and lab equipment. Library/Hostel belong to the
+    # dedicated Librarian / Hostel Warden roles below, not every support account.
     "Support Staff": [
-        "dashboard", "room", "settings", "leave", "announcements", "hostel",
-        "library", "inventory"
+        "dashboard", "room", "settings", "leave", "announcements", "inventory"
     ],
     # Functional non-teaching roles below: each gets only its own operational
     # module (plus the same baseline as Support Staff) rather than the whole

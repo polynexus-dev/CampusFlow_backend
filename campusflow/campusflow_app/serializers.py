@@ -867,6 +867,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             from django.utils import timezone
             profile_data['consent_timestamp'] = timezone.now()
 
+        is_demo = is_demo_tenant() or connection.schema_name == 'demo'
+
         # Handle student status and parental consent checks
         if role == 'student':
             dob = profile_data.get('date_of_birth')
@@ -878,8 +880,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                     profile_data['guardian_consent_given'] = False
             if 'status' not in profile_data and not is_demo:
                 profile_data['status'] = 'pending'
-
-        is_demo = is_demo_tenant() or connection.schema_name == 'demo'
 
         # High-trust roles are created directly by Management — activate immediately.
         # Faculty, HOD, non-teaching staff, and students still go through pending approval.
