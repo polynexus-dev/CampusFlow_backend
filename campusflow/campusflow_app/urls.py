@@ -212,7 +212,7 @@ from campusflow_app.views.audit_portal import (
     InviteAuditorView, AuditEngagementListView, RevokeAuditEngagementView, MyAuditEngagementsView,
     ReceiptsPaymentsStatementView, IncomeExpenditureStatementView, FixedAssetRegisterView,
     PayrollStatutorySummaryView, FeeReconciliationView, VendorLedgerView, DocumentVaultExportView,
-    AssetsLiabilitiesScheduleView,
+    AssetsLiabilitiesScheduleView, AuditVoucherView, AuditorAccessLogListView,
 )
 from campusflow_app.views.scholarship import StateScholarshipSchemeViewSet, StudentScholarshipRecordViewSet
 from campusflow_app.views.progress import StudentProgressView, StudentTopicPerformanceView, StudentInsightView
@@ -724,6 +724,8 @@ urlpatterns = [
     path('audit-portal/reports/fee-reconciliation/', FeeReconciliationView.as_view(), name='audit-portal-fee-reconciliation'),
     path('audit-portal/reports/vendor-ledger/', VendorLedgerView.as_view(), name='audit-portal-vendor-ledger'),
     path('audit-portal/document-vault/', DocumentVaultExportView.as_view(), name='audit-portal-document-vault'),
+    path('audit-portal/vouchers/<str:kind>/<int:pk>/', AuditVoucherView.as_view(), name='audit-portal-voucher'),
+    path('audit-portal/access-logs/', AuditorAccessLogListView.as_view(), name='audit-portal-access-logs'),
     path('audit-portal/reports/assets-liabilities-schedule/', AssetsLiabilitiesScheduleView.as_view(), name='audit-portal-assets-liabilities-schedule'),
 
     # Accreditation Reporting — Quick Wins (P5)

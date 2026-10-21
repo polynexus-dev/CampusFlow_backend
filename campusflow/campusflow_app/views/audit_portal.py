@@ -21,12 +21,13 @@ import secrets
 import zipfile
 
 from django.contrib.auth.models import Group, User
+from django.db import connection
 from django.core.mail import send_mail
 from django.http import HttpResponse
 from django.utils.dateparse import parse_date
 from ipware import get_client_ip
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -37,9 +38,26 @@ from ..models.finance import ExpenseEntry, FinancialYear, FixedAsset, IncomeEntr
 from ..models.payments import PaymentGatewayTransaction
 from ..models.payroll import Payslip
 from ..models.scholarship import StudentScholarshipRecord
-from ..permissions import IsActiveAuditor, IsSaaSOrCollegeAdmin, RequiresModule, get_user_group
+from ..permissions import IsActiveAuditor, IsSaaSOrCollegeAdmin, RequiresModule, get_user_group, is_saas_admin
 
-AUDIT_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("audit-portal")]
+class CollegeSubscribedToAuditPortal(BasePermission):
+    """
+    The admin side (invite/revoke/activity log) needs the college to subscribe
+    to the audit portal, but NOT the 'audit-portal' role module — that module
+    is reserved for the CA group (RESTRICTED_ROLE_MODULES), so requiring it here
+    locked every College Admin out of managing their own auditors.
+    """
+    message = "Your college has not enabled the CA Audit Portal."
+
+    def has_permission(self, request, view):
+        if is_saas_admin(request.user):
+            return True
+        tenant = getattr(connection, "tenant", None)
+        subscribed = {m.lower().replace(" ", "-") for m in (getattr(tenant, "subscribed_modules", None) or [])}
+        return "audit-portal" in subscribed
+
+
+AUDIT_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, CollegeSubscribedToAuditPortal]
 AUDIT_CA_PERMS = [IsAuthenticated, IsActiveAuditor, RequiresModule("audit-portal")]
 from ..serializers import AuditEngagementSerializer, AuditorProfileSerializer
 
@@ -293,7 +311,7 @@ class ReceiptsPaymentsStatementView(APIView):
         income_entries = list(fy.income_entries.select_related("category").all())
         income_total = sum((e.amount for e in income_entries), start=type(fy.opening_cash_balance)(0)) if income_entries else 0
 
-        expense_entries = list(fy.expense_entries.select_related("category").all())
+        expense_entries = list(fy.expense_entries.select_related("category", "vendor").all())
         expense_total = sum((e.amount for e in expense_entries), start=type(fy.opening_cash_balance)(0)) if expense_entries else 0
 
         pairs = _year_month_pairs(fy.start_date, fy.end_date)
@@ -312,13 +330,18 @@ class ReceiptsPaymentsStatementView(APIView):
             "opening_balance": fy.opening_balance,
             "receipts": {
                 "fee_payments": fee_receipt_total,
-                "other_income": [{"category": e.category.name, "amount": e.amount, "source": e.source, "date": e.received_date} for e in income_entries],
+                "other_income": [{"id": e.id, "category": e.category.name, "amount": e.amount, "source": e.source,
+                                  "date": e.received_date, "reference": e.receipt_reference, "has_voucher": bool(e.voucher)}
+                                 for e in income_entries],
                 "other_income_total": income_total,
                 "total_receipts": fee_receipt_total + income_total,
             },
             "payments": {
                 "payroll_net_payable": payroll_total,
-                "other_expenses": [{"category": e.category.name, "amount": e.amount, "date": e.payment_date} for e in expense_entries],
+                "other_expenses": [{"id": e.id, "category": e.category.name, "amount": e.amount, "date": e.payment_date,
+                                    "reference": e.payment_reference, "vendor": e.vendor.name if e.vendor_id else None,
+                                    "has_voucher": bool(e.voucher)}
+                                   for e in expense_entries],
                 "other_expenses_total": expense_total,
                 "total_payments": payroll_total + expense_total,
             },
@@ -738,3 +761,103 @@ class AssetsLiabilitiesScheduleView(APIView):
             return _export_response(f"assets_liabilities_schedule_{fy.label}", "Assets & Liabilities Schedule", ["Line Item", "Detail", "Amount"], rows, export_format)
 
         return Response(data)
+
+
+class AuditVoucherView(APIView):
+    """
+    GET /api/audit-portal/vouchers/<kind>/<pk>/?financial_year=<id>
+    Opens the receipt/voucher behind one Receipts & Payments line (kind is
+    'income' or 'expense'). Returns the uploaded scan when there is one;
+    otherwise a system-generated PDF of the ledger entry, labelled as such so
+    a CA never mistakes it for a source document. Every open is logged.
+    """
+    permission_classes = AUDIT_CA_PERMS
+
+    def get(self, request, kind, pk):
+        from django.http import FileResponse, Http404
+
+        fy = request.auditor_engagement.financial_year
+        model = {"income": IncomeEntry, "expense": ExpenseEntry}.get(kind)
+        if model is None:
+            raise Http404
+        try:
+            entry = model.objects.select_related("category").get(pk=pk, financial_year=fy)
+        except model.DoesNotExist:
+            raise Http404
+        reference = (entry.receipt_reference if kind == "income" else entry.payment_reference) or f"#{entry.pk}"
+        _log_access(request, f"voucher:{kind}:{reference}"[:50], AuditorAccessLog.ACTION_DOWNLOAD)
+
+        if entry.voucher:
+            try:
+                return FileResponse(entry.voucher.open("rb"), as_attachment=False, filename=entry.voucher.name.rsplit("/", 1)[-1])
+            except FileNotFoundError:
+                pass  # file missing from storage: fall back to the ledger record below
+        return _ledger_record_pdf(entry, kind, reference, fy)
+
+
+def _ledger_record_pdf(entry, kind, reference, fy):
+    from reportlab.lib.pagesizes import A5
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A5)
+    width, height = A5
+    title = "Receipt (Income)" if kind == "income" else "Payment Voucher (Expense)"
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(15 * mm, height - 20 * mm, title)
+    c.setFont("Helvetica", 9)
+    c.drawString(15 * mm, height - 26 * mm, "System-generated from the ledger entry - no scanned voucher was uploaded.")
+    rows = [
+        ("Reference", reference),
+        ("Financial year", fy.label),
+        ("Category", entry.category.name),
+        ("Amount", f"Rs. {entry.amount:,.2f}"),
+        ("Date", str(entry.received_date if kind == "income" else entry.payment_date)),
+    ]
+    if kind == "income":
+        rows.append(("Source", entry.source or "-"))
+    else:
+        rows.append(("Vendor", entry.vendor.name if entry.vendor_id else "-"))
+        rows.append(("Department", entry.department.name if entry.department_id else "-"))
+    rows.append(("Recorded by", entry.recorded_by.get_full_name() or entry.recorded_by.username if entry.recorded_by_id else "-"))
+    y = height - 40 * mm
+    for label, value in rows:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(15 * mm, y, label)
+        c.setFont("Helvetica", 10)
+        c.drawString(50 * mm, y, str(value)[:60])
+        y -= 8 * mm
+    c.showPage()
+    c.save()
+    response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{kind}_{reference}.pdf"'
+    return response
+
+
+class AuditorAccessLogListView(APIView):
+    """
+    GET /api/audit-portal/access-logs/?engagement=<id>
+    College Admin's view of everything auditors opened or downloaded (newest
+    first, last 500), so a download by the CA is never invisible to the college.
+    """
+    permission_classes = AUDIT_ADMIN_PERMS
+
+    def get(self, request):
+        logs = AuditorAccessLog.objects.select_related("auditor__user", "engagement__financial_year")
+        engagement_id = request.query_params.get("engagement")
+        if engagement_id:
+            logs = logs.filter(engagement_id=engagement_id)
+        return Response([
+            {
+                "id": log.id,
+                "timestamp": log.timestamp,
+                "auditor": log.auditor.firm_name or log.auditor.user.get_full_name() or log.auditor.user.username,
+                "auditor_username": log.auditor.user.username,
+                "financial_year": log.engagement.financial_year.label,
+                "report_type": log.report_type,
+                "action": log.action,
+                "ip_address": log.ip_address,
+            }
+            for log in logs[:500]
+        ])

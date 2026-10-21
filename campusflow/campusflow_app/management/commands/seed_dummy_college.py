@@ -253,6 +253,7 @@ class Command(BaseCommand):
             self._step("inventory", self._inventory)
             self._step("placements", self._placements)
             self._step("finance & accreditation", self._finance)
+            self._step("auditor access to every financial year", self._audit_years)
             self._step("announcements & notifications", self._announcements)
             if not options['skip_generic']:
                 self._generic_fill()
@@ -1102,6 +1103,42 @@ class Command(BaseCommand):
             AuditEngagement.objects.create(auditor=auditor, financial_year=fy, access_start=today - timedelta(days=10),
                                            access_end=today + timedelta(days=180), granted_by=self._user('director'))
         return f"{fy.label}, 45 ledger entries, 6 fixed assets"
+
+    def _audit_years(self):
+        """Give the previous (closed) FY its own ledger, and the CA an engagement for
+        every FY, so the audit portal's year switch has something to switch to.
+        Idempotent: only adds entries to a year with none, and missing engagements."""
+        from campusflow_app.models import (
+            AuditEngagement, AuditorProfile, Department, ExpenseCategory, ExpenseEntry, FinancialYear,
+            IncomeCategory, IncomeEntry, Supplier,
+        )
+        auditor = AuditorProfile.objects.filter(user__username=U + 'auditor').first()
+        if not auditor:
+            return "no auditor account"
+        accounts = self._user('accounts') or User.objects.filter(username=U + 'accounts').first()
+        inc = list(IncomeCategory.objects.all())
+        exp = list(ExpenseCategory.objects.all())
+        suppliers = list(Supplier.objects.all()) or [None]
+        depts = list(Department.objects.all())
+        added = 0
+        for fy in FinancialYear.objects.order_by('start_date'):
+            if inc and exp and not fy.income_entries.exists():
+                y = fy.start_date.year
+                IncomeEntry.objects.bulk_create([IncomeEntry(
+                    category=inc[i % len(inc)], financial_year=fy, amount=D(120000 + i * 31000), source="Dummy income",
+                    received_date=date(y, 4 + i % 9, 5 + i % 20), receipt_reference=f"DMY-INC-{y % 100:02d}-{i + 1:03d}",
+                    recorded_by=accounts) for i in range(15)])
+                ExpenseEntry.objects.bulk_create([ExpenseEntry(
+                    category=exp[i % len(exp)], financial_year=fy, department=depts[i % len(depts)] if depts else None,
+                    amount=D(35000 + i * 11000), vendor=suppliers[i % len(suppliers)],
+                    payment_date=date(y, 4 + i % 9, 3 + i % 20), payment_reference=f"DMY-EXP-{y % 100:02d}-{i + 1:03d}",
+                    recorded_by=accounts) for i in range(18)])
+            if not AuditEngagement.objects.filter(auditor=auditor, financial_year=fy).exists():
+                today = date.today()
+                AuditEngagement.objects.create(auditor=auditor, financial_year=fy, access_start=today - timedelta(days=10),
+                                               access_end=today + timedelta(days=180), granted_by=self._user('director'))
+                added += 1
+        return f"{added} new engagements" if added else "already seeded"
 
     def _announcements(self):
         from campusflow_app.models import Announcement, Department, Notification

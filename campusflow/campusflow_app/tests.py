@@ -3045,6 +3045,14 @@ class CAAuditPortalTests(TenantTestCase):
 
     def setUp(self):
         super().setUp()
+        # The audit portal is a premium module: the college must subscribe to it.
+        self.tenant.subscribed_modules = ['audit-portal']
+        self.tenant.save(update_fields=['subscribed_modules'])
+        # Login touches the cache; enabled here because TenantTestCase.setUpClass
+        # skips the hook that applies class-level override_settings.
+        self.cache_override = override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+        self.cache_override.enable()
+        self.addCleanup(self.cache_override.disable)
         with schema_context(self.tenant.schema_name):
             for role in ('Management', 'Faculty', 'CA'):
                 Group.objects.get_or_create(name=role)
@@ -3872,3 +3880,64 @@ class AccountCreationHierarchyTests(TenantTestCase):
     def test_support_staff_cannot_add_students(self):
         response = self._post(self.support, 'student_registration', self._student('stu_by_clerk', department_id=self.cse.id))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class AuditPortalAdminAndVoucherTests(TenantTestCase):
+    """College Admins can manage auditors and see their activity log; a CA can
+    switch between engaged years and open a receipt (logged)."""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant.subscribed_modules = ['audit-portal']
+        self.tenant.save(update_fields=['subscribed_modules'])
+        from .models.audit_portal import AuditEngagement, AuditorProfile
+        from .models.finance import FinancialYear, IncomeCategory, IncomeEntry
+        with schema_context(self.tenant.schema_name):
+            for role in ('Management', 'CA'):
+                Group.objects.get_or_create(name=role)
+            self.admin = User.objects.create_user(username='mgmt_a', email='mgmt_a@test.com', password='pw12345!')
+            self.admin.groups.add(Group.objects.get(name='Management'))
+            self.ca = User.objects.create_user(username='ca_a', email='ca_a@test.com', password='pw12345!')
+            self.ca.groups.add(Group.objects.get(name='CA'))
+            auditor = AuditorProfile.objects.create(user=self.ca, firm_name="Test & Co.")
+            today = datetime.date.today()
+            self.fys = []
+            for y in (2024, 2025):
+                fy = FinancialYear.objects.create(label=f"FY {y}-{(y + 1) % 100}", start_date=datetime.date(y, 4, 1),
+                                                  end_date=datetime.date(y + 1, 3, 31))
+                AuditEngagement.objects.create(auditor=auditor, financial_year=fy, access_start=today - datetime.timedelta(days=1),
+                                               access_end=today + datetime.timedelta(days=30))
+                self.fys.append(fy)
+            cat = IncomeCategory.objects.create(name="Grants")
+            self.entry = IncomeEntry.objects.create(category=cat, financial_year=self.fys[0], amount=1000,
+                                                    received_date=datetime.date(2024, 5, 1), receipt_reference="RCPT-1")
+
+    def _h(self, user):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+
+    def test_college_admin_can_list_engagements(self):
+        response = self.client.get(reverse('audit-portal-engagement-list'), **self._h(self.admin))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+
+    def test_ca_switches_year_and_opens_receipt_and_admin_sees_the_log(self):
+        h = self._h(self.ca)
+        for fy in self.fys:
+            r = self.client.get(reverse('audit-portal-receipts-payments') + f'?financial_year={fy.id}', **h)
+            self.assertEqual(r.status_code, status.HTTP_200_OK)
+            self.assertEqual(r.data['financial_year'], fy.label)
+        r = self.client.get(reverse('audit-portal-voucher', args=['income', self.entry.id]) + f'?financial_year={self.fys[0].id}', **h)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        # an entry from another year is not reachable through this year's engagement
+        r = self.client.get(reverse('audit-portal-voucher', args=['income', self.entry.id]) + f'?financial_year={self.fys[1].id}', **h)
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+        logs = self.client.get(reverse('audit-portal-access-logs'), **self._h(self.admin))
+        self.assertEqual(logs.status_code, status.HTTP_200_OK)
+        self.assertIn('voucher:income:RCPT-1', [l['report_type'] for l in logs.data])
+        self.assertEqual(self.client.get(reverse('audit-portal-access-logs'), **h).status_code, status.HTTP_403_FORBIDDEN)
+
