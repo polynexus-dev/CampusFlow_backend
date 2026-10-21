@@ -661,16 +661,34 @@ class VerifyAccountView(APIView):
             return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         # ── Activate account ──
-        if user.is_active:
+        profile = get_user_profile_by_user(user)
+        user_group = get_user_group(user)
+
+        if user.is_active and getattr(profile, 'status', None) == 'active':
             return Response({"message": "Account is already active."}, status=status.HTTP_200_OK)
 
         user.is_active = True
         user.save()
 
-        user_group = get_user_group(user)
-        if user_group == 'student':
-            profile = get_user_profile_by_user(user)
-            if profile:
+        # If student account is pending administrator approval, keep profile.status as 'pending'
+        if user_group == 'student' and profile:
+            if profile.status == 'pending':
+                return Response(
+                    {
+                        "message": "OTP verified successfully! Your account is pending administrator approval before you can log in.",
+                        "status": "pending"
+                    },
+                    status=status.HTTP_200_OK
+                )
+            elif profile.status == 'pending_guardian':
+                return Response(
+                    {
+                        "message": "OTP verified successfully! Awaiting parental/guardian consent.",
+                        "status": "pending_guardian"
+                    },
+                    status=status.HTTP_200_OK
+                )
+            else:
                 profile.status = 'active'
                 profile.save()
 
@@ -2523,14 +2541,18 @@ class PendingApprovalsView(APIView):
 
         # Helper to format user data
         def format_pending(profile, role):
+            dept_name = None
+            if hasattr(profile, 'department') and profile.department:
+                dept_name = profile.department.name
             return {
                 "user_id": profile.user.id,
                 "username": profile.user.username,
                 "email": profile.user.email,
                 "full_name": profile.user.get_full_name(),
                 "role": role,
-                "department": profile.department.name if hasattr(profile, 'department') and profile.department else None,
-                "employee_id": getattr(profile, 'employee_id', None),
+                "department": dept_name,
+                "employee_id": getattr(profile, 'employee_id', None) or getattr(profile, 'student_id', None),
+                "student_id": getattr(profile, 'student_id', None),
                 "date_joined": profile.user.date_joined
             }
 
@@ -2545,13 +2567,17 @@ class PendingApprovalsView(APIView):
                 # (Librarian, Hostel Warden, ...) — label with the user's actual
                 # group rather than hardcoding 'Support Staff' for all of them.
                 pending_users.append(format_pending(p, get_user_group(p.user) or 'Support Staff'))
+            for p in StudentProfile.objects.filter(status='pending'):
+                pending_users.append(format_pending(p, 'Student'))
 
-        # 2. If HOD: Collect Faculty and Support in their department
+        # 2. If HOD: Collect Faculty, Support, and Students in their department
         elif is_hod and hod_dept:
             for p in TeachingStaffProfile.objects.filter(status='pending', department=hod_dept):
                 pending_users.append(format_pending(p, 'Faculty'))
             for p in NonTeachingStaffProfile.objects.filter(status='pending', department=hod_dept):
                 pending_users.append(format_pending(p, get_user_group(p.user) or 'Support Staff'))
+            for p in StudentProfile.objects.filter(status='pending', department=hod_dept):
+                pending_users.append(format_pending(p, 'Student'))
         
         else:
             return Response({"detail": "You do not have permission to view pending approvals."}, status=status.HTTP_403_FORBIDDEN)
@@ -2565,7 +2591,7 @@ class ApproveUserView(APIView):
     - HOD: Approved by Admin.
     - Faculty: Approved by HOD.
     - Support Staff / other non-teaching roles: Approved by Admin or HOD.
-    - Student: Approved/Rejected by Admin (bypasses OTP-based flow).
+    - Student: Approved/Rejected by Admin or Department HOD.
     """
     permission_classes = [IsAuthenticated, IsNotStudent]
 
@@ -2598,12 +2624,10 @@ class ApproveUserView(APIView):
             elif hasattr(target_user, 'administrator_profile'):
                 target_group = 'Administrator'
 
-        # Students are activated via OTP (is_active flag), not via the pending queue.
-        # All other roles must be in 'pending' state before being approved/rejected.
         is_student_target = target_group == 'student'
         if not target_profile:
             return Response({"error": "User profile not found."}, status=status.HTTP_400_BAD_REQUEST)
-        if not is_student_target and target_profile.status != 'pending':
+        if target_profile.status != 'pending':
             return Response({"error": "User is not in a pending state."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Requester info
@@ -2642,8 +2666,10 @@ class ApproveUserView(APIView):
                 authorized = True
         
         elif is_student_target:
-            # Students can only be approved/rejected by Admins
+            # Students can be approved/rejected by Admins or their HOD
             if is_admin:
+                authorized = True
+            elif is_hod and getattr(target_profile, 'department', None) == hod_dept:
                 authorized = True
 
         # Supervisor cannot approve/reject Management accounts
@@ -2669,13 +2695,8 @@ class ApproveUserView(APIView):
                 target_user.groups.add(group_obj)
             msg = f"User {target_user.username} has been approved."
         else:  # reject
-            if is_student_target:
-                # For students, rejection deactivates the account without changing status
-                target_user.is_active = False
-                target_profile.status = 'inactive'
-            else:
-                target_profile.status = 'rejected'
-                target_user.is_active = False
+            target_profile.status = 'rejected'
+            target_user.is_active = False
             msg = f"User {target_user.username} has been rejected."
         
         target_user.save()
