@@ -876,11 +876,13 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                 if age < 18:
                     profile_data['status'] = 'pending_guardian'
                     profile_data['guardian_consent_given'] = False
+            if 'status' not in profile_data and not is_demo:
+                profile_data['status'] = 'pending'
 
         is_demo = is_demo_tenant() or connection.schema_name == 'demo'
 
         # High-trust roles are created directly by Management — activate immediately.
-        # Faculty, HOD, non-teaching staff still go through pending approval + OTP.
+        # Faculty, HOD, non-teaching staff, and students still go through pending approval.
         HIGH_TRUST_ROLES = ('Management', 'Administrator', 'Principal', 'Supervisor', 'guardian')
         auto_activate = is_demo or role in HIGH_TRUST_ROLES
 
@@ -895,6 +897,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
         if role == 'student':
             fields = {k: v for k, v in profile_data.items() if hasattr(StudentProfile, k)}
+            if not is_demo and fields.get('status') != 'pending_guardian':
+                fields['status'] = 'pending'
             StudentProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'student')
         elif role == 'Faculty':

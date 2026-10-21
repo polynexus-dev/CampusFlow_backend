@@ -390,7 +390,7 @@ FACE_PIPELINE_TASK_TIMEOUT = int(os.environ.get("FACE_PIPELINE_TASK_TIMEOUT", 15
 # `ollama serve` is actually running (with AI_GRADING_MODEL/AI_NARRATIVE_MODEL
 # pulled beforehand via `ollama pull <model>`).
 # ============================================================
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434"
 AI_GRADING_MODEL = os.environ.get("AI_GRADING_MODEL", "qwen2.5vl:3b")
 # Local CPU vision inference is much slower than a hosted API — generous vs.
 # the old Claude timeout on purpose.

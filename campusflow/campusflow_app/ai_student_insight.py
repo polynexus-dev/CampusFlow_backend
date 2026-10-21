@@ -83,16 +83,17 @@ def build_student_insight(progress_data: dict, topic_data: dict) -> dict:
         "options": {"temperature": 0.2, "num_predict": 2048, "num_ctx": settings.AI_NARRATIVE_NUM_CTX},
     }
 
+    base_url = (getattr(settings, "OLLAMA_BASE_URL", "") or "http://localhost:11434").rstrip("/")
     try:
         response = requests.post(
-            f"{settings.OLLAMA_BASE_URL}/api/chat",
+            f"{base_url}/api/chat",
             json=payload,
             timeout=settings.AI_NARRATIVE_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
     except requests.ConnectionError as e:
         raise StudentInsightError(
-            f"Could not reach the local drafting model at {settings.OLLAMA_BASE_URL} — "
+            f"Could not reach the local drafting model at {base_url} — "
             f"is `ollama serve` running and has `{settings.AI_NARRATIVE_MODEL}` been pulled? ({e})"
         ) from e
     except requests.Timeout as e:
