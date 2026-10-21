@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.db import connection
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -391,6 +394,33 @@ def _compute_student_topic_performance(profile, published_only=True):
     }
 
 
+def _insight_progress(snapshot):
+    """
+    Progress info for a pending insight, so the UI can show a bar and time left:
+    seconds elapsed since it was requested, the typical end-to-end time (median
+    of this college's last 20 completed insights — queue wait + model time on
+    this server), and how many requests are queued ahead of it here.
+    """
+    import statistics
+
+    recent = (StudentInsightSnapshot.objects
+              .filter(status=StudentInsightSnapshot.STATUS_READY, generated_at__isnull=False)
+              .order_by('-generated_at')
+              .values_list('requested_at', 'generated_at')[:20])
+    durations = [(done - asked).total_seconds() for asked, done in recent if done > asked]
+    typical = statistics.median(durations) if durations else 60
+    return {
+        "elapsed_seconds": max(0, int((timezone.now() - snapshot.requested_at).total_seconds())),
+        "typical_seconds": int(min(max(typical, 10), 180)),
+        # Only recent requests: an older "pending" row was abandoned (worker
+        # restart, task killed) and is no longer in the queue.
+        "queue_ahead": StudentInsightSnapshot.objects.filter(
+            status=StudentInsightSnapshot.STATUS_PENDING, requested_at__lt=snapshot.requested_at,
+            requested_at__gte=timezone.now() - timedelta(minutes=10),
+        ).count(),
+    }
+
+
 class StudentInsightView(APIView):
     """
     GET: The latest AI-generated performance insight for a student — a
@@ -420,14 +450,17 @@ class StudentInsightView(APIView):
         snapshot = StudentInsightSnapshot.objects.filter(student=profile).first()
         if not snapshot:
             return Response({"status": "not_generated"})
-        return Response({
+        data = {
             "status": snapshot.status,
             "narrative_text": snapshot.narrative_text,
             "recommendations": snapshot.recommendations,
             "generated_at": snapshot.generated_at,
             "model_used": snapshot.model_used,
             "error_message": snapshot.error_message,
-        })
+        }
+        if snapshot.status == StudentInsightSnapshot.STATUS_PENDING:
+            data.update(_insight_progress(snapshot))
+        return Response(data)
 
     def post(self, request):
         from ..tasks import run_student_insight_generation
@@ -439,6 +472,9 @@ class StudentInsightView(APIView):
         snapshot, _ = StudentInsightSnapshot.objects.update_or_create(
             student=profile,
             defaults={
+                # requested_at is auto_now_add (set on first create only); reset
+                # it so a regeneration's elapsed time/progress starts from now.
+                "requested_at": timezone.now(),
                 "status": StudentInsightSnapshot.STATUS_PENDING,
                 "requested_by": request.user,
                 "narrative_text": "",

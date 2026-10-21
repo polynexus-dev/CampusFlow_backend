@@ -63,12 +63,16 @@ def build_student_insight(progress_data: dict, topic_data: dict) -> dict:
     StudentTopicPerformanceView's already-computed payloads. Raises
     StudentInsightError on any failure. Caller owns all persistence.
     """
+    # Compact JSON: every prompt token costs time on a CPU model.
+    def compact(value):
+        return json.dumps(value, separators=(",", ":"), default=str)
+
     user_message = (
         f"Student: {progress_data.get('student_name', 'Unknown')}\n\n"
-        f"Overall performance:\n{json.dumps(progress_data.get('overall', {}), indent=2)}\n\n"
-        f"By course:\n{json.dumps(progress_data.get('by_course', []), indent=2)}\n\n"
-        f"By topic (from evaluated answer scripts):\n{json.dumps(topic_data.get('topics', []), indent=2)}\n\n"
-        f"Course-outcome attainment:\n{json.dumps(topic_data.get('course_outcomes', []), indent=2)}\n\n"
+        f"Overall performance:\n{compact(progress_data.get('overall', {}))}\n\n"
+        f"By course:\n{compact(progress_data.get('by_course', []))}\n\n"
+        f"By topic (from evaluated answer scripts):\n{compact(topic_data.get('topics', []))}\n\n"
+        f"Course-outcome attainment:\n{compact(topic_data.get('course_outcomes', []))}\n\n"
         "Write the narrative and recommendations for this student's performance from the data above."
     )
 
@@ -80,7 +84,10 @@ def build_student_insight(progress_data: dict, topic_data: dict) -> dict:
         ],
         "format": _OUTPUT_SCHEMA,
         "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 2048, "num_ctx": settings.AI_NARRATIVE_NUM_CTX},
+        # A 3-5 sentence read + 2-4 recommendations is ~250 tokens; 2048 let a
+        # rambling reply run for minutes on CPU. num_ctx must stay equal to the
+        # other AI_NARRATIVE_MODEL callers, or Ollama reloads the model each switch.
+        "options": {"temperature": 0.2, "num_predict": 600, "num_ctx": settings.AI_NARRATIVE_NUM_CTX},
     }
 
     base_url = (getattr(settings, "OLLAMA_BASE_URL", "") or "http://localhost:11434").rstrip("/")
@@ -106,6 +113,14 @@ def build_student_insight(progress_data: dict, topic_data: dict) -> dict:
         raise StudentInsightError(f"Could not reach the drafting service: {e}") from e
 
     data = response.json()
+    # Ollama reports where the time went (nanoseconds) — the first thing to
+    # check when insights feel slow: model load vs. reading the prompt vs. writing.
+    logger.info(
+        "student insight timing: total=%.1fs load=%.1fs prompt=%s tok/%.1fs output=%s tok/%.1fs",
+        data.get("total_duration", 0) / 1e9, data.get("load_duration", 0) / 1e9,
+        data.get("prompt_eval_count"), data.get("prompt_eval_duration", 0) / 1e9,
+        data.get("eval_count"), data.get("eval_duration", 0) / 1e9,
+    )
 
     if data.get("done_reason") == "length":
         raise StudentInsightError("The drafting model's response was truncated before completing — try again.")

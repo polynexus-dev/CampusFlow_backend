@@ -22,5 +22,8 @@ pip install -r requirements.txt
 # knob. Start low (default 2) and raise via CELERY_CONCURRENCY once you've
 # checked actual RAM headroom on the host — don't just match CPU core count
 # blindly the way you might for a stateless web worker.
-echo "🚀 Starting Celery worker..."
-exec celery -A campusflow worker --loglevel=info --concurrency="${CELERY_CONCURRENCY:-2}"
+# CELERY_QUEUES: this service takes the default (face pipeline) queue;
+# celery_background_worker runs the same script with CELERY_QUEUES=background
+# and concurrency 1 for the slow AI/timetable jobs (see CELERY_TASK_ROUTES).
+echo "🚀 Starting Celery worker (queues: ${CELERY_QUEUES:-celery})..."
+exec celery -A campusflow worker --loglevel=info -Q "${CELERY_QUEUES:-celery}" --concurrency="${CELERY_CONCURRENCY:-2}"

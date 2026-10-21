@@ -86,6 +86,28 @@ services:
       - ollama
     command: /bin/bash ./entrypoint_celery.sh
 
+  # Slow background jobs (local-LLM AI features + timetable solver) on their
+  # own queue, so they never wait behind — or block — face attendance on the
+  # worker above. Concurrency 1: Ollama on CPU answers one request at a time.
+  celery_background_worker:
+    build: .
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=pgbouncer
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CELERY_QUEUES=background
+      - CELERY_CONCURRENCY=1
+    depends_on:
+      - pgbouncer   # unlike the face worker, these jobs write their results to the DB
+      - redis
+      - ollama
+    command: /bin/bash ./entrypoint_celery.sh
+
   # Local, on-prem model server for every AI-assisted feature (answer-sheet
   # valuation, accreditation narrative drafting, question generation, student
   # insight — see campusflow_app/ai_*.py). Runs entirely inside this compose

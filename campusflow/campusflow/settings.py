@@ -376,6 +376,17 @@ CELERY_TASK_TIME_LIMIT = int(os.environ.get("CELERY_TASK_TIME_LIMIT", 20))
 # before giving up and telling the student to use manual attendance
 # instead. Keep below CELERY_TASK_TIME_LIMIT.
 FACE_PIPELINE_TASK_TIMEOUT = int(os.environ.get("FACE_PIPELINE_TASK_TIMEOUT", 15))
+# Slow background jobs (local-LLM AI features, the timetable solver) run on
+# their own "background" queue/worker (docker-compose: celery_background_worker).
+# On the shared default queue a 1-3 minute AI job held one of the face
+# worker's two slots — insights waited behind attendance scans, and
+# attendance throughput halved while an insight was being written.
+CELERY_TASK_ROUTES = {
+    "campusflow_app.run_ai_grading_suggestion": {"queue": "background"},
+    "campusflow_app.run_accreditation_narrative_draft": {"queue": "background"},
+    "campusflow_app.run_student_insight_generation": {"queue": "background"},
+    "campusflow_app.run_generate_timetable": {"queue": "background"},
+}
 
 # ============================================================
 # AI-ASSISTED VALUATION (local Ollama vision grading — nothing about a
