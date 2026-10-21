@@ -379,6 +379,9 @@ class ABCCreditEntryTests(_SharedFixtureMixin, TenantTestCase):
                 start_date=datetime.date(2026, 4, 1), end_date=datetime.date(2026, 9, 30),
             )
             exam = self._exam_with_term(term=term)
+            # Only the exam's own staff may publish it (see permissions.can_manage_exam).
+            exam.created_by = self.faculty_user
+            exam.save(update_fields=["created_by"])
             student_user = User.objects.create_user(username="stuabc2", email="stuabc2@test.com")
             student = StudentProfile.objects.create(user=student_user, student_id="STUABC2", department=self.dept)
             result = StudentExamResult.objects.create(exam=exam, student=student, marks_obtained=90)

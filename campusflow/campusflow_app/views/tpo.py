@@ -1,4 +1,5 @@
-from rest_framework import viewsets
+from rest_framework import status, viewsets
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from ..models.tpo import RecruitmentDrive, PlacementApplication
 from ..serializers import RecruitmentDriveSerializer, PlacementApplicationSerializer
@@ -29,6 +30,19 @@ class PlacementApplicationViewSet(viewsets.ModelViewSet):
         if student_id:
             qs = qs.filter(student_id=student_id)
         return qs
+
+    def create(self, request, *args, **kwargs):
+        # Pin a student's application to themselves before validation, so the
+        # duplicate check and everything else runs against their own record.
+        student_profile = getattr(request.user, 'student_profile', None)
+        if student_profile is not None:
+            data = request.data.copy()
+            data['student'] = student_profile.id
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student')
