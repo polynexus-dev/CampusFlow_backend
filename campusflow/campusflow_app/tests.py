@@ -3665,3 +3665,40 @@ class NBAAttainmentRollupTests(TenantTestCase):
         )
         self.assertEqual(csv_response.status_code, status.HTTP_200_OK)
         self.assertEqual(csv_response["Content-Type"], "text/csv")
+
+
+class StaffRegistrationRoleGroupTests(TenantTestCase):
+    """Regression: creating a Principal/Administrator 500'd in tenants whose
+    schema was missing that role's Group (assign_role_permissions raised)."""
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            Group.objects.get_or_create(name='Management')
+            Group.objects.filter(name__in=('Principal', 'Administrator')).delete()
+
+    def _management_token(self):
+        with schema_context(self.tenant.schema_name):
+            user = User.objects.create_user(
+                username='mgmt_creator', email='mgmt_creator@test.com', password='pw12345!',
+            )
+            user.groups.add(Group.objects.get(name='Management'))
+            token = RefreshToken.for_user(user)
+            token['tenant_schema'] = self.tenant.schema_name
+        return token
+
+    def test_management_can_create_principal_and_administrator_without_seeded_groups(self):
+        token = self._management_token()
+        for i, role in enumerate(('Principal', 'Administrator')):
+            response = self.client.post(
+                reverse('staff_registration'),
+                {
+                    'username': f'new_{i}', 'email': f'new_{i}@test.com',
+                    'password': 'Password123', 'password2': 'Password123',
+                    'role': role, 'employee_id': f'EMP-NEW-{i}', 'consent_given': True,
+                },
+                format='json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+            )
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+            with schema_context(self.tenant.schema_name):
+                self.assertTrue(User.objects.get(email=f'new_{i}@test.com').groups.filter(name=role).exists())

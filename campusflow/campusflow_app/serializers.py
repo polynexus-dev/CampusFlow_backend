@@ -625,10 +625,10 @@ class LogoutSerializer(serializers.Serializer):
 
 def assign_role_permissions(user, role_group_name):
     """Assigns user to a specific role group and sets permissions."""
-    try:
-        group = Group.objects.get(name=role_group_name)
-    except Group.DoesNotExist:
-        raise ValueError(f"Group '{role_group_name}' does not exist. Please create it first.")
+    # Callers have already validated the role name. Create the group on demand:
+    # tenants provisioned before a role existed (e.g. 'Principal') or by other
+    # paths may be missing it, and raising here 500s the whole registration.
+    group, _ = Group.objects.get_or_create(name=role_group_name)
     user.groups.clear()
     user.groups.add(group)
     group_permissions_codenames = group.permissions.values_list('codename', flat=True)
