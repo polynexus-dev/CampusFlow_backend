@@ -86,6 +86,16 @@ if [ "${SEED_DEMO_DATA:-0}" = "1" ]; then
     python seed_demo_data.py
 fi
 
+# 4.6. 'dummy' test college (~2,000 students, every role, data in every model)
+#      for handing out demo logins. Idempotent — only creates what's missing,
+#      so it's cheap after the first deploy. Never blocks startup: a seeding
+#      error is logged and the server still starts. Set SEED_DUMMY_COLLEGE=0
+#      to skip it on a server that shouldn't have the dummy college.
+if [ "${SEED_DUMMY_COLLEGE:-1}" = "1" ]; then
+    echo "🔄 Ensuring dummy college data is seeded..."
+    python manage.py seed_dummy_college || echo "⚠️  seed_dummy_college failed — continuing startup."
+fi
+
 # 5. Collect static files for the admin panel / DRF browsable API
 echo "🔄 Collecting static files..."
 python manage.py collectstatic --noinput
