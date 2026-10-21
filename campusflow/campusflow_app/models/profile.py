@@ -361,6 +361,9 @@ class NonTeachingStaffProfile(models.Model):
     # Additional
     profile_picture = models.ImageField(upload_to='profile_pics/non_teaching_staff/', blank=True, null=True)
     assigned_responsibilities = models.TextField(blank=True, null=True)
+    # In-charge of their team (role): may add members of the same team — see
+    # views/users.py TEAM_CREATABLE_ROLES. Set by a College Admin only.
+    is_in_charge = models.BooleanField(default=False)
 
     # DPDP Compliance
     consent_given = models.BooleanField(default=False, help_text="True if privacy notice is accepted.")

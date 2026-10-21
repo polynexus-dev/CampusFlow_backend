@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from ..models.exam import ExamType, Exam
 from ..permissions import (
+    can_manage_exam,
     IsCollegeAdmin, IsFacultyOrAbove, IsNotStudent, RequiresModule,
     get_user_group, is_college_admin, is_saas_admin
 )
@@ -240,6 +241,9 @@ class ExamDetailView(APIView):
     def put(self, request, pk):
         if not IsFacultyOrAbove().has_permission(request, self):
             return Response({"error": "Insufficient permissions."}, status=status.HTTP_403_FORBIDDEN)
+        existing = Exam.objects.filter(id=pk).first()
+        if existing and not can_manage_exam(request.user, existing):
+            return Response({"error": "You can only edit exams you set, invigilate or teach."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             exam = Exam.objects.get(id=pk)

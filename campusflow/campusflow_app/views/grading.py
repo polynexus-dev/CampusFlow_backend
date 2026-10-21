@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 from ..models.academics import Term
 from ..models.grading import CourseGradeAward, StudentAcademicSummary, TermGradeSheet
 from ..models.profile import StudentProfile
-from ..permissions import RequiresModule, IsHMOrAbove, is_faculty_or_above
+from ..permissions import RequiresModule, IsHMOrAbove, is_faculty_or_above, IsPrincipalOrCollegeAdmin
 from ..services.grading import publish_term_results
 
 
@@ -73,7 +73,8 @@ class PublishTermResultsView(APIView):
     touched here (see recompute_academic_records for an explicit correction).
     """
 
-    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("academics")]
+    # College-wide: a HOD publishing every department's grades was too broad.
+    permission_classes = [IsAuthenticated, IsPrincipalOrCollegeAdmin, RequiresModule("academics")]
 
     def post(self, request, pk):
         term = Term.objects.filter(pk=pk).first()

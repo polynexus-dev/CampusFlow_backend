@@ -21,7 +21,7 @@ from rest_framework.views import APIView
 from django.utils import timezone
 
 from ..models.apprenticeship import ApprenticeshipContract, StipendClaim
-from ..permissions import RequiresModule, get_user_group, is_faculty_or_above, is_saas_admin
+from ..permissions import ManagedBy, RequiresModule, get_user_group, is_faculty_or_above, is_saas_admin
 from ..serializers import ApprenticeshipContractSerializer
 
 TPO_PERMS = [IsAuthenticated, RequiresModule("tpo")]
@@ -47,7 +47,8 @@ class ApprenticeshipContractViewSet(viewsets.ModelViewSet):
         "placement_application__student__user", "placement_application__drive",
     ).all()
     serializer_class = ApprenticeshipContractSerializer
-    permission_classes = TPO_PERMS
+    # Students read their own contracts; the Placement Officer/Admins manage them.
+    permission_classes = TPO_PERMS + [ManagedBy("Placement Officer")]
 
     def get_queryset(self):
         qs = super().get_queryset()

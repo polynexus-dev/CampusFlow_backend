@@ -21,7 +21,7 @@ Auth Flow:
   create users or run fees/payroll. Created only by Management or SaaS Admin.
 """
 
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 from django.db import connection, models
 
 
@@ -33,7 +33,7 @@ from django.db import connection, models
 NON_TEACHING_STAFF_ROLES = (
     'Support Staff', 'Librarian', 'Hostel Warden', 'Store Manager', 'Placement Officer',
     'Fee Counter', 'Transport Coordinator', 'Payroll Officer', 'Admissions Officer',
-    'Scholarship Officer', 'Accounts Officer',
+    'Scholarship Officer', 'Accounts Officer', 'Canteen Staff', 'Driver', 'Conductor',
 )
 
 
@@ -328,6 +328,63 @@ class IsActiveAuditor(BasePermission):
                 request.auditor_engagement = engagement
                 return True
         return False
+
+
+def can_manage_exam(user, exam):
+    """
+    Who may enter marks, set/see the question paper, edit or publish one exam:
+    College Admins and the Principal (any exam), the HOD of the exam's
+    department, and Faculty who created/invigilate it or teach its course.
+    IsFacultyOrAbove alone let any teacher change any department's marks.
+    """
+    if is_saas_admin(user) or is_college_admin(user) or get_user_group(user) == PRINCIPAL_ROLE:
+        return True
+    group = get_user_group(user)
+    if group == 'Department Head':
+        hod = getattr(user, 'department_head_profile', None)
+        return bool(hod and hod.department_id and hod.department_id == exam.department_id)
+    if group == 'Faculty':
+        if user.id in (exam.created_by_id, exam.invigilator_id):
+            return True
+        from .models.offerings import CourseOffering
+        return CourseOffering.objects.filter(course_id=exam.course_id, faculty=user).exists()
+    return False
+
+
+class IsPrincipalOrCollegeAdmin(BasePermission):
+    """College-wide academic actions (e.g. publishing a whole term's grades)."""
+    message = "Only the Principal or a College Admin can do this."
+
+    def has_permission(self, request, view):
+        user = request.user
+        return is_saas_admin(user) or is_college_admin(user) or get_user_group(user) == PRINCIPAL_ROLE
+
+
+def ManagedBy(*roles, create_roles=()):
+    """
+    Read for anyone the view's other permission classes let through; writes
+    only for College Admins and `roles` (the module's operating role, e.g.
+    'Hostel Warden'). `create_roles` may additionally POST — e.g. students
+    applying to a placement drive — the view must then pin what they create
+    to themselves.
+
+    Exists because many modules are held by students/other roles purely to
+    *read* (their own hostel room, placement drives, ...), and RequiresModule
+    alone let them create/edit/delete every record in that module.
+    """
+    class _ManagedBy(BasePermission):
+        message = f"Only {' / '.join(roles) or 'College Admins'} can change these records."
+
+        def has_permission(self, request, view):
+            if request.method in SAFE_METHODS:
+                return True
+            user = request.user
+            if is_saas_admin(user) or is_college_admin(user) or get_user_group(user) in roles:
+                return True
+            return request.method == 'POST' and get_user_group(user) in create_roles
+
+    _ManagedBy.__name__ = f"ManagedBy_{'_'.join(r.replace(' ', '') for r in roles)}"
+    return _ManagedBy
 
 
 def RequiresModule(module_key):

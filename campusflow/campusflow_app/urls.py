@@ -2,7 +2,7 @@ from django.urls import path
 from tenants.views import InvoiceListAPIView, InvoiceUploadReceiptAPIView
 from campusflow_app.views.department import DepartmentView, DepartmentDetailView
 from campusflow_app.views.users import (
-    StudentUserProfileView, StudentLookupView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView,
+    StudentUserProfileView, StudentLookupView, VerifyTokenView, StudentRegistrationView, StaffRegistrationView, MyTeamView,
     MyObtainTokenPairView, LoginOTPRequestView, LoginOTPVerifyView, LogoutAPIView, UserProfileView,
     ManagementUserProfileView, AdministratorUserProfileView, PrincipalUserProfileView,
     TeachingStaffUserProfileView, VerifyAccountView, ResendOTPView,
@@ -128,7 +128,8 @@ from campusflow_app.views.notifications import (
 from campusflow_app.views.fees import (
     FeeCategoryViewSet, FeeStructureViewSet, StudentFeeInvoiceViewSet,
     BulkGenerateInvoicesView, RecordFeePaymentView, FeePaymentListView,
-    FeeDashboardView
+    FeeDashboardView,
+    FeeStudentLookupView, StudentDuesView, CollectDuesView, FeeCounterListView,
 )
 from campusflow_app.views.payments import (
     CreatePaymentOrderView, VerifyPaymentView, RazorpayWebhookView
@@ -233,6 +234,7 @@ urlpatterns = [
     # ── Auth ─────────────────────────────────────────────────────────
     path('register/student/', StudentRegistrationView.as_view(), name='student_registration'),
     path('register/staff/', StaffRegistrationView.as_view(), name='staff_registration'),
+    path('team/members/', MyTeamView.as_view(), name='my-team'),
     path('verify-account/', VerifyAccountView.as_view(), name='verify-account'),
     path('resend-otp/', ResendOTPView.as_view(), name='resend-otp'),
     path('student/onboard/request-otp/', StudentOnboardRequestOTPView.as_view(), name='student_onboard_request_otp'),
@@ -547,6 +549,10 @@ urlpatterns = [
     path('fees/invoices/bulk-generate/', BulkGenerateInvoicesView.as_view(), name='fee-invoice-bulk-generate'),
     path('fees/invoices/<int:invoice_id>/pay/', RecordFeePaymentView.as_view(), name='fee-invoice-pay'),
     path('fees/payments/', FeePaymentListView.as_view(), name='fee-payment-list'),
+    path('fees/students/', FeeStudentLookupView.as_view(), name='fee-student-lookup'),
+    path('fees/students/<int:user_id>/dues/', StudentDuesView.as_view(), name='fee-student-dues'),
+    path('fees/collect-dues/', CollectDuesView.as_view(), name='fee-collect-dues'),
+    path('fees/counters/', FeeCounterListView.as_view(), name='fee-counter-list'),
     path('fees/dashboard/', FeeDashboardView.as_view(), name='fee-dashboard'),
 
     # ── Online Payments (Gateway) ───────────────────────────────────

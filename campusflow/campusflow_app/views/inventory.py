@@ -5,9 +5,10 @@ from ..serializers import (
     InventoryCategorySerializer, InventoryItemSerializer,
     SupplierSerializer, InventoryTransactionSerializer
 )
-from ..permissions import RequiresModule
+from ..permissions import ManagedBy, RequiresModule
 
-INVENTORY_PERMS = [IsAuthenticated, RequiresModule("inventory")]
+# Support Staff hold 'inventory' to look up lab stock; the Store Manager/Admins change it.
+INVENTORY_PERMS = [IsAuthenticated, RequiresModule("inventory"), ManagedBy("Store Manager")]
 
 
 class InventoryCategoryViewSet(viewsets.ModelViewSet):

@@ -103,18 +103,6 @@ class DepartmentView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def delete(self, request):
-        """Delete ALL departments. Requires SaaS Admin or College Admin."""
-        if not self._can_write(request.user):
-            return Response(
-                {"error": "Only SaaS Admin or College Admins can delete departments."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        try:
-            Department.objects.all().delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class DepartmentDetailView(APIView):

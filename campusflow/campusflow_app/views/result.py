@@ -9,7 +9,8 @@ from ..models.exam import Exam
 from ..models.offerings import CourseOffering, StudentCourseRegistration
 from ..models.profile import StudentProfile
 from ..serializers import StudentExamResultSerializer
-from ..permissions import RequiresModule, IsFacultyOrAbove, get_user_group, is_faculty_or_above
+from rest_framework.exceptions import PermissionDenied
+from ..permissions import RequiresModule, IsFacultyOrAbove, can_manage_exam, get_user_group, is_faculty_or_above
 from ..services.notifications import notify_guardians_of_student
 from ..services.abc_credit import record_credit_entry
 
@@ -43,10 +44,20 @@ class StudentExamResultViewSet(viewsets.ModelViewSet):
             return qs.none()
         return qs
 
+    def _check_exam(self, exam):
+        if not can_manage_exam(self.request.user, exam):
+            raise PermissionDenied("You can only enter marks for exams you set, invigilate or teach.")
+
     def perform_create(self, serializer):
+        self._check_exam(serializer.validated_data['exam'])
         serializer.save(entered_by=self.request.user)
 
+    def perform_destroy(self, instance):
+        self._check_exam(instance.exam)
+        instance.delete()
+
     def perform_update(self, serializer):
+        self._check_exam(serializer.instance.exam)
         if serializer.instance.exam.results_published:
             raise drf_serializers.ValidationError(
                 "This exam's results are published and locked. Submit a ResultCorrectionRequest instead."
@@ -128,6 +139,9 @@ class ExamPublishResultsView(APIView):
         except Exam.DoesNotExist:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        if not can_manage_exam(request.user, exam):
+            return Response({"error": "You can only publish results for exams you set, invigilate or teach."},
+                            status=status.HTTP_403_FORBIDDEN)
         if exam.results_published:
             return Response({"error": "Results for this exam are already published."}, status=status.HTTP_400_BAD_REQUEST)
 

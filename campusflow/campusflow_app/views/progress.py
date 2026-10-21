@@ -22,6 +22,11 @@ def _resolve_student_profile(request):
     """
     user = request.user
     student_id = request.query_params.get('student_id')
+    if student_id is not None and not str(student_id).isdigit():
+        return None, Response(
+            {"error": "student_id must be a numeric student profile id."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     if get_user_group(user) == 'student':
         profile = getattr(user, 'student_profile', None)

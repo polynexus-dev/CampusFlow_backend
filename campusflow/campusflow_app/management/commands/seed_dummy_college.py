@@ -225,6 +225,7 @@ NT_DESIGNATIONS = {
     'store': 'Store Manager', 'tpo': 'Training & Placement Officer', 'fees': 'Fee Counter Clerk',
     'transport': 'Transport Coordinator', 'payroll': 'Payroll Officer', 'admissions': 'Admissions Officer',
     'scholarship': 'Scholarship Officer', 'accounts': 'Accounts Officer',
+    'canteen_head': 'Canteen Manager', 'canteen': 'Canteen Staff', 'support_head': 'Support Staff Supervisor',
 }
 
 
@@ -268,6 +269,7 @@ class Command(BaseCommand):
             self._step("finance & accreditation", self._finance)
             self._step("auditor access to every financial year", self._audit_years)
             self._step("announcements & notifications", self._announcements)
+            self._step("clearance desks & final-year no-dues", self._clearance)
             if not options['skip_generic']:
                 self._generic_fill()
             self._report()
@@ -547,6 +549,32 @@ class Command(BaseCommand):
         made['Department Head'] = self._ensure_people('Department Head', hod_specs)
         made['Faculty'] = self._ensure_people('Faculty', fac_specs)
         made['student'] = self._ensure_people('student', stu_specs)
+
+        # Team roles added later. Drivers/conductors keep their place above (their
+        # employee ids are positional) and just move to their own roles; the new
+        # canteen team and support in-charge get ids from a separate range.
+        from campusflow_app.models import NonTeachingStaffProfile as NTP
+        for uname, new_role in [(f'driver{i}', 'Driver') for i in range(1, 5)] + [(f'conductor{i}', 'Conductor') for i in range(1, 5)]:
+            u = self.users.get(U + uname)
+            if u and u.groups.filter(name='Support Staff').exists():
+                u.groups.set([Group.objects.get(name=new_role)])
+                NTP.objects.filter(user=u).update(staff_role=new_role)
+        team_rows = {
+            'Support Staff': [('support_head', 'Vilas', 101)],
+            'Canteen Staff': [('canteen_head', 'Sharad', 102), ('canteen1', 'Babu', 103), ('canteen2', 'Lakshmi', 104)],
+        }
+        for role, rows in team_rows.items():
+            made[role] = made.get(role, 0) + self._ensure_people(role, [
+                {'username': U + uname, 'first_name': fn, 'last_name': LAST[k % len(LAST)], 'profile': {
+                    'employee_id': f"DMY-NT-{k:03d}", 'designation': nt_designation(uname),
+                    'staff_role': role if role != 'Support Staff' else 'administrator', 'status': 'active',
+                    'consent_given': True, 'date_of_joining': date(2015, 7, 1), **self._address(k)}}
+                for uname, fn, k in rows])
+        # One in-charge per team, set once when the feature first arrives (never
+        # re-applied, so an admin's later change sticks).
+        if not NTP.objects.filter(is_in_charge=True).exists():
+            NTP.objects.filter(user__username__in=[U + n for n in ('librarian', 'warden_boys', 'support_head', 'canteen_head')]
+                               ).update(is_in_charge=True)
 
         # Older seeds derived the title from the username ("Labasst"); fix only those untouched rows.
         from campusflow_app.models import NonTeachingStaffProfile
@@ -908,17 +936,21 @@ class Command(BaseCommand):
 
     def _payroll(self):
         from campusflow_app.models import Payslip, SalaryStructure
-        if SalaryStructure.objects.exists():
-            return "already seeded"
+        first_run = not SalaryStructure.objects.exists()
         basic = {'Management': 150000, 'Principal': 140000, 'Department Head': 110000, 'Administrator': 70000, 'Faculty': 65000}
         structures = []
+        have = set(SalaryStructure.objects.values_list('user_id', flat=True))
         for u in self._staff_users():
+            if u.id in have:
+                continue  # staff added on a later deploy still get a salary structure
             group = u.groups.first().name
             b = D(basic.get(group, 25000) + (u.id % 7) * 1000)
             structures.append(SalaryStructure(user=u, basic_pay=b, hra=(b * D('0.24')).quantize(D('1')), da=(b * D('0.17')).quantize(D('1')),
                                               ta=D(1600), pf_deduction=min(D(1800), (b * D('0.12')).quantize(D('1'))),
                                               tds_deduction=(b * D('0.05')).quantize(D('1')) if b > 50000 else D(0)))
         SalaryStructure.objects.bulk_create(structures)
+        if not first_run:
+            return f"{len(structures)} new salary structures" if structures else "already seeded"
         today = date.today()
         payslips = []
         payroll_officer = self._user('payroll')
@@ -1161,6 +1193,33 @@ class Command(BaseCommand):
                                                access_end=today + timedelta(days=180), granted_by=self._user('director'))
                 added += 1
         return f"{added} new engagements" if added else "already seeded"
+
+    def _clearance(self):
+        """Real clearance desks (each owned by the role that signs it off) and a
+        final-exit no-dues request for final-semester students, so the Fee Counter
+        has fee clearances to work. Idempotent."""
+        from campusflow_app.models import ClearanceDesk, ClearanceRequest, StudentProfile
+        from campusflow_app.services.academics import get_current_term
+        from campusflow_app.services.clearance import create_clearance_request
+
+        for order, (name, code, group, module) in enumerate([
+            ("Fees", "fees", "Fee Counter", "fees"), ("Library", "library", "Librarian", "library"),
+            ("Hostel", "hostel", "Hostel Warden", "hostel"), ("Department", "department", "Department Head", "none"),
+        ], start=1):
+            ClearanceDesk.objects.get_or_create(code=code, defaults={
+                "name": name, "responsible_group": Group.objects.get(name=group), "linked_module": module, "order": order,
+            })
+        # Placeholder desks from the generic pass would add sign-offs nobody owns.
+        ClearanceDesk.objects.filter(code__startswith="dummy-").update(is_active=False)
+
+        ay = get_current_term().academic_year
+        if ClearanceRequest.objects.filter(cycle_type=ClearanceRequest.CYCLE_FINAL_EXIT, academic_year=ay).exists():
+            return "already seeded"
+        final_year = [sp for sp in StudentProfile.objects.select_related('program', 'user').filter(user__username__startswith=U)
+                      if sp.program and sp.current_semester_number and sp.current_semester_number >= sp.program.total_terms - 1]
+        for sp in final_year[::4][:60]:
+            create_clearance_request(sp, ClearanceRequest.CYCLE_FINAL_EXIT, academic_year=ay, generated_by=self._user('admin'))
+        return f"4 desks, {min(60, len(final_year[::4]))} final-exit requests"
 
     def _announcements(self):
         from campusflow_app.models import Announcement, Department, Notification

@@ -93,6 +93,10 @@ ROLE_DEFAULT_MODULES = {
     "Scholarship Officer": ["dashboard", "settings", "leave", "announcements", "scholarship"],
     # Sees every fee invoice/payment and the payroll register (read-only — the
     # APIs enforce it); books it all in the ledger. See views/fees.py, payroll.py.
+    # New team roles: canteen workers, bus drivers and conductors.
+    "Canteen Staff": ["dashboard", "settings", "leave", "announcements"],
+    "Driver": ["dashboard", "settings", "leave", "announcements", "bus-tracking"],
+    "Conductor": ["dashboard", "settings", "leave", "announcements", "bus-tracking"],
     "Accounts Officer": ["dashboard", "settings", "leave", "announcements", "ledger", "fees", "payroll", "clearance"],
     "student": [
         "dashboard", "attendance", "schedule", "settings", "exams", "announcements",

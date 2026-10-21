@@ -34,8 +34,23 @@ class CanCollectFees(BasePermission):
     message = "Only the Fee Counter or a College Admin can record fee payments."
 
     def has_permission(self, request, view):
-        user = request.user
-        return is_saas_admin(user) or is_college_admin(user) or get_user_group(user) == 'Fee Counter'
+        return can_collect_fees(request.user)
+
+
+def can_collect_fees(user):
+    return is_saas_admin(user) or is_college_admin(user) or get_user_group(user) == 'Fee Counter'
+
+
+def can_oversee_fees(user):
+    """Collectors plus the Accounts Officer (read-only oversight)."""
+    return can_collect_fees(user) or get_user_group(user) == 'Accounts Officer'
+
+
+class CanOverseeFees(BasePermission):
+    message = "Only the Fee Counter, Accounts Officer or a College Admin can do this."
+
+    def has_permission(self, request, view):
+        return can_oversee_fees(request.user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -507,3 +522,167 @@ class FeeDashboardView(APIView):
         }
 
         return Response(stats, status=status.HTTP_200_OK)
+
+
+# Categories the Fee Counter may bill on the spot for dues that were never
+# invoiced (fines, clearance dues, certificate fees). Created on first use.
+COUNTER_DUE_CATEGORIES = ("Library Fine", "Clearance Dues", "Certificate Fee", "Miscellaneous")
+
+
+class FeeStudentLookupView(APIView):
+    """GET /api/fees/students/?search= — student picker for the fee counter (no contact/ID data)."""
+    permission_classes = [IsAuthenticated, CanOverseeFees, RequiresModule("fees")]
+
+    def get(self, request):
+        q = (request.query_params.get("search") or "").strip()
+        qs = StudentProfile.objects.select_related("user", "department").order_by("student_id")
+        if q:
+            qs = qs.filter(
+                Q(student_id__icontains=q) | Q(user__username__icontains=q)
+                | Q(user__first_name__icontains=q) | Q(user__last_name__icontains=q)
+            )
+        return Response([
+            {"user_id": sp.user_id, "student_id": sp.student_id, "name": sp.user.get_full_name(),
+             "department": sp.department.name if sp.department_id else None}
+            for sp in qs[:25]
+        ])
+
+
+class StudentDuesView(APIView):
+    """
+    GET /api/fees/students/<user_id>/dues/ — everything a student owes at the
+    counter: unpaid invoices (any category), unpaid library fines, and pending
+    fee-desk clearance items.
+    """
+    permission_classes = [IsAuthenticated, CanOverseeFees, RequiresModule("fees")]
+
+    def get(self, request, user_id):
+        from campusflow_app.models.clearance import ClearanceItem
+        from campusflow_app.models.library import BookIssue
+
+        student = StudentProfile.objects.select_related("user").filter(user_id=user_id).first()
+        if not student:
+            return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+        invoices = StudentFeeInvoice.objects.filter(student_id=user_id).exclude(status=StudentFeeInvoice.STATUS_PAID)
+        fines = BookIssue.objects.filter(student=student, fine_amount__gt=0).select_related("book_copy__book")
+        clearance = ClearanceItem.objects.filter(
+            request__student=student, desk__linked_module="fees", status=ClearanceItem.STATUS_PENDING,
+        ).select_related("desk", "request")
+        return Response({
+            "student": {"user_id": student.user_id, "student_id": student.student_id, "name": student.user.get_full_name()},
+            "unpaid_invoices": [
+                {"id": inv.id, "invoice_number": inv.invoice_number, "due_date": inv.due_date,
+                 "total_amount": str(inv.total_amount), "paid_amount": str(inv.paid_amount),
+                 "remaining_balance": str(inv.remaining_balance), "status": inv.status}
+                for inv in invoices
+            ],
+            "library_fines": [
+                {"book_issue_id": bi.id, "book": bi.book_copy.book.title, "barcode": bi.book_copy.barcode,
+                 "fine_amount": str(bi.fine_amount), "status": bi.status}
+                for bi in fines
+            ],
+            "pending_fee_clearance": [
+                {"item_id": it.id, "desk": it.desk.name, "cycle": it.request.cycle_type,
+                 "reference": it.reference_snapshot}
+                for it in clearance
+            ],
+        })
+
+
+class CollectDuesView(APIView):
+    """
+    POST /api/fees/collect-dues/ — bill and collect an un-invoiced due in one step.
+    Payload: {student_user_id, category: one of COUNTER_DUE_CATEGORIES, amount,
+              payment_method, transaction_reference?, remarks?, book_issue_id?}
+    With book_issue_id the amount defaults to that library fine, and the fine
+    is marked settled once paid. Creates an invoice + receipt like any fee.
+    """
+    permission_classes = [IsAuthenticated, CanCollectFees, RequiresModule("fees")]
+
+    @transaction.atomic
+    def post(self, request):
+        from campusflow_app.models.finance import get_locked_financial_year_for_date
+        from campusflow_app.models.library import BookIssue
+
+        locked_fy = get_locked_financial_year_for_date(timezone.now().date())
+        if locked_fy:
+            return Response({"error": f"Financial year {locked_fy.label} is locked."}, status=status.HTTP_400_BAD_REQUEST)
+
+        student = StudentProfile.objects.select_related("user").filter(user_id=request.data.get("student_user_id")).first()
+        if not student:
+            return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        category_name = (request.data.get("category") or "").strip()
+        if category_name not in COUNTER_DUE_CATEGORIES:
+            return Response({"error": f"category must be one of: {', '.join(COUNTER_DUE_CATEGORIES)}"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        method = (request.data.get("payment_method") or "").strip().lower()
+        if method not in [c[0] for c in FeePayment.METHOD_CHOICES]:
+            return Response({"error": "Invalid payment method."}, status=status.HTTP_400_BAD_REQUEST)
+
+        book_issue = None
+        if request.data.get("book_issue_id"):
+            book_issue = BookIssue.objects.select_for_update().filter(
+                id=request.data["book_issue_id"], student=student, fine_amount__gt=0,
+            ).select_related("book_copy").first()
+            if not book_issue:
+                return Response({"error": "No unpaid fine on that book issue for this student."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = Decimal(str(request.data.get("amount") or (book_issue.fine_amount if book_issue else 0)))
+        except Exception:
+            return Response({"error": "amount must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+        if amount <= 0:
+            return Response({"error": "amount must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
+
+        remarks = request.data.get("remarks", "")
+        if book_issue:
+            remarks = f"Library fine for copy {book_issue.book_copy.barcode} (Rs. {book_issue.fine_amount}). {remarks}".strip()
+
+        category, _ = FeeCategory.objects.get_or_create(name=category_name, defaults={"description": "Collected at the fee counter"})
+        invoice = StudentFeeInvoice.objects.create(student=student.user, due_date=timezone.now().date(), total_amount=amount)
+        StudentFeeInvoiceItem.objects.create(invoice=invoice, category=category, amount=amount)
+        payment = FeePayment.objects.create(
+            invoice=invoice, amount_paid=amount, payment_method=method,
+            transaction_reference=request.data.get("transaction_reference", ""), remarks=remarks,
+            collected_by=request.user,
+        )
+        if book_issue:
+            book_issue.fine_amount = 0
+            book_issue.save(update_fields=["fine_amount"])
+
+        return Response({
+            "message": f"{category_name} of Rs. {amount} collected.",
+            "receipt_number": payment.receipt_number,
+            "invoice_number": invoice.invoice_number,
+        }, status=status.HTTP_201_CREATED)
+
+
+class FeeCounterListView(APIView):
+    """
+    GET /api/fees/counters/ — the Fee Counter accounts and what each has
+    collected (all time and today), for the Accounts Officer to reconcile.
+    New counters are created through /api/register/staff/ (role 'Fee Counter').
+    """
+    permission_classes = [IsAuthenticated, CanOverseeFees, RequiresModule("fees")]
+
+    def get(self, request):
+        if get_user_group(request.user) == 'Fee Counter':
+            return Response({"detail": "Only the Accounts Officer or a College Admin can view all counters."},
+                            status=status.HTTP_403_FORBIDDEN)
+        today = timezone.localdate()
+        counters = User.objects.filter(groups__name='Fee Counter').select_related('non_teaching_staff_profile').order_by('username')
+        rows = []
+        for u in counters:
+            payments = FeePayment.objects.filter(collected_by=u)
+            todays = payments.filter(payment_date__date=today)
+            profile = getattr(u, 'non_teaching_staff_profile', None)
+            rows.append({
+                "user_id": u.id, "username": u.username, "name": u.get_full_name(), "email": u.email,
+                "employee_id": getattr(profile, 'employee_id', None), "is_active": u.is_active,
+                "receipts": payments.count(),
+                "collected_total": str(payments.aggregate(t=Sum('amount_paid'))['t'] or 0),
+                "collected_today": str(todays.aggregate(t=Sum('amount_paid'))['t'] or 0),
+            })
+        return Response(rows)
+

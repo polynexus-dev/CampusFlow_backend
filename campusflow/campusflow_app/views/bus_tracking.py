@@ -24,7 +24,7 @@ REST API for the CampusNexus Bus Module:
 from django.http import HttpResponse
 from rest_framework import generics, status
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework import serializers as drf_serializers
 from django.utils import timezone
@@ -39,7 +39,19 @@ from campusflow_app.services.qr_branding import render_branded_qr
 from campusflow_app.services.notifications import notify_guardians_of_student
 
 BUS_PERMS = [IsAuthenticated, RequiresModule("bus-tracking")]
-BUS_ADMIN_PERMS = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("bus-tracking")]
+def is_transport_manager(user):
+    """College Admins and the Transport Coordinator run the fleet (routes, passes, QR codes, oversight)."""
+    return is_saas_or_college_admin(user) or get_user_group(user) == 'Transport Coordinator'
+
+
+class IsTransportManager(BasePermission):
+    message = "Only the Transport Coordinator or a College Admin can manage transport."
+
+    def has_permission(self, request, view):
+        return is_transport_manager(request.user)
+
+
+BUS_ADMIN_PERMS = [IsAuthenticated, IsTransportManager, RequiresModule("bus-tracking")]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -248,7 +260,7 @@ class StudentIDQRView(APIView):
         except StudentProfile.DoesNotExist:
             return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if profile.user_id != request.user.id and not is_saas_or_college_admin(request.user):
+        if profile.user_id != request.user.id and not is_transport_manager(request.user):
             return Response({"error": "You are not authorized to view this student's ID card."}, status=status.HTTP_403_FORBIDDEN)
 
         png_bytes = render_branded_qr(
@@ -316,7 +328,7 @@ class BusSubscriptionListCreateView(generics.ListCreateAPIView):
 
     def create(self, request, *args, **kwargs):
         # Only admins can create subscriptions
-        if not is_saas_or_college_admin(request.user):
+        if not is_transport_manager(request.user):
             return Response(
                 {"error": "Only admins can assign bus subscriptions."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -479,7 +491,7 @@ class BusConductorScanStudentView(APIView):
 
         route = trip.route
         is_conductor_or_driver = route is not None and request.user.id in (route.driver_id, route.conductor_id)
-        if not is_conductor_or_driver and not is_saas_or_college_admin(request.user):
+        if not is_conductor_or_driver and not is_transport_manager(request.user):
             return Response({"error": "You are not the assigned driver/conductor for this trip."}, status=status.HTTP_403_FORBIDDEN)
 
         def record(status_value, student=None):
@@ -652,7 +664,7 @@ class BusLiveLocationsView(generics.ListAPIView):
 
         routes = BusRoute.objects.filter(is_active=True).select_related("driver")
 
-        if not is_saas_or_college_admin(request.user):
+        if not is_transport_manager(request.user):
             today = timezone.localdate()
             subscribed_route_ids = BusSubscription.objects.filter(
                 user=request.user,
@@ -773,7 +785,7 @@ class BusTrailView(generics.ListAPIView):
         User = get_user_model()
 
         # Only admins, or the driver viewing their own trail, may access this.
-        if str(request.user.id) != str(driver_id) and not is_saas_or_college_admin(request.user):
+        if str(request.user.id) != str(driver_id) and not is_transport_manager(request.user):
             return Response({"error": "You are not authorized to view this driver's trail."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -1103,7 +1115,7 @@ class BusTripSummaryView(APIView):
             return Response({"error": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
 
         is_conductor_or_driver = trip.route is not None and request.user.id in (trip.route.driver_id, trip.route.conductor_id)
-        if not is_conductor_or_driver and not is_saas_or_college_admin(request.user):
+        if not is_conductor_or_driver and not is_transport_manager(request.user):
             return Response({"error": "You are not authorized to view this trip."}, status=status.HTTP_403_FORBIDDEN)
 
         missing_events = BusScanEvent.objects.filter(

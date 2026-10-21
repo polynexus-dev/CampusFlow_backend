@@ -4056,3 +4056,240 @@ class FinanceRoleSplitTests(TenantTestCase):
         r = self.client.get('/api/fees/invoices/', **self._h('Accounts Officer'))
         self.assertEqual(r.status_code, 200)
         self.assertEqual(self.client.get('/api/fees/payments/', **self._h('Accounts Officer')).status_code, 200)
+
+
+class FeeCounterCollectionTests(TenantTestCase):
+    """The Fee Counter collects every kind of due (invoices, library fines,
+    clearance dues) and signs off the fees clearance desk; the Accounts Officer
+    opens fee counters and reconciles what each one collected."""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant.subscribed_modules = ['fees', 'clearance', 'library']
+        self.tenant.save(update_fields=['subscribed_modules'])
+        from .models.clearance import ClearanceDesk, ClearanceRequest
+        from .models.library import Book, BookCopy, BookIssue
+        from .models.profile import NonTeachingStaffProfile
+        from .services.clearance import create_clearance_request
+        with schema_context(self.tenant.schema_name):
+            self.u = {}
+            for role in ('Fee Counter', 'Accounts Officer', 'student'):
+                Group.objects.get_or_create(name=role)
+                u = User.objects.create_user(username=role.replace(' ', '_').lower(), email=f"{role[:5].strip()}@test.com", password='pw12345!')
+                u.groups.add(Group.objects.get(name=role))
+                self.u[role] = u
+            for role in ('Fee Counter', 'Accounts Officer'):
+                NonTeachingStaffProfile.objects.create(user=self.u[role], employee_id=f'E-{role[:3]}')
+            self.student = StudentProfile.objects.create(user=self.u['student'], student_id='S-1')
+            copy = BookCopy.objects.create(book=Book.objects.create(title='B', author='A', isbn='9780000000009'), barcode='BC-1')
+            self.issue = BookIssue.objects.create(book_copy=copy, student=self.student, due_date=datetime.date.today(), fine_amount=50)
+            ClearanceDesk.objects.create(name='Fees', code='fees', responsible_group=Group.objects.get(name='Fee Counter'), linked_module='fees')
+            self.request, _ = create_clearance_request(self.student, ClearanceRequest.CYCLE_FINAL_EXIT)
+
+    def _h(self, role):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.u[role])
+            token['tenant_schema'] = self.tenant.schema_name
+        return {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+
+    def test_counter_collects_library_fine_and_it_is_settled(self):
+        dues = self.client.get(f"/api/fees/students/{self.u['student'].id}/dues/", **self._h('Fee Counter')).json()
+        self.assertEqual(len(dues['library_fines']), 1)
+        self.assertEqual(len(dues['pending_fee_clearance']), 1)
+        body = {'student_user_id': self.u['student'].id, 'category': 'Library Fine', 'payment_method': 'cash',
+                'book_issue_id': self.issue.id}
+        r = self.client.post('/api/fees/collect-dues/', body, content_type='application/json', **self._h('Fee Counter'))
+        self.assertEqual(r.status_code, 201, r.json())
+        self.assertTrue(r.json()['receipt_number'])
+        with schema_context(self.tenant.schema_name):
+            self.issue.refresh_from_db()
+            self.assertEqual(self.issue.fine_amount, 0)
+        # Accounts oversees but never collects.
+        body['amount'] = 10
+        body.pop('book_issue_id')
+        self.assertEqual(self.client.post('/api/fees/collect-dues/', body, content_type='application/json',
+                                          **self._h('Accounts Officer')).status_code, 403)
+
+    def test_counter_clears_the_fees_clearance_desk(self):
+        with schema_context(self.tenant.schema_name):
+            item = self.request.items.get(desk__code='fees')
+        r = self.client.post(f'/api/clearance/items/{item.id}/clear/', {'remarks': 'No dues'},
+                             content_type='application/json', **self._h('Fee Counter'))
+        self.assertEqual(r.status_code, 200, r.json())
+
+    def test_accounts_opens_fee_counters_and_sees_their_collections(self):
+        body = {'username': 'counter2', 'email': 'counter2@test.com', 'password': 'Password123', 'password2': 'Password123',
+                'role': 'Fee Counter', 'employee_id': 'FC-2'}
+        r = self.client.post(reverse('staff_registration'), body, content_type='application/json', **self._h('Accounts Officer'))
+        self.assertEqual(r.status_code, 201, r.json())
+        # ...but nothing beyond fee counters.
+        body.update(username='lib2', email='lib2@test.com', role='Librarian', employee_id='L-2')
+        self.assertEqual(self.client.post(reverse('staff_registration'), body, content_type='application/json',
+                                          **self._h('Accounts Officer')).status_code, 403)
+        counters = self.client.get('/api/fees/counters/', **self._h('Accounts Officer')).json()
+        self.assertEqual({c['username'] for c in counters}, {'fee_counter', 'counter2'})
+        # A counter can't see other counters' takings or open new counters.
+        self.assertEqual(self.client.get('/api/fees/counters/', **self._h('Fee Counter')).status_code, 403)
+        body.update(username='c3', email='c3@test.com', role='Fee Counter', employee_id='FC-3')
+        self.assertEqual(self.client.post(reverse('staff_registration'), body, content_type='application/json',
+                                          **self._h('Fee Counter')).status_code, 403)
+
+
+class TeamInChargeTests(TenantTestCase):
+    """A team's in-charge (flag set by an admin) adds members of their own team;
+    coordinator roles (Transport Coordinator, Accounts Officer) always can."""
+
+    def setUp(self):
+        super().setUp()
+        from .models.profile import ManagementProfile, NonTeachingStaffProfile
+        with schema_context(self.tenant.schema_name):
+            self.cse = Department.objects.create(name="CSE", code="CSE")
+            self.u = {}
+
+            def make(username, role, model=NonTeachingStaffProfile, **profile):
+                Group.objects.get_or_create(name=role)
+                u = User.objects.create_user(username=username, email=f'{username}@test.com', password='pw12345!')
+                u.groups.add(Group.objects.get(name=role))
+                model.objects.create(user=u, employee_id=username.upper(), **profile)
+                self.u[username] = u
+            make('lib_head', 'Librarian', is_in_charge=True)
+            make('lib_plain', 'Librarian')
+            make('support_head_cse', 'Support Staff', is_in_charge=True, department=self.cse)
+            make('transport', 'Transport Coordinator')
+            make('mgmt', 'Management', ManagementProfile)
+            for role in ('Driver', 'Conductor'):
+                Group.objects.get_or_create(name=role)
+
+    def _post(self, who, username, role):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.u[who])
+            token['tenant_schema'] = self.tenant.schema_name
+        body = {'username': username, 'email': f'{username}@test.com', 'password': 'Password123', 'password2': 'Password123',
+                'role': role, 'employee_id': f'E-{username}'}
+        return self.client.post(reverse('staff_registration'), body, content_type='application/json',
+                                HTTP_AUTHORIZATION=f'Bearer {token.access_token}')
+
+    def test_in_charge_adds_own_team_only(self):
+        self.assertEqual(self._post('lib_head', 'lib_new', 'Librarian').status_code, 201)
+        self.assertEqual(self._post('lib_plain', 'lib_new2', 'Librarian').status_code, 403)
+        self.assertEqual(self._post('lib_head', 'fc_new', 'Fee Counter').status_code, 403)
+
+    def test_departmental_in_charge_members_join_that_department(self):
+        from .models.profile import NonTeachingStaffProfile
+        self.assertEqual(self._post('support_head_cse', 'peon1', 'Support Staff').status_code, 201)
+        with schema_context(self.tenant.schema_name):
+            self.assertEqual(NonTeachingStaffProfile.objects.get(user__username='peon1').department_id, self.cse.id)
+
+    def test_transport_coordinator_adds_drivers_and_conductors(self):
+        self.assertEqual(self._post('transport', 'drv1', 'Driver').status_code, 201)
+        self.assertEqual(self._post('transport', 'cond1', 'Conductor').status_code, 201)
+        self.assertEqual(self._post('transport', 'sup1', 'Support Staff').status_code, 403)
+
+    def test_my_team_lists_members_and_roles(self):
+        self._post('lib_head', 'lib_new', 'Librarian')
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.u['lib_head'])
+            token['tenant_schema'] = self.tenant.schema_name
+        r = self.client.get(reverse('my-team'), HTTP_AUTHORIZATION=f'Bearer {token.access_token}')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['creatable_roles'], ['Librarian'])
+        self.assertEqual({m['username'] for m in r.data['members']}, {'lib_head', 'lib_plain', 'lib_new'})
+
+    def test_only_admin_sets_in_charge(self):
+        from .models.profile import NonTeachingStaffProfile
+        def put(who):
+            with schema_context(self.tenant.schema_name):
+                token = RefreshToken.for_user(self.u[who])
+                token['tenant_schema'] = self.tenant.schema_name
+            return self.client.put(reverse('non_teaching_staff_user_profile'), {'employee_id': 'LIB_PLAIN', 'is_in_charge': True},
+                                   content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}')
+        self.assertEqual(put('lib_head').status_code, 403)
+        self.assertEqual(put('mgmt').status_code, 200)
+        with schema_context(self.tenant.schema_name):
+            self.assertTrue(NonTeachingStaffProfile.objects.get(employee_id='LIB_PLAIN').is_in_charge)
+
+
+class RoleAccessAuditTests(TenantTestCase):
+    """Fixes from the role-access audit: module holders read but only the
+    operating role writes; students see only their own records; exam staff
+    only touch their own exams; college-wide actions need Principal/Admin."""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant.subscribed_modules = ['hostel', 'tpo', 'inventory', 'exams', 'academics', 'bus-tracking']
+        self.tenant.save(update_fields=['subscribed_modules'])
+        from .models.course import Course
+        from .models.exam import Exam, ExamType
+        from .models.hostel import Hostel, HostelAllocation, HostelRoom
+        from .models.profile import DepartmentHeadProfile, NonTeachingStaffProfile, TeachingStaffProfile
+        from .models.tpo import PlacementApplication, RecruitmentDrive
+        with schema_context(self.tenant.schema_name):
+            self.cse = Department.objects.create(name="CSE", code="CSE")
+            me = Department.objects.create(name="ME", code="ME")
+            self.u = {}
+
+            def make(username, role, model=None, **profile):
+                Group.objects.get_or_create(name=role)
+                u = User.objects.create_user(username=username, email=f'{username}@test.com', password='pw12345!')
+                u.groups.add(Group.objects.get(name=role))
+                if model:
+                    model.objects.create(user=u, **profile)
+                self.u[username] = u
+            make('stu1', 'student', StudentProfile, student_id='S1', department=self.cse)
+            make('stu2', 'student', StudentProfile, student_id='S2', department=self.cse)
+            make('lab', 'Support Staff', NonTeachingStaffProfile, employee_id='LAB')
+            make('transport', 'Transport Coordinator', NonTeachingStaffProfile, employee_id='TR')
+            make('hod_cse', 'Department Head', DepartmentHeadProfile, employee_id='H1', department=self.cse)
+            make('fac_me', 'Faculty', TeachingStaffProfile, employee_id='F2', department=me)
+            s1, s2 = (StudentProfile.objects.get(student_id=x) for x in ('S1', 'S2'))
+            room = HostelRoom.objects.create(hostel=Hostel.objects.create(name='H'), room_number='101')
+            HostelAllocation.objects.create(student=s1, room=room)
+            HostelAllocation.objects.create(student=s2, room=room)
+            drive = RecruitmentDrive.objects.create(company_name='C', job_title='J', package_lpa=5, drive_date=datetime.date.today())
+            self.drive = drive
+            PlacementApplication.objects.create(drive=drive, student=s2)
+            course = Course.objects.create(course_code='CS1', course_name='C', department=self.cse)
+            self.exam = Exam.objects.create(name='Mid', exam_type=ExamType.objects.create(name='Mid', code='M'), department=self.cse,
+                                            course=course, date=datetime.date.today(), start_time=datetime.time(10), end_time=datetime.time(11))
+
+    def _h(self, who):
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(self.u[who])
+            token['tenant_schema'] = self.tenant.schema_name
+        return {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
+
+    def test_student_reads_own_hostel_allocation_and_cannot_write(self):
+        self.assertEqual(len(self.client.get('/api/hostel-allocations/', **self._h('stu1')).json()), 1)
+        self.assertEqual(self.client.post('/api/hostels/', {'name': 'X'}, content_type='application/json', **self._h('stu1')).status_code, 403)
+
+    def test_student_sees_and_applies_only_for_self(self):
+        self.assertEqual(self.client.get('/api/placement-applications/', **self._h('stu1')).json(), [])
+        r = self.client.post('/api/placement-applications/', {'drive': self.drive.id, 'student': StudentProfile.objects.get(student_id='S2').id},
+                             content_type='application/json', **self._h('stu1'))
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()['student'], StudentProfile.objects.get(student_id='S1').id)
+        self.assertEqual(self.client.post('/api/recruitment-drives/', {}, content_type='application/json', **self._h('stu1')).status_code, 403)
+
+    def test_support_staff_inventory_is_read_only(self):
+        self.assertEqual(self.client.get('/api/inventory-items/', **self._h('lab')).status_code, 200)
+        self.assertEqual(self.client.post('/api/inventory-categories/', {'name': 'X'}, content_type='application/json', **self._h('lab')).status_code, 403)
+
+    def test_faculty_cannot_touch_another_departments_exam(self):
+        r = self.client.post('/api/exam-results/', {'exam': self.exam.id, 'student': StudentProfile.objects.get(student_id='S1').id,
+                                                    'marks_obtained': 10}, content_type='application/json', **self._h('fac_me'))
+        self.assertEqual(r.status_code, 403, r.content)
+        self.assertEqual(self.client.post(f'/api/exams/{self.exam.id}/publish-results/', **self._h('fac_me')).status_code, 403)
+        self.assertEqual(self.client.get(f'/api/exams/{self.exam.id}/paper/', **self._h('fac_me')).status_code, 404)
+        # ...while the HOD of the exam's own department can.
+        self.assertEqual(self.client.post(f'/api/exams/{self.exam.id}/publish-results/', **self._h('hod_cse')).status_code, 200)
+
+    def test_hod_cannot_publish_college_wide_term_results(self):
+        from .services.academics import get_current_term
+        with schema_context(self.tenant.schema_name):
+            term = get_current_term()
+        self.assertEqual(self.client.post(f'/api/academics/terms/{term.id}/publish-results/', **self._h('hod_cse')).status_code, 403)
+
+    def test_transport_coordinator_manages_routes(self):
+        r = self.client.post('/api/bus/routes/', {'name': 'R1', 'stops': []}, content_type='application/json', **self._h('transport'))
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.client.post('/api/bus/routes/', {'name': 'R2'}, content_type='application/json', **self._h('lab')).status_code, 403)

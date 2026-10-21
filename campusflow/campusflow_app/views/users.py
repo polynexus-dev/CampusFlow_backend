@@ -380,6 +380,61 @@ DEPARTMENT_CREATABLE_ROLES = {
     'Faculty': ('Support Staff',),
 }
 
+# Coordinator roles that always run a team, so they may add its members:
+# the Accounts Officer opens fee counters, the Transport Coordinator hires
+# drivers and conductors.
+OFFICE_CREATABLE_ROLES = {
+    'Accounts Officer': ('Fee Counter',),
+    'Transport Coordinator': ('Driver', 'Conductor'),
+}
+
+# Teams whose in-charge (NonTeachingStaffProfile.is_in_charge, set by a College
+# Admin) may add more members of the same team.
+TEAM_CREATABLE_ROLES = {
+    'Librarian': ('Librarian',),
+    'Support Staff': ('Support Staff',),
+    'Canteen Staff': ('Canteen Staff',),
+    'Hostel Warden': ('Hostel Warden',),
+}
+
+
+def team_creatable_roles(user):
+    """Staff roles a non-admin may add to the team they run (see the two maps above)."""
+    group = get_user_group(user)
+    roles = OFFICE_CREATABLE_ROLES.get(group, ())
+    profile = getattr(user, 'non_teaching_staff_profile', None)
+    if profile and profile.is_in_charge:
+        roles = roles + TEAM_CREATABLE_ROLES.get(group, ())
+    return roles
+
+
+class MyTeamView(APIView):
+    """
+    GET /api/team/members/ — for a team in-charge / coordinator: the roles they
+    may add and the current members of those roles (their department's only,
+    when the in-charge belongs to one). Members are added via /api/register/staff/.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        roles = team_creatable_roles(request.user)
+        if not roles:
+            return Response({"detail": "You don't run a team."}, status=status.HTTP_403_FORBIDDEN)
+        members = NonTeachingStaffProfile.objects.filter(user__groups__name__in=roles).select_related('user', 'department')
+        own = getattr(request.user, 'non_teaching_staff_profile', None)
+        if own and own.department_id:
+            members = members.filter(department_id=own.department_id)
+        return Response({
+            "creatable_roles": list(roles),
+            "members": [
+                {"id": p.id, "user_id": p.user_id, "username": p.user.username, "name": p.user.get_full_name(),
+                 "email": p.user.email, "role": get_user_group(p.user), "designation": p.designation,
+                 "employee_id": p.employee_id, "department": p.department.name if p.department_id else None,
+                 "status": p.status, "is_in_charge": p.is_in_charge}
+                for p in members.order_by('user__username')
+            ],
+        })
+
 
 def own_department_id(user, roles=('Department Head', 'Faculty')):
     """
@@ -543,7 +598,15 @@ class StaffRegistrationView(generics.CreateAPIView):
         # HOD/Faculty may add the roles below them, only into their own
         # department — the department is forced server-side, whatever the form sent.
         created_in_department = False
-        if not (is_saas_admin(user) or is_college_admin(user)):
+        if not (is_saas_admin(user) or is_college_admin(user)) and role in team_creatable_roles(user):
+            # Team in-charge / coordinator adding to their own team; a departmental
+            # in-charge's members join that same department.
+            data = request.data.copy()
+            own = getattr(user, 'non_teaching_staff_profile', None)
+            if own and own.department_id:
+                data['department_id'] = own.department_id
+            created_in_department = True  # vouched for by the creator: approved straight away
+        elif not (is_saas_admin(user) or is_college_admin(user)):
             dept_id = own_department_id(user)
             if not dept_id:
                 return Response({"detail": IsCollegeAdmin.message}, status=status.HTTP_403_FORBIDDEN)
@@ -2028,6 +2091,7 @@ class NonTeachingStaffUserProfileView(HODCanListMixin, APIView):
                 "pan_number": prof.pan_number, "staff_role": prof.staff_role, "status": prof.status,
                 "profile_picture": prof.profile_picture.url if prof.profile_picture else None,
                 "assigned_responsibilities": prof.assigned_responsibilities,
+                "is_in_charge": prof.is_in_charge,
             })
         return Response(_hod_visible(result, dept_id), status=status.HTTP_200_OK)
 
@@ -2047,8 +2111,9 @@ class NonTeachingStaffUserProfileView(HODCanListMixin, APIView):
                 profile = NonTeachingStaffProfile.objects.get(id=employee_id)
         except (NonTeachingStaffProfile.DoesNotExist, ValueError, TypeError):
             return Response({"error": "Support Staff profile not found."}, status=status.HTTP_404_NOT_FOUND)
-            
-        profile_field_names = [
+
+        # is_in_charge lets this person add members to their own team (see TEAM_CREATABLE_ROLES).
+        profile_field_names = ['is_in_charge',
             'middle_name', 'date_of_birth', 'gender', 'aadhaar_number',
             'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
             'contact_number', 'current_address_line1', 'current_address_line2',
