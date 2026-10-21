@@ -3702,3 +3702,22 @@ class StaffRegistrationRoleGroupTests(TenantTestCase):
             self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
             with schema_context(self.tenant.schema_name):
                 self.assertTrue(User.objects.get(email=f'new_{i}@test.com').groups.filter(name=role).exists())
+
+    def test_administrator_form_payload_from_frontend(self):
+        """The web Administrator form posts every optional field as ''."""
+        token = self._management_token()
+        for i in range(2):
+            response = self.client.post(
+                reverse('staff_registration'),
+                {
+                    'username': f'fe_admin_{i}', 'email': f'fe_admin_{i}@test.com',
+                    'password': 'Password123', 'password2': 'Password123',
+                    'first_name': 'A', 'middle_name': '', 'last_name': 'B',
+                    'employee_id': f'EMP-FE-{i}', 'designation': 'Office',
+                    'contact_number': '', 'date_of_birth': '', 'gender': '',
+                    'aadhaar_number': '', 'nationality': '', 'role': 'Administrator',
+                    'college_id': None,
+                },
+                content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {token.access_token}',
+            )
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)

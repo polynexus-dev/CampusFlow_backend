@@ -742,6 +742,17 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             'email': {'required': True},
         }
 
+    def to_internal_value(self, data):
+        # Web forms post untouched optional inputs as '' — treat that as "not
+        # provided" for nullable non-text fields (dates, numbers, booleans, FKs)
+        # instead of failing with "Date has wrong format".
+        if hasattr(data, 'items'):
+            data = {
+                k: (None if v == '' and getattr(self.fields.get(k), 'allow_null', False) else v)
+                for k, v in data.items()
+            }
+        return super().to_internal_value(data)
+
     def validate(self, data):
         if data['password'] != data['password2']:
             raise serializers.ValidationError({"password": "Password fields didn't match."})
@@ -839,7 +850,12 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         ]
         for field_name in profile_field_names:
             if field_name in validated_data:
-                if field_name == 'department_id':
+                if validated_data[field_name] == '':
+                    # Blank form input = not provided: let the model default/NULL
+                    # apply, so unique fields (aadhaar_number, pan_number) don't
+                    # collide on '' for the second user who leaves them empty.
+                    validated_data.pop(field_name)
+                elif field_name == 'department_id':
                     profile_data['department'] = validated_data.pop(field_name)
                 elif field_name == 'program_enrolled_in_id':
                     profile_data['program_enrolled_in'] = validated_data.pop(field_name)
