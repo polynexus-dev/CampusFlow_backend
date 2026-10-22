@@ -122,7 +122,11 @@ services:
     env_file:
       - .env
     environment:
-      - OLLAMA_KEEP_ALIVE=-1
+      # Unload a model after 10 idle minutes. "-1" (never) kept both models
+      # (~3-6 GB) resident on a shared, swapping host, so they were paged out
+      # to swap and every AI request read weights back from disk. Override in
+      # .env (e.g. OLLAMA_KEEP_ALIVE=-1) on a dedicated AI/GPU machine.
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-10m}
     volumes:
       - CampusFlow_ollama_data:/root/.ollama
       - ./entrypoint_ollama.sh:/entrypoint_ollama.sh
