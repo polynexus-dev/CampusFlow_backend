@@ -251,6 +251,8 @@ class RecomputeRiskScoresCommandTests(_RiskFixtureMixin, TenantTestCase):
 class AtRiskStudentsAPITests(_RiskFixtureMixin, TenantTestCase):
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ["at-risk-prediction"]
+        self.tenant.save(update_fields=["subscribed_modules"])
         with schema_context(self.tenant.schema_name):
             for role in ("Faculty", "student"):
                 Group.objects.get_or_create(name=role)

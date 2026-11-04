@@ -40,6 +40,7 @@ from ..models.profile import (
 )
 from ..demo_guard import IsNotDemoTenant, demo_block_response, is_demo_tenant
 from ..permissions import (
+    RequiresAction,
     CanCreateCollegeAdmin,
     DepartmentExistsForUserCreation,
     IsCollegeAdmin,
@@ -56,6 +57,7 @@ from ..permissions import (
     is_supervisor,
 )
 from ..services import whatsapp
+from ..services.rbac import scope_students
 from ..serializers import (
     LogoutSerializer,
     MyTokenObtainPairSerializer,
@@ -464,7 +466,7 @@ class StudentRegistrationView(generics.CreateAPIView):
     Requires phone_number. The OTP is sent via WhatsApp (falls back to email if WhatsApp is unavailable).
     """
     serializer_class = UserRegistrationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresAction("student")]
 
     def post(self, request, *args, **kwargs):
         # Force the role to 'student' to prevent role escalation
@@ -588,7 +590,7 @@ class StaffRegistrationView(generics.CreateAPIView):
     see own_department_id() and DEPARTMENT_CREATABLE_ROLES.
     """
     serializer_class = UserRegistrationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequiresAction("staff")]
 
     def post(self, request, *args, **kwargs):
         role = request.data.get('role', '').strip()
@@ -1515,7 +1517,7 @@ class HODCanListMixin:
     """
     def get_permissions(self):
         if self.request.method == 'GET':
-            return [IsAuthenticated()]
+            return [IsAuthenticated(), RequiresAction("staff")()]
         return super().get_permissions()
 
 
@@ -1697,7 +1699,8 @@ class StudentLookupView(APIView):
             Q(student_id__icontains=search) | Q(user__username__icontains=search)
             | Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search)
             | Q(user__email__icontains=search)
-        )[:25]
+        )
+        qs = scope_students(qs, user)[:25]
         return Response({"results": [{
             "id": s.id,
             "user_id": s.user_id,
@@ -1712,15 +1715,17 @@ class StudentUserProfileView(APIView):
     View all Student profiles.
     Students cannot list other students — only Faculty and above can.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresAction("student")]
 
     def get(self, request):
-        if request.query_params.get('count_only') == 'true':
-            return Response({"count": StudentProfile.objects.count()}, status=status.HTTP_200_OK)
-
-        student_profiles = StudentProfile.objects.all().select_related('user', 'department')
-        
         user = request.user
+        visible_students = scope_students(StudentProfile.objects.all(), user)
+
+        if request.query_params.get('count_only') == 'true':
+            return Response({"count": visible_students.count()}, status=status.HTTP_200_OK)
+
+        student_profiles = visible_students.select_related('user', 'department')
+
         is_admin = is_saas_admin(user) or get_user_group(user) in ('Management', 'Administrator')
 
         search_query = request.query_params.get('search')
@@ -1821,15 +1826,16 @@ class StudentUserProfileView(APIView):
         if not student_id:
             return Response({"error": "Student profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
             
+        visible_students = scope_students(StudentProfile.objects.all(), user)
         try:
-            profile = StudentProfile.objects.filter(student_id=student_id).first()
+            profile = visible_students.filter(student_id=student_id).first()
             if not profile:
-                profile = StudentProfile.objects.get(id=student_id)
+                profile = visible_students.get(id=student_id)
         except (StudentProfile.DoesNotExist, ValueError, TypeError):
             return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
             
         if group == 'Department Head' and not is_saas_admin(user):
-            hod_profile = getattr(user, 'departmenthead_profile', None)
+            hod_profile = getattr(user, 'department_head_profile', None)
             if not hod_profile or hod_profile.department != profile.department:
                 return Response({"detail": "You can only edit student profiles from your own department."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1924,10 +1930,11 @@ class StudentUserProfileView(APIView):
         if not student_id:
             return Response({"error": "Student profile id is required."}, status=status.HTTP_400_BAD_REQUEST)
             
+        visible_students = scope_students(StudentProfile.objects.all(), user)
         try:
-            profile = StudentProfile.objects.filter(student_id=student_id).first()
+            profile = visible_students.filter(student_id=student_id).first()
             if not profile:
-                profile = StudentProfile.objects.get(id=student_id)
+                profile = visible_students.get(id=student_id)
         except (StudentProfile.DoesNotExist, ValueError, TypeError):
             return Response({"error": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
             

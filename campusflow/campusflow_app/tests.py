@@ -6,6 +6,7 @@ from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context
 from .models.profile import StudentProfile
 from .models.department import Department
+from .models.module_permissions import TenantModulePermission
 from rest_framework_simplejwt.tokens import RefreshToken
 import datetime
 from django.core.cache import cache
@@ -37,6 +38,11 @@ class DPDPComplianceTests(TenantTestCase):
         with schema_context(self.tenant.schema_name):
             Group.objects.get_or_create(name='student')
             self.dept = Department.objects.create(name="Computer Science", code="CS")
+            admin = User.objects.create_user(username='dpdp_admin', password='pw12345!')
+            admin.groups.add(Group.objects.get_or_create(name='Administrator')[0])
+            token = RefreshToken.for_user(admin)
+            token['tenant_schema'] = self.tenant.schema_name
+            self.auth = {'HTTP_AUTHORIZATION': f'Bearer {token.access_token}'}
 
     def tearDown(self):
         self.cache_patcher.stop()
@@ -53,12 +59,13 @@ class DPDPComplianceTests(TenantTestCase):
             'password2': 'Password123',
             'role': 'student',
             'student_id': 'STU999',
+            'phone_number': '9876599900',
             'program_enrolled_in_id': 'BTech',
             'department_id': dept_id,
             'date_of_birth': '2005-01-01',
             'consent_given': False,
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', **self.auth)
         if response.status_code != status.HTTP_400_BAD_REQUEST:
             print("FAILED consent test:", response.status_code, response.data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -75,12 +82,13 @@ class DPDPComplianceTests(TenantTestCase):
             'password2': 'Password123',
             'role': 'student',
             'student_id': 'STU998',
+            'phone_number': '9876599800',
             'program_enrolled_in_id': 'BTech',
             'department_id': dept_id,
             'date_of_birth': '2012-01-01',
             'consent_given': True,
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', **self.auth)
         if response.status_code != status.HTTP_400_BAD_REQUEST:
             print("FAILED minor requires guardian test:", response.status_code, response.data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -97,6 +105,7 @@ class DPDPComplianceTests(TenantTestCase):
             'password2': 'Password123',
             'role': 'student',
             'student_id': 'STU997',
+            'phone_number': '9876599700',
             'program_enrolled_in_id': 'BTech',
             'department_id': dept_id,
             'date_of_birth': '2012-01-01',
@@ -104,7 +113,7 @@ class DPDPComplianceTests(TenantTestCase):
             'parent_guardian_name': 'John Doe',
             'parent_guardian_email': 'johndoe@test.com',
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', **self.auth)
         if response.status_code != status.HTTP_201_CREATED:
             print("FAILED minor success test:", response.status_code, response.data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -125,19 +134,21 @@ class DPDPComplianceTests(TenantTestCase):
             'password2': 'Password123',
             'role': 'student',
             'student_id': 'STU996',
+            'phone_number': '9876599600',
             'program_enrolled_in_id': 'BTech',
             'department_id': dept_id,
             'date_of_birth': '2000-01-01',
             'consent_given': True,
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', **self.auth)
         if response.status_code != status.HTTP_201_CREATED:
             print("FAILED adult success test:", response.status_code, response.data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         
         with schema_context(self.tenant.schema_name):
             profile = StudentProfile.objects.get(student_id='STU996')
-            self.assertEqual(profile.status, 'active')
+            # No guardian step for an adult; verifying the OTP activates the account.
+            self.assertEqual(profile.status, 'pending')
 
     def test_guardian_consent_approval(self):
         with schema_context(self.tenant.schema_name):
@@ -162,7 +173,7 @@ class DPDPComplianceTests(TenantTestCase):
             'guardian_email': 'janedoe@test.com',
             'action': 'approve',
         }
-        response = self.client.post(url, data, format='json')
+        response = self.client.post(url, data, format='json', **self.auth)
         if response.status_code != status.HTTP_200_OK:
             print("FAILED guardian consent approval:", response.status_code, response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -1478,6 +1489,8 @@ class BulkInvoiceRosterTests(TenantTestCase):
 
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ['fees']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             Group.objects.get_or_create(name='Management')
             self.dept = Department.objects.create(name="Computer Science", code="CS")
@@ -2301,6 +2314,8 @@ class OutcomeBasedEducationTests(TenantTestCase):
 
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ['exams']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             for role in ('student', 'Management'):
                 Group.objects.get_or_create(name=role)
@@ -2503,7 +2518,7 @@ class OutcomeBasedEducationTests(TenantTestCase):
         exam = Exam.objects.create(
             name="Progress Exam", exam_type=exam_type, department=self.dept, course=course,
             date="2026-11-01", start_time="09:00", end_time="12:00",
-            question_structure=question_structure,
+            question_structure=question_structure, results_published=True,
         )
         evaluator = self._teaching_staff(f"eval{ScannedPaper.objects.count()}")
         session = ValuationSession.objects.create(exam=exam, evaluator=evaluator)
@@ -2723,6 +2738,8 @@ class RosterCutoverTests(TenantTestCase):
 
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ['assignments']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             for role in ('student', 'Management', 'guardian'):
                 Group.objects.get_or_create(name=role)
@@ -2907,6 +2924,8 @@ class LedgerFoundationTests(TenantTestCase):
 
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ['fees', 'ledger']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             Group.objects.get_or_create(name='Management')
 
@@ -3316,6 +3335,8 @@ class AccreditationReportingTests(TenantTestCase):
 
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ['compliance-center']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             Group.objects.get_or_create(name='Management')
             self.dept = Department.objects.create(name="Mechanical", code="MECH")
@@ -3390,9 +3411,15 @@ class EvidenceWorkspaceTests(TenantTestCase):
 
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ['compliance-center']
+        self.tenant.save(update_fields=['subscribed_modules'])
         with schema_context(self.tenant.schema_name):
             for role in ('Faculty', 'Department Head'):
                 Group.objects.get_or_create(name=role)
+                # Neither role holds this module by default; a College Admin grants it.
+                TenantModulePermission.objects.update_or_create(
+                    group_name=role, defaults={'allowed_modules': ['compliance-center']},
+                )
             self.dept = Department.objects.create(name="Civil", code="CIV")
 
     def _token_for(self, role):

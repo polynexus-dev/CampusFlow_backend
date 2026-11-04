@@ -147,6 +147,8 @@ class LeadStageTransitionTests(TenantTestCase):
 class AdmissionsAPITests(TenantTestCase):
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ["admissions"]
+        self.tenant.save(update_fields=["subscribed_modules"])
         with schema_context(self.tenant.schema_name):
             for role in ("Management", "Faculty"):
                 Group.objects.get_or_create(name=role)

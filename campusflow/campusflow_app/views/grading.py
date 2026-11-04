@@ -22,6 +22,7 @@ from ..models.grading import CourseGradeAward, StudentAcademicSummary, TermGrade
 from ..models.profile import StudentProfile
 from ..permissions import RequiresModule, IsHMOrAbove, is_faculty_or_above, IsPrincipalOrCollegeAdmin
 from ..services.grading import publish_term_results
+from ..services.rbac import scope_students
 
 
 def _serialize_award(a):
@@ -115,7 +116,7 @@ class StudentTranscriptView(APIView):
             if not is_faculty_or_above(request.user):
                 return Response({"error": "Not permitted to view another student's transcript."},
                                 status=status.HTTP_403_FORBIDDEN)
-            student = StudentProfile.objects.filter(pk=pk).first()
+            student = scope_students(StudentProfile.objects.filter(pk=pk), request.user).first()
             if not student:
                 return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 

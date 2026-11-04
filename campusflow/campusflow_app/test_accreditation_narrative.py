@@ -139,6 +139,8 @@ class RunAccreditationNarrativeDraftTaskTests(_NarrativeFixtureMixin, TenantTest
 class AccreditationNarrativeAPITests(_NarrativeFixtureMixin, TenantTestCase):
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ["compliance-center"]
+        self.tenant.save(update_fields=["subscribed_modules"])
         with schema_context(self.tenant.schema_name):
             for role in ("Management", "Faculty"):
                 Group.objects.get_or_create(name=role)
@@ -238,7 +240,7 @@ class AccreditationNarrativeAPITests(_NarrativeFixtureMixin, TenantTestCase):
             )
         response = self.client.patch(
             reverse("narrativedraft-detail", args=[draft.id]),
-            {"narrative_text": "Reviewer-edited text."}, format="json", **self._auth(self.admin_token),
+            {"narrative_text": "Reviewer-edited text."}, content_type="application/json", **self._auth(self.admin_token),
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         with schema_context(self.tenant.schema_name):

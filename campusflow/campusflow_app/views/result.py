@@ -12,6 +12,7 @@ from ..serializers import StudentExamResultSerializer
 from rest_framework.exceptions import PermissionDenied
 from ..permissions import RequiresModule, IsFacultyOrAbove, can_manage_exam, get_user_group, is_faculty_or_above
 from ..services.notifications import notify_guardians_of_student
+from ..services.rbac import scope_students
 from ..services.abc_credit import record_credit_entry
 
 
@@ -42,7 +43,7 @@ class StudentExamResultViewSet(viewsets.ModelViewSet):
             # Guardians use views/guardian.py; other roles have no need for
             # marks. Previously every non-student role got everyone's marks.
             return qs.none()
-        return qs
+        return scope_students(qs, user, 'student__')
 
     def _check_exam(self, exam):
         if not can_manage_exam(self.request.user, exam):

@@ -14,6 +14,7 @@ from ..models.submission import AssignmentSubmission
 from ..models.valuation import ScannedPaper
 from ..models.profile import StudentProfile
 from ..permissions import get_user_group, is_faculty_or_above
+from ..services.rbac import scope_students
 
 
 def _resolve_student_profile(request):
@@ -68,10 +69,10 @@ def _resolve_student_profile(request):
             {"error": "student_id query parameter is required."},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    try:
-        return StudentProfile.objects.get(pk=student_id), None
-    except StudentProfile.DoesNotExist:
+    student = scope_students(StudentProfile.objects.filter(pk=student_id), user).first()
+    if student is None:
         return None, Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+    return student, None
 
 
 def _compute_student_progress(profile, published_only=True):

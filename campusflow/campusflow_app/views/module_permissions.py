@@ -6,7 +6,8 @@ from django.db import connection, transaction
 from tenants.models import Tenant
 from campusflow_app.demo_guard import IsNotDemoTenant
 from campusflow_app.models import TenantModulePermission
-from campusflow_app.permissions import IsSaaSAdmin, IsCollegeAdmin, get_user_group
+from campusflow_app.permissions import IsSaaSAdmin, IsCollegeAdmin, get_user_group, get_user_role_name
+from campusflow_app.services.rbac import ACTIONS, module_actions_for
 
 # Default modules hierarchy list for validation
 ALL_ERP_MODULES = [
@@ -294,6 +295,17 @@ class RoleModulePermissionView(APIView):
                 new_allowed.append(subscribed_lower_map[m_norm])
 
         perm.allowed_modules = list(set(new_allowed))
+        # This screen switches whole modules on and off, so a toggle overrides
+        # whatever actions the role had in that module: off is none, and on from
+        # off is everything. Absent modules already mean everything.
+        granted = {m.lower().replace(" ", "-") for m in perm.allowed_modules}
+        for module, actions in perm.module_actions.items():
+            if module not in PREMIUM_MODULES:
+                continue
+            if module not in granted:
+                perm.module_actions[module] = []
+            elif "view" not in actions:
+                perm.module_actions[module] = list(ACTIONS)
         perm.save()
 
         return Response({
@@ -316,25 +328,28 @@ def get_effective_allowed_modules(user):
     whether to actually allow an API call — so the two can never drift apart.
     Returns a set for cheap `in` checks from RequiresModule.
     """
-    tenant = connection.tenant
-    subscribed = getattr(tenant, 'subscribed_modules', None) or []
-
     if user.is_superuser:
+        subscribed = getattr(connection.tenant, 'subscribed_modules', None) or []
         return {m.lower().replace(" ", "-") for m in subscribed}
 
-    group_name = get_user_group(user)
+    group_name = get_user_role_name(user)
     if not group_name:
         return {"dashboard", "settings", "profile"}
 
-    default_allowed = ROLE_DEFAULT_MODULES.get(group_name) or ["dashboard", "settings", "profile"]
+    return get_role_modules(group_name)
 
-    try:
-        perm = TenantModulePermission.objects.get(group_name=group_name)
-        allowed = perm.allowed_modules
-        if not allowed:
-            allowed = default_allowed
-    except TenantModulePermission.DoesNotExist:
-        allowed = default_allowed
+
+def get_role_modules(group_name):
+    """The module keys a role holds in this tenant — see get_effective_allowed_modules."""
+    subscribed = getattr(connection.tenant, 'subscribed_modules', None) or []
+    perm = TenantModulePermission.objects.filter(group_name=group_name).first()
+
+    default_allowed = (
+        ROLE_DEFAULT_MODULES.get(group_name)
+        or (perm and ROLE_DEFAULT_MODULES.get(perm.based_on))
+        or ["dashboard", "settings", "profile"]
+    )
+    allowed = (perm.allowed_modules if perm else None) or default_allowed
 
     subscribed_lower = {m.lower().replace(" ", "-") for m in subscribed}
 
@@ -369,6 +384,12 @@ def get_effective_allowed_modules(user):
         if group_name != restricted_to:
             final_modules.discard(module)
 
+    # Taking a role's view action away takes the module away, core ones included.
+    if perm:
+        for module, actions in perm.module_actions.items():
+            if "view" not in actions:
+                final_modules.discard(module)
+
     return final_modules
 
 
@@ -385,7 +406,8 @@ class MyAllowedModulesView(APIView):
         allowed_modules = get_effective_allowed_modules(user)
         return Response({
             "role": role,
-            "allowed_modules": sorted(allowed_modules)
+            "allowed_modules": sorted(allowed_modules),
+            "module_actions": module_actions_for(user),
         })
 
 

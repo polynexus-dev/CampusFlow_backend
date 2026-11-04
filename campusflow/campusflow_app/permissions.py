@@ -37,11 +37,25 @@ NON_TEACHING_STAFF_ROLES = (
 )
 
 
-def get_user_group(user):
-    """Returns the name of the user's first group, or None."""
+def get_user_role_name(user):
+    """The name of the user's actual group (a custom role's own name), or None."""
     if user.groups.exists():
         return user.groups.first().name
     return None
+
+
+def get_user_group(user):
+    """
+    The role every permission check compares against: the user's group, or for
+    a custom role the built-in role it is based on. Use get_user_role_name()
+    when the custom role's own name matters (its permissions, its label).
+    """
+    name = get_user_role_name(user)
+    if name is None or name in BUILT_IN_ROLES:
+        return name
+    from .models import TenantModulePermission
+    based_on = TenantModulePermission.objects.filter(group_name=name).values_list('based_on', flat=True).first()
+    return based_on or name
 
 
 def is_saas_admin(user):
@@ -63,6 +77,11 @@ def is_saas_or_college_admin(user):
 
 PRINCIPAL_ROLE = 'Principal'
 SUPERVISOR_ROLE = 'Supervisor'
+
+BUILT_IN_ROLES = frozenset({
+    'Management', 'Administrator', SUPERVISOR_ROLE, 'Principal', 'Department Head', 'Faculty',
+    'student', 'guardian', 'CA', 'SaaS Admin', *NON_TEACHING_STAFF_ROLES,
+})
 
 
 def is_supervisor(user):
@@ -412,10 +431,39 @@ def RequiresModule(module_key):
             if is_saas_admin(request.user):
                 return True
             from .views.module_permissions import get_effective_allowed_modules
-            return module_key in get_effective_allowed_modules(request.user)
+            if module_key not in get_effective_allowed_modules(request.user):
+                return False
+            return _action_allowed(self, request, module_key)
 
     _RequiresModule.__name__ = f"RequiresModule_{module_key.replace('-', '_')}"
     return _RequiresModule
+
+
+def RequiresAction(module_key):
+    """
+    The action half of RequiresModule (view/add/change/delete, from the HTTP
+    method) for core modules such as student and staff, which are open to more
+    roles than hold them in ROLE_DEFAULT_MODULES. Only a role whose permissions
+    were explicitly set is narrowed, so existing access is unchanged until a
+    College Admin edits that role.
+    """
+    class _RequiresAction(BasePermission):
+        message = f"Your role doesn't have permission to do this in '{module_key}'."
+
+        def has_permission(self, request, view):
+            return request.user.is_authenticated and _action_allowed(self, request, module_key)
+
+    _RequiresAction.__name__ = f"RequiresAction_{module_key.replace('-', '_')}"
+    return _RequiresAction
+
+
+def _action_allowed(permission, request, module_key):
+    from .services.rbac import action_for_method, can_perform
+    action = action_for_method(request.method)
+    if can_perform(request.user, module_key, action):
+        return True
+    permission.message = f"Your role doesn't have the '{action}' permission for '{module_key}'. Contact your College Admin."
+    return False
 
 
 class CanGenerateQR(BasePermission):

@@ -24,13 +24,14 @@ from ..models.profile import (
     ManagementProfile, AdministratorProfile, DepartmentHeadProfile
 )
 from ..models.risk_score import StudentRiskScore
-from ..permissions import IsCollegeAdmin, IsFacultyOrAbove, RequiresModule, get_user_group, is_college_admin
+from ..permissions import IsCollegeAdmin, IsFacultyOrAbove, RequiresAction, RequiresModule, get_user_group, is_college_admin
+from ..services.rbac import scope_students
 from ..serializers import StudentRiskScoreSerializer
 
 
 class OverviewKPIView(APIView):
     """GET: High-level KPI stats for dashboard cards."""
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresAction("analytics")]
 
     def get(self, request):
         total_students = StudentProfile.objects.count()
@@ -78,7 +79,7 @@ class AttendanceTrendsView(APIView):
     GET: Attendance count per day over a date range.
     Query params: ?days=30 (default), ?department_id=X
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresAction("analytics")]
 
     def get(self, request):
         days = int(request.query_params.get('days', 30))
@@ -120,7 +121,7 @@ class DepartmentPerformanceView(APIView):
     """
     GET: Department-wise summary — student count, staff count, avg attendance.
     """
-    permission_classes = [IsAuthenticated, IsFacultyOrAbove]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresAction("analytics")]
 
     def get(self, request):
         departments = Department.objects.all()
@@ -267,9 +268,9 @@ class AtRiskStudentsView(APIView):
     permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("at-risk-prediction")]
 
     def get(self, request):
-        scores = StudentRiskScore.objects.select_related(
+        scores = scope_students(StudentRiskScore.objects.select_related(
             'student__user', 'student__department',
-        ).order_by('-risk_score')
+        ).order_by('-risk_score'), request.user, 'student__')
 
         department_id = request.query_params.get('department_id')
         if department_id:

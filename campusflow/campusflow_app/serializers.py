@@ -19,7 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from user_agents import parse
 
 # ── Local App-Specific Imports ────────────────────────────────────────────────
-from .permissions import NON_TEACHING_STAFF_ROLES
+from .permissions import NON_TEACHING_STAFF_ROLES, get_user_group
 from .models.audit import log_account_event
 from .models.attendance import Attendance
 from .models.attendance_log import FaceAttendanceLog
@@ -361,63 +361,65 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 user_groups = [group_obj]
 
             user_group = user_groups[0]
+            # A custom role signs in with the profile of the built-in role it is based on.
+            role_key = get_user_group(user)
 
-            if user_group.name == 'student':
+            if role_key == 'student':
                 profile_data = StudentProfile.objects.filter(user=user).first()
-            elif user_group.name == 'Faculty':
+            elif role_key == 'Faculty':
                 profile_data = TeachingStaffProfile.objects.filter(user=user).first()
-            elif user_group.name in NON_TEACHING_STAFF_ROLES:
+            elif role_key in NON_TEACHING_STAFF_ROLES:
                 profile_data = NonTeachingStaffProfile.objects.filter(user=user).first()
-            elif user_group.name == 'Management':
+            elif role_key == 'Management':
                 profile_data = ManagementProfile.objects.filter(user=user).first()
-            elif user_group.name == 'Administrator':
+            elif role_key == 'Administrator':
                 profile_data = AdministratorProfile.objects.filter(user=user).first()
-            elif user_group.name == 'Department Head':
+            elif role_key == 'Department Head':
                 profile_data = DepartmentHeadProfile.objects.filter(user=user).first()
-            elif user_group.name == 'Principal':
+            elif role_key == 'Principal':
                 profile_data = PrincipalProfile.objects.filter(user=user).first()
-            elif user_group.name == 'guardian':
+            elif role_key == 'guardian':
                 profile_data = GuardianProfile.objects.filter(user=user).first()
-            elif user_group.name == 'CA':
+            elif role_key == 'CA':
                 profile_data = AuditorProfile.objects.filter(user=user).first()
 
             if not profile_data:
                 # Auto-create missing profile matching the user's role group
-                if user_group.name == 'Management':
+                if role_key == 'Management':
                     profile_data = ManagementProfile.objects.create(
                         user=user,
                         employee_id=f"MGMT-{uuid.uuid4().hex[:6].upper()}",
                         designation="College Management",
                         status="active"
                     )
-                elif user_group.name == 'Administrator':
+                elif role_key == 'Administrator':
                     profile_data = AdministratorProfile.objects.create(
                         user=user,
                         employee_id=f"ADMIN-{uuid.uuid4().hex[:6].upper()}",
                         designation="System Administrator",
                         status="active"
                     )
-                elif user_group.name == 'Principal':
+                elif role_key == 'Principal':
                     profile_data = PrincipalProfile.objects.create(
                         user=user,
                         employee_id=f"PRIN-{uuid.uuid4().hex[:6].upper()}",
                         designation="Principal",
                         status="active"
                     )
-                elif user_group.name == 'student':
+                elif role_key == 'student':
                     profile_data = StudentProfile.objects.create(
                         user=user,
                         student_id=f"STU-{uuid.uuid4().hex[:6].upper()}",
                         status="active"
                     )
-                elif user_group.name == 'Faculty':
+                elif role_key == 'Faculty':
                     profile_data = TeachingStaffProfile.objects.create(
                         user=user,
                         employee_id=f"FAC-{uuid.uuid4().hex[:6].upper()}",
                         designation="Faculty",
                         status="active"
                     )
-                elif user_group.name == 'guardian':
+                elif role_key == 'guardian':
                     profile_data = GuardianProfile.objects.create(
                         user=user,
                         guardian_id=f"GUA-{uuid.uuid4().hex[:6].upper()}",
@@ -425,7 +427,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                     )
                 else:
                     raise serializers.ValidationError(
-                        f"User '{username}' with role '{user_group.name}' does not have an associated profile.",
+                        f"User '{username}' with role '{role_key}' does not have an associated profile.",
                         code='no_profile_found'
                     )
             
@@ -530,14 +532,14 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'id': profile_data.id,
                 'department_id': profile_data.department.id if hasattr(profile_data, 'department') and profile_data.department else None,
             }
-            if user_group.name == 'student':
+            if role_key == 'student':
                 data['profile']['student_id'] = profile_data.student_id
                 data['profile']['program_enrolled_in'] = profile_data.program_enrolled_in if hasattr(profile_data, 'program_enrolled_in') else None
                 data['profile']['is_face_registered'] = getattr(profile_data, 'is_face_registered', False)
                 data['profile']['locked_device_id'] = getattr(profile_data, 'locked_device_id', None)
-            elif user_group.name in ('Faculty', 'Management', 'Administrator', 'Principal', 'Department Head', *NON_TEACHING_STAFF_ROLES):
+            elif role_key in ('Faculty', 'Management', 'Administrator', 'Principal', 'Department Head', *NON_TEACHING_STAFF_ROLES):
                 data['profile']['employee_id'] = profile_data.employee_id
-            elif user_group.name == 'guardian':
+            elif role_key == 'guardian':
                 data['profile']['guardian_id'] = profile_data.guardian_id
                 data['profile']['contact_number'] = profile_data.contact_number
 

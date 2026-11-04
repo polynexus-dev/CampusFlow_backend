@@ -134,6 +134,7 @@ from campusflow_app.views.fees import (
 from campusflow_app.views.payments import (
     CreatePaymentOrderView, VerifyPaymentView, RazorpayWebhookView
 )
+from campusflow_app.views.rbac import RoleDetailView, RoleListCreateView, RoleMemberDetailView, RoleMembersView
 from campusflow_app.views.module_permissions import (
     TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView, CustomRolesView
 )
@@ -569,6 +570,10 @@ urlpatterns = [
     path('tenant/subscriptions/<int:tenant_id>/', TenantSubscriptionView.as_view(), name='tenant-subscription'),
     path('tenant/module-permissions/', RoleModulePermissionView.as_view(), name='role-module-permissions'),
     path('tenant/roles/', CustomRolesView.as_view(), name='tenant-custom-roles'),
+    path('tenant/rbac/roles/', RoleListCreateView.as_view(), name='rbac-roles'),
+    path('tenant/rbac/roles/<int:pk>/', RoleDetailView.as_view(), name='rbac-role-detail'),
+    path('tenant/rbac/roles/<int:pk>/members/', RoleMembersView.as_view(), name='rbac-role-members'),
+    path('tenant/rbac/roles/<int:pk>/members/<int:user_id>/', RoleMemberDetailView.as_view(), name='rbac-role-member-detail'),
     path('user/allowed-modules/', MyAllowedModulesView.as_view(), name='user-allowed-modules'),
 
     # ── Clearance (No-Dues) ──────────────────────────────────────────

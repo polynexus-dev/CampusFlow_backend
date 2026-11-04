@@ -203,6 +203,8 @@ class RunAIGradingSuggestionTaskTests(_ValuationFixtureMixin, TenantTestCase):
 class AIGradingSuggestionAPITests(_ValuationFixtureMixin, TenantTestCase):
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ["valuation", "ai-valuation"]
+        self.tenant.save(update_fields=["subscribed_modules"])
         with schema_context(self.tenant.schema_name):
             for role in ("Faculty", "student", "Management"):
                 Group.objects.get_or_create(name=role)

@@ -9,6 +9,8 @@ inside schema_context(self.tenant.schema_name), matching the convention
 established in the other test files this session.
 """
 
+from unittest.mock import patch
+
 from django.contrib.auth.models import Group, User
 from django.core.management import call_command
 from django.urls import reverse
@@ -242,6 +244,8 @@ class RunGenerateTimetableTaskTests(_TimetableFixtureMixin, TenantTestCase):
 class TimetableGenerationAPITests(_TimetableFixtureMixin, TenantTestCase):
     def setUp(self):
         super().setUp()
+        self.tenant.subscribed_modules = ["timetable-generation"]
+        self.tenant.save(update_fields=["subscribed_modules"])
         with schema_context(self.tenant.schema_name):
             for role in ("Management", "Faculty"):
                 Group.objects.get_or_create(name=role)
@@ -277,11 +281,13 @@ class TimetableGenerationAPITests(_TimetableFixtureMixin, TenantTestCase):
         response = self.client.post(reverse("timetable-generate"), format="json", **self._auth(self.admin_token))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_generate_queues_run(self):
+    @patch("campusflow_app.views.timetable_generation.run_generate_timetable.delay")
+    def test_generate_queues_run(self, mock_delay):
         response = self.client.post(
             reverse("timetable-generate"), {"term_id": self.term.id}, format="json", **self._auth(self.admin_token),
         )
         self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        mock_delay.assert_called_once()
         self.assertEqual(response.data["status"], "pending")
         with schema_context(self.tenant.schema_name):
             self.assertEqual(TimetableGenerationRun.objects.filter(term=self.term).count(), 1)
