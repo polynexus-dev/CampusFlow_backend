@@ -44,7 +44,10 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.hashers import make_password
+from django.apps import apps
 from django.contrib.auth.models import Group, User
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
 from django.db import models, transaction
 from django.utils import timezone
@@ -233,10 +236,35 @@ def nt_designation(uname):
     return NT_DESIGNATIONS.get(uname.rstrip('0123456789'), uname.title())
 
 
+def _sample_pdf(title):
+    """A one-page PDF plainly marked as sample data, so it can't be mistaken for a real document."""
+    stream = f"BT /F1 14 Tf 60 760 Td (SAMPLE - {title} - CampusNexus demo data, not a real document) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    pdf = b"%PDF-1.4\n"
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += str(number).encode() + b" 0 obj\n" + body + b"\nendobj\n"
+    xref = len(pdf)
+    pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    pdf += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    pdf += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return pdf
+
+
 class Command(BaseCommand):
     help = "Creates/refreshes the 'dummy' tenant college with ~2,000 students and data in every model. Idempotent."
 
     def add_arguments(self, parser):
+        parser.add_argument('--files-only', action='store_true',
+                            help="Only write the sample PDFs that seeded records point at.")
         parser.add_argument('--skip-generic', action='store_true',
                             help="Skip the pass that puts placeholder rows into every remaining empty model.")
 
@@ -247,6 +275,11 @@ class Command(BaseCommand):
 
         tenant, email_domain = self._ensure_tenant()
         self.email_domain = email_domain
+
+        if options['files_only']:
+            with schema_context(tenant.schema_name):
+                self._sample_files()
+            return
 
         with schema_context(tenant.schema_name):
             self._step("role groups", self._groups)
@@ -1403,6 +1436,20 @@ class Command(BaseCommand):
         if any(k in name for k in ('start', 'from', 'begin')):
             return timedelta(days=-30 - i)
         return timedelta(days=-i)
+
+    def _sample_files(self):
+        """Generic seeding only stores a file's name, so write a real PDF behind each one."""
+        written = 0
+        for model in apps.get_app_config('campusflow_app').get_models():
+            for f in model._meta.fields:
+                if not isinstance(f, models.FileField) or isinstance(f, models.ImageField):
+                    continue
+                names = model.objects.filter(**{f"{f.name}__startswith": 'dummy/'}).values_list(f.name, flat=True)
+                for name in names:
+                    if not default_storage.exists(name):
+                        default_storage.save(name, ContentFile(_sample_pdf(str(model._meta.verbose_name).title())))
+                        written += 1
+        self.stdout.write(f"   {written} sample file(s) written.")
 
     def _report(self):
         from django.apps import apps

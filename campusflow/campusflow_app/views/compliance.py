@@ -1,10 +1,12 @@
 import io
+import os
 import zipfile
 
 from django.db.models import Count
-from django.http import HttpResponse
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -60,6 +62,23 @@ class ComplianceCertificateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(uploaded_by=self.request.user)
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """
+        The only way to fetch a certificate's file: these are private documents,
+        so they go through this view's permissions rather than a public media URL.
+        Always an attachment, so an uploaded HTML file can't run on the API's origin.
+        """
+        certificate = self.get_object()
+        try:
+            handle = certificate.file.open('rb')
+        except (FileNotFoundError, ValueError):
+            return Response(
+                {"error": "This certificate's file is missing. Please upload it again."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return FileResponse(handle, as_attachment=True, filename=os.path.basename(certificate.file.name))
 
 
 # ─────────────────────────────────────────────

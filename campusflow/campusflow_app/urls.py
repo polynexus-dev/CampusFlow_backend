@@ -706,6 +706,7 @@ urlpatterns = [
     path('compliance-certificate-types/<int:pk>/', ComplianceCertificateTypeViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='compliancecertificatetype-detail'),
     path('compliance-certificates/', ComplianceCertificateViewSet.as_view({'get': 'list', 'post': 'create'}), name='compliancecertificate-list'),
     path('compliance-certificates/<int:pk>/', ComplianceCertificateViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='compliancecertificate-detail'),
+    path('compliance-certificates/<int:pk>/download/', ComplianceCertificateViewSet.as_view({'get': 'download'}), name='compliancecertificate-download'),
 
     # Financial Year & Ledger Foundation (P2)
     path('financial-years/', FinancialYearViewSet.as_view({'get': 'list', 'post': 'create'}), name='financialyear-list'),

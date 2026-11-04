@@ -4,8 +4,11 @@ Tests for Roles & Permissions: module actions, data scope and custom roles
 """
 
 import datetime
+import tempfile
 
 from django.contrib.auth.models import Group, User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.urls import reverse
 from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context
@@ -15,7 +18,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import (
     AcademicYear, Batch, Course, CourseOffering, Department, Program, Regulation, Term,
 )
+from .management.commands.seed_dummy_college import _sample_pdf
 from .models.audit import AuditLog
+from .models.compliance import ComplianceCertificate, ComplianceCertificateType
 from .models.module_permissions import TenantModulePermission
 from .models.offerings import StudentCourseRegistration
 from .models.profile import AdministratorProfile, DepartmentHeadProfile, StudentProfile, TeachingStaffProfile
@@ -72,7 +77,8 @@ class _RbacFixtureMixin:
         return StudentProfile.objects.create(user=user, student_id=username, department=department, status="active")
 
     def _auth(self, user):
-        token = RefreshToken.for_user(user)
+        with schema_context(self.tenant.schema_name):
+            token = RefreshToken.for_user(user)
         token["tenant_schema"] = self.tenant.schema_name
         return {"HTTP_AUTHORIZATION": f"Bearer {token.access_token}"}
 
@@ -350,3 +356,56 @@ class CustomRoleTests(_RbacFixtureMixin, TenantTestCase):
             reverse("rbac-role-detail", args=[self._role_id("Faculty")]), **self._auth(self.admin),
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class ComplianceCertificateDownloadTests(_RbacFixtureMixin, TenantTestCase):
+    def setUp(self):
+        super().setUp()
+        media = tempfile.TemporaryDirectory()
+        self.addCleanup(media.cleanup)
+        override = override_settings(MEDIA_ROOT=media.name)
+        override.enable()
+        self.addCleanup(override.disable)
+        with schema_context(self.tenant.schema_name):
+            self._build_fixture()
+            self.tenant.subscribed_modules = ["compliance-center"]
+            self.tenant.save(update_fields=["subscribed_modules"])
+            certificate_type = ComplianceCertificateType.objects.create(name="Fire NOC")
+            self.certificate = ComplianceCertificate.objects.create(
+                certificate_type=certificate_type, file=SimpleUploadedFile("noc.pdf", b"%PDF-real"),
+            )
+
+    def _download(self, user):
+        return self.client.get(
+            reverse("compliancecertificate-download", args=[self.certificate.id]), **self._auth(user),
+        )
+
+    def test_admin_downloads_the_file_as_an_attachment(self):
+        response = self._download(self.admin)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-real")
+        self.assertIn("attachment", response["Content-Disposition"])
+        response.close()
+
+    def test_role_without_compliance_access_is_refused(self):
+        self.assertEqual(self._download(self.faculty).status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_login_is_required(self):
+        response = self.client.get(reverse("compliancecertificate-download", args=[self.certificate.id]))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_missing_file_gives_a_clear_error(self):
+        with schema_context(self.tenant.schema_name):
+            ComplianceCertificate.objects.filter(pk=self.certificate.pk).update(file="dummy/gone.pdf")
+        response = self._download(self.admin)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertIn("missing", response.data["error"])
+
+
+class SamplePdfTests(TenantTestCase):
+    def test_sample_pdf_is_well_formed_and_marked_as_a_sample(self):
+        pdf = _sample_pdf("Compliance Certificate")
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        self.assertIn(b"SAMPLE", pdf)
+        xref = int(pdf.rsplit(b"startxref\n", 1)[1].split(b"\n")[0])
+        self.assertEqual(pdf[xref:xref + 4], b"xref")
