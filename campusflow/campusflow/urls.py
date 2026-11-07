@@ -17,7 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from tenants.views import (
-    TenantCreateAPIView, TenantDetailAPIView, 
+    TenantCreateAPIView, TenantDetailAPIView, TenantLegalAgreementAPIView,
     SaaSInvoiceListAPIView, SaaSInvoiceApproveAPIView, SaaSInvoiceRejectAPIView
 )
 from rest_framework import permissions
@@ -41,6 +41,7 @@ urlpatterns = [
     # SaaS Management Routes (Public Schema only)
     path('api/saas/create-college/', TenantCreateAPIView.as_view(), name='create-college'),
     path('api/saas/colleges/<int:pk>/', TenantDetailAPIView.as_view(), name='college-detail'),
+    path('api/saas/colleges/<int:pk>/legal-agreement/', TenantLegalAgreementAPIView.as_view(), name='college-legal-agreement'),
     path('api/saas/invoices/', SaaSInvoiceListAPIView.as_view(), name='saas_invoice_list'),
     path('api/saas/invoices/<int:pk>/approve/', SaaSInvoiceApproveAPIView.as_view(), name='saas_invoice_approve'),
     path('api/saas/invoices/<int:pk>/reject/', SaaSInvoiceRejectAPIView.as_view(), name='saas_invoice_reject'),

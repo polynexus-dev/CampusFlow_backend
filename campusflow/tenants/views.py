@@ -265,3 +265,52 @@ class SaaSInvoiceRejectAPIView(APIView):
             "message": "Invoice payment receipt rejected. Notice sent to college admin.",
             "invoice": InvoiceSerializer(invoice).data
         }, status=status.HTTP_200_OK)
+
+
+class TenantLegalAgreementAPIView(APIView):
+    """
+    SaaS Owner (superuser) only: Dynamically generate a client-specific
+    CampusNexus Master Client Legal Agreement populated with the selected
+    Tenant's name, code, address, subscribed_modules, billing rates, and
+    payment gateway settings.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsSaaSAdmin]
+
+    def get(self, request, pk):
+        if not request.user.is_superuser:
+            return Response(
+                {"error": "Only the SaaS Owner (superuser) can generate client legal agreements."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        tenant = Tenant.objects.filter(pk=pk).first()
+        if not tenant:
+            return Response(
+                {"error": "College tenant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from django.http import HttpResponse
+        from .agreement_generator import render_tenant_legal_agreement_html
+
+        rendered_html = render_tenant_legal_agreement_html(tenant)
+        safe_code = (tenant.code or tenant.schema_name or str(tenant.id)).lower()
+        filename = f"CampusNexus_Legal_Agreement_{safe_code}.html"
+
+        if request.query_params.get("raw") == "1":
+            response = HttpResponse(rendered_html, content_type="text/html; charset=utf-8")
+            if request.query_params.get("download") == "1":
+                response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+
+        return Response(
+            {
+                "tenant_id": tenant.id,
+                "tenant_name": tenant.name,
+                "tenant_code": tenant.code,
+                "filename": filename,
+                "html": rendered_html,
+            },
+            status=status.HTTP_200_OK,
+        )
+

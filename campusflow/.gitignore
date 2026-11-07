@@ -172,6 +172,9 @@ fine_tuned_embeddings/
 # are still in the index; they should be untracked separately.
 billing_receipts/*.pdf
 
+# sample PDFs written by seed_dummy_college --files-only
+dummy/
+
 # Django migrations are deliberately TRACKED. They are the only reproducible
 # record of the database schema, and every tenant schema is migrated from them.
 # Ignoring them made rollback, review and reproducing a schema impossible, and

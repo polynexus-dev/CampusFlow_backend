@@ -1,5 +1,7 @@
 from django import forms
 from django.contrib import admin
+from django.urls import reverse
+from django.utils.html import format_html
 from django_tenants.admin import TenantAdminMixin
 from .models import Tenant, Domain
 
@@ -53,7 +55,10 @@ class TenantAdminForm(forms.ModelForm):
 @admin.register(Tenant)
 class TenantAdmin(TenantAdminMixin, admin.ModelAdmin):
     form = TenantAdminForm
-    list_display = ('name', 'code', 'schema_name', 'contact_email', 'is_active', 'created_on')
+    list_display = (
+        'name', 'code', 'schema_name', 'contact_email',
+        'is_active', 'created_on', 'legal_agreement_link',
+    )
     search_fields = ('name', 'code', 'schema_name')
     list_filter = ('is_active',)
     fields = (
@@ -64,6 +69,17 @@ class TenantAdmin(TenantAdminMixin, admin.ModelAdmin):
         'billing_student_rate', 'billing_student_discount', 'billing_employee_rate', 'billing_employee_discount',
         'subscribed_modules'
     )
+
+    @admin.display(description="Legal Agreement")
+    def legal_agreement_link(self, obj):
+        if not obj or not obj.pk or obj.schema_name == 'public':
+            return "—"
+        url = f"{reverse('college-legal-agreement', args=[obj.pk])}?raw=1"
+        return format_html(
+            '<a class="button" href="{}" target="_blank" rel="noopener noreferrer">'
+            'Generate Contract &nearr;</a>',
+            url,
+        )
 
 
 @admin.register(Domain)
