@@ -17,78 +17,62 @@ mandate a fixed split for (handled by equal-weight-per-channel below).
 """
 from collections import defaultdict
 
-from ..models.exam import Exam
 from ..models.indirect_attainment import OutcomeIndirectSurveyResponse
 from ..models.outcomes import CourseOutcome, ProgramOutcome
-from ..models.valuation import ScannedPaper
+from .co_evidence import collect_course_evidence
 
 DIRECT_ATTAINMENT_WEIGHT = 0.8
 INDIRECT_ATTAINMENT_WEIGHT = 0.2
 
 
-def _extract_score_and_max(raw, spec):
-    """Same per-question extraction rule as StudentTopicPerformanceView:
-    question_scores entries are either a plain number or a
-    {'score','max_marks','note'} dict; question_structure entries are either
-    a plain max-marks number or a {'topic','course_outcome','marks'} dict."""
-    obtained = raw.get('score') if isinstance(raw, dict) else raw
-    try:
-        obtained = float(obtained)
-    except (TypeError, ValueError):
-        return None, None, None
+def _student_percent(by_source, weights):
+    """One student's percentage on one CO.
 
-    if isinstance(spec, dict):
-        co_code = spec.get('course_outcome')
-        max_marks = spec.get('marks')
-    else:
-        co_code = None
-        max_marks = spec
+    weights=None pools raw marks across every source (sum obtained / sum max),
+    which is exactly the pre-multi-source behaviour when only exams exist.
+    With weights, each source's own percentage is averaged by its weight
+    (e.g. {"exam": 0.6, "assignment": 0.2, "rubric": 0.2}), over the sources
+    this student actually has evidence in."""
+    if weights is None:
+        obtained = sum(e["obtained"] for e in by_source.values())
+        max_marks = sum(e["max_marks"] for e in by_source.values())
+        return (obtained / max_marks) * 100 if max_marks else None
 
-    if isinstance(raw, dict) and raw.get('max_marks') is not None:
-        max_marks = raw.get('max_marks')
-
-    try:
-        max_marks = float(max_marks)
-    except (TypeError, ValueError):
-        return None, None, None
-
-    return obtained, max_marks, co_code
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for source, entry in by_source.items():
+        weight = float(weights.get(source, 0))
+        if weight <= 0 or not entry["max_marks"]:
+            continue
+        weighted_sum += (entry["obtained"] / entry["max_marks"]) * 100 * weight
+        total_weight += weight
+    return weighted_sum / total_weight if total_weight else None
 
 
-def compute_course_outcome_class_attainment(course_id):
+def compute_course_outcome_class_attainment(course_id, weights=None, sources=None):
     """
     For every CourseOutcome defined on this course, aggregates every
-    evaluated student's marks on questions tagged with that CO, then reports
-    what fraction of students cleared the CO's own per-student threshold
-    (`target_attainment_percent`) — the class-level attainment NBA's SAR asks
-    for, compared against `target_student_percent` to say whether the course
-    "attained" that outcome this term.
+    student's CO-tagged marks from every evidence source (end-sem/internal
+    answer scripts, assignments, rubric assessments; see
+    services/co_evidence.py), then reports what fraction of students cleared
+    the CO's own per-student threshold (`target_attainment_percent`) — the
+    class-level attainment NBA's SAR asks for, compared against
+    `target_student_percent` to say whether the course "attained" that
+    outcome this term.
+
+    `weights` optionally weights sources against each other (see
+    _student_percent); `sources` optionally restricts which are used.
+    Each result carries a `source_breakdown` so the SAR can show direct
+    attainment split by exam / assignment / rubric.
     """
-    papers = (
-        ScannedPaper.objects
-        .filter(session__exam__course_id=course_id, status='Evaluated')
-        .select_related('session__exam')
+    # student_id -> co_code -> source -> {obtained, max_marks}
+    student_co_scores = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: {"obtained": 0.0, "max_marks": 0.0}))
     )
-
-    # student_id -> co_code -> {obtained, max_marks}
-    student_co_scores = defaultdict(lambda: defaultdict(lambda: {"obtained": 0.0, "max_marks": 0.0}))
-
-    for paper in papers:
-        structure = paper.session.exam.question_structure or {}
-        scores = paper.question_scores or {}
-        if not structure or not scores:
-            continue
-
-        for q_key, raw in scores.items():
-            spec = structure.get(q_key)
-            if spec is None:
-                continue
-            obtained, max_marks, co_code = _extract_score_and_max(raw, spec)
-            if obtained is None or max_marks is None or not co_code:
-                continue
-            entry = student_co_scores[paper.student_id][co_code]
-            entry["obtained"] += obtained
-            entry["max_marks"] += max_marks
+    for evidence in collect_course_evidence(course_id, sources=sources):
+        entry = student_co_scores[evidence.student_id][evidence.co_code][evidence.source]
+        entry["obtained"] += evidence.obtained
+        entry["max_marks"] += evidence.max_marks
 
     co_codes_seen = {code for co_map in student_co_scores.values() for code in co_map.keys()}
     course_outcomes = CourseOutcome.objects.filter(course_id=course_id, code__in=co_codes_seen)
@@ -96,10 +80,18 @@ def compute_course_outcome_class_attainment(course_id):
     results = []
     for co in course_outcomes:
         student_percentages = []
+        # source -> [per-student percentage within that source]
+        per_source = defaultdict(list)
         for co_map in student_co_scores.values():
-            entry = co_map.get(co.code)
-            if entry and entry["max_marks"]:
-                student_percentages.append((entry["obtained"] / entry["max_marks"]) * 100)
+            by_source = co_map.get(co.code)
+            if not by_source:
+                continue
+            percent = _student_percent(by_source, weights)
+            if percent is not None:
+                student_percentages.append(percent)
+            for source, entry in by_source.items():
+                if entry["max_marks"]:
+                    per_source[source].append((entry["obtained"] / entry["max_marks"]) * 100)
 
         if not student_percentages:
             continue
@@ -123,6 +115,13 @@ def compute_course_outcome_class_attainment(course_id):
             # percentage-meeting-target, not the raw class average, since
             # that's what target_student_percent is actually measuring.
             "attainment_value": class_percent_meeting_target,
+            "source_breakdown": {
+                source: {
+                    "students": len(values),
+                    "average_percent": round(sum(values) / len(values), 2),
+                }
+                for source, values in sorted(per_source.items())
+            },
         })
 
     results.sort(key=lambda r: r["code"])

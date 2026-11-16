@@ -107,7 +107,7 @@ class LectureSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lecture
-        fields = ('id', 'name', 'subject', 'faculty', 'faculty_username', 'teacher_name', 'classroom', 'classroom_name', 'start_time', 'end_time', 'code', 'created_at')
+        fields = ('id', 'name', 'subject', 'faculty', 'faculty_username', 'teacher_name', 'classroom', 'classroom_name', 'start_time', 'end_time', 'code', 'meeting_url', 'meeting_provider', 'created_at')
         read_only_fields = ('id', 'code', 'created_at')
         extra_kwargs = {
             'classroom': {'required': True, 'allow_null': False}

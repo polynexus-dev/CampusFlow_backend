@@ -30,6 +30,17 @@ class Assignment(models.Model):
         default=False,
         help_text="If true, a notification is sent to the guardians of every student in this assignment's department when created.",
     )
+    # OBE: an assignment tagged with a CO and a numeric max_marks counts as CO
+    # evidence (services/co_evidence.py assignment_evidence).
+    course_outcome = models.ForeignKey(
+        'campusflow_app.CourseOutcome', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assignments',
+        help_text="Course outcome this assignment assesses. Feeds CO attainment.",
+    )
+    max_marks = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Maximum marks. Required for the assignment to count toward CO attainment.",
+    )
     created_by = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='assignments_created',
         help_text="Faculty member who posted this assignment."

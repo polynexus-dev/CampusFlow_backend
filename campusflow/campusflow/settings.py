@@ -223,6 +223,7 @@ REST_FRAMEWORK = {
         'otp_verify': os.environ.get('THROTTLE_OTP_VERIFY', '10/min'),
         'parent_link': os.environ.get('THROTTLE_PARENT_LINK', '10/hour'),
         'sso_handoff': os.environ.get('THROTTLE_SSO_HANDOFF', '30/min'),
+        'certificate_verify': os.environ.get('THROTTLE_CERTIFICATE_VERIFY', '30/min'),
     },
     # Client IP = the last X-Forwarded-For hop added by our reverse proxy
     # (nginx). Without this DRF trusts the whole header, which the client

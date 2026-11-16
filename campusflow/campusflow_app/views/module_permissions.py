@@ -22,6 +22,10 @@ ALL_ERP_MODULES = [
     # and credits drive SGPA and graduation checks — so they must work without a
     # per-tenant subscription change.
     "academics", "curriculum", "transcript",
+    # Gap-closure Phase 1 (Docs/college_gap_closure_plan.md): core, not
+    # premium. Certificates are daily office work, and LMS + rubrics are
+    # table stakes that are bundled into the per-student price.
+    "certificates", "lms", "rubrics",
 ]
 
 # Single shared definition — this used to be defined three times inline
@@ -56,21 +60,22 @@ ROLE_DEFAULT_MODULES = {
         "schedule", "settings", "leave", "exams", "analytics", "announcements",
         "assignments", "tpo", "library", "valuation", "ai-valuation", "at-risk-prediction", "admissions",
         "timetable-generation", "syllabus-tracker", "clearance",
-        "academics", "curriculum", "transcript"
+        "academics", "curriculum", "transcript", "certificates", "lms", "rubrics"
     ],
     # Deliberately small: a College Admin widens it per college from Module
     # Assignment (the 'Principal' group shows up there automatically). Kept to
     # modules whose APIs already accept Principal via is_faculty_or_above /
     # is_hm_or_above, so nothing in the sidebar leads to a 403.
     "Principal": [
-        "dashboard", "settings", "leave", "announcements", "exams", "analytics"
+        "dashboard", "settings", "leave", "announcements", "exams", "analytics",
+        "certificates", "lms", "rubrics"
     ],
     # "staff"/"student": faculty add Support Staff and students to their own
     # department (see views/users.py DEPARTMENT_CREATABLE_ROLES).
     "Faculty": [
         "dashboard", "staff", "student", "attendance", "schedule", "settings", "leave", "exams",
         "announcements", "analytics", "assignments", "valuation", "ai-valuation",
-        "at-risk-prediction", "transcript", "syllabus-tracker", "clearance"
+        "at-risk-prediction", "transcript", "syllabus-tracker", "clearance", "lms", "rubrics"
     ],
     # Plain Support Staff (lab assistants, clerks, drivers): their own leave,
     # announcements, labs/rooms and lab equipment. Library/Hostel belong to the
@@ -101,7 +106,8 @@ ROLE_DEFAULT_MODULES = {
     "Accounts Officer": ["dashboard", "settings", "leave", "announcements", "ledger", "fees", "payroll", "clearance"],
     "student": [
         "dashboard", "attendance", "schedule", "settings", "exams", "announcements",
-        "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript", "clearance"
+        "assignments", "fees", "bus-tracking", "hostel", "tpo", "library", "transcript", "clearance",
+        "certificates", "lms", "rubrics"
     ],
     # CA is deliberately never given anything beyond its own read-only report
     # namespace — no fees/payroll/inventory, so there's nothing to accidentally
