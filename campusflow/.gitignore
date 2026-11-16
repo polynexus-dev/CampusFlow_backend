@@ -193,3 +193,6 @@ Doc/
 doc/
 
 
+
+# Uploads written by tests (FileField upload_to=lms/...)
+lms/
