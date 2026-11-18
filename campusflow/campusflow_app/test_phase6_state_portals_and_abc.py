@@ -396,27 +396,89 @@ class ABCCreditEntryTests(_SharedFixtureMixin, TenantTestCase):
             entry = ABCCreditEntry.objects.get(student=student, course=exam.course)
             self.assertEqual(entry.grade, result.grade)
 
-    def test_sync_stub_flips_status(self):
-        with schema_context(self.tenant.schema_name):
-            from .models.academics import Term
-            term = Term.objects.create(
-                academic_year=self.academic_year, name="Sem 3", sequence=1,
-                start_date=datetime.date(2026, 4, 1), end_date=datetime.date(2026, 9, 30),
-            )
-            course = Course.objects.create(
-                course_code="CS102", course_name="Discrete Math", department=self.dept,
-                regulation=Regulation.objects.create(
-                    program=self.program, code="R2027", effective_from_year=2027,
-                    grading_scheme=get_default_grading_scheme(),
-                ),
-                semester_number=1, credits=3,
-            )
-            student_user = User.objects.create_user(username="stuabc3", email="stuabc3@test.com")
-            student = StudentProfile.objects.create(user=student_user, student_id="STUABC3", department=self.dept)
-            entry = ABCCreditEntry.objects.create(
-                student=student, course=course, academic_year=self.academic_year, credits_earned=3, grade="A",
-            )
+    def _pending_entry(self, username, student_id, apaar_id, course_code):
+        course = Course.objects.create(
+            course_code=course_code, course_name="Discrete Math", department=self.dept,
+            regulation=Regulation.objects.create(
+                program=self.program, code=f"R{course_code}", effective_from_year=2027,
+                grading_scheme=get_default_grading_scheme(),
+            ),
+            semester_number=1, credits=3,
+        )
+        user = User.objects.create_user(username=username, email=f"{username}@test.com", first_name="Asha", last_name="Rao")
+        student = StudentProfile.objects.create(
+            user=user, student_id=student_id, department=self.dept, apaar_id=apaar_id,
+        )
+        return ABCCreditEntry.objects.create(
+            student=student, course=course, academic_year=self.academic_year, credits_earned=3, grade="A",
+        )
 
-        response = self.client.post(reverse("abccreditentry-sync", args=[entry.id]), **self._auth(self.admin_user))
+    def test_apaar_problem(self):
+        from .models.abc_credit import apaar_problem
+        self.assertEqual(apaar_problem(None), "missing")
+        self.assertEqual(apaar_problem("  "), "missing")
+        self.assertEqual(apaar_problem("12345"), "malformed")
+        self.assertEqual(apaar_problem("12345678901A"), "malformed")
+        self.assertIsNone(apaar_problem("123456789012"))
+
+    def _post_json(self, url, data, auth):
+        return self.client.post(url, json.dumps(data), content_type="application/json", **auth)
+
+    def test_readiness_export_and_mark_uploaded(self):
+        with schema_context(self.tenant.schema_name):
+            good = self._pending_entry("stuabc3", "STUABC3", "123456789012", "CS102")
+            missing = self._pending_entry("stuabc4", "STUABC4", None, "CS103")
+            bad = self._pending_entry("stuabc5", "STUABC5", "98765", "CS104")
+        auth = self._auth(self.admin_user)
+
+        readiness = self.client.get(reverse("abccreditentry-readiness"), **auth)
+        self.assertEqual(readiness.status_code, status.HTTP_200_OK, readiness.data)
+        self.assertEqual(readiness.data["ready_entries"], 1)
+        self.assertEqual(readiness.data["blocked_entries"], 2)
+        problems = {r["student_id_display"]: r["problem"] for r in readiness.data["blocked_students"]}
+        self.assertEqual(problems, {"STUABC4": "missing", "STUABC5": "malformed"})
+        self.assertEqual(readiness.data["ready_ids"], [good.id])
+
+        listing = self.client.get(reverse("abccreditentry-list"), {"search": "STUABC5", "limit": 1}, **auth)
+        self.assertEqual(listing.data["count"], 1)
+        self.assertEqual(listing.data["results"][0]["apaar_problem"], "malformed")
+
+        export = self.client.get(reverse("abccreditentry-export"), **auth)
+        self.assertEqual(export.status_code, status.HTTP_200_OK)
+        lines = export.content.decode("utf-8-sig").strip().splitlines()
+        self.assertEqual(len(lines), 2)  # header + the one ready entry
+        self.assertTrue(lines[0].startswith("APAAR_ID,ENROLMENT_NO"))
+        self.assertIn("123456789012,STUABC3,Asha Rao", lines[1])
+        self.assertEqual(export["X-Entry-Count"], "1")
+
+        url = reverse("abccreditentry-mark-uploaded")
+        no_ref = self._post_json(url, {"ids": [good.id]}, auth)
+        self.assertEqual(no_ref.status_code, status.HTTP_400_BAD_REQUEST)
+        future = self._post_json(
+            url, {"ids": [good.id], "batch_reference": "NAD-1", "uploaded_on": "2999-01-01"}, auth,
+        )
+        self.assertEqual(future.status_code, status.HTTP_400_BAD_REQUEST)
+
+        response = self._post_json(
+            url, {"ids": [good.id, missing.id, bad.id, 999999], "batch_reference": "NAD-2026-11-001",
+                  "uploaded_on": "2026-11-18"}, auth,
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        self.assertEqual(response.data["sync_status"], "synced")
+        self.assertEqual(response.data["marked_ids"], [good.id])
+        reasons = {r["id"]: r["reason"] for r in response.data["skipped"]}
+        self.assertEqual(reasons, {missing.id: "APAAR ID missing", bad.id: "APAAR ID malformed", 999999: "not found"})
+
+        with schema_context(self.tenant.schema_name):
+            good.refresh_from_db()
+            self.assertEqual(good.sync_status, ABCCreditEntry.SYNC_UPLOADED)
+            self.assertEqual(good.upload_batch_reference, "NAD-2026-11-001")
+            self.assertEqual(good.uploaded_on, datetime.date(2026, 11, 18))
+            self.assertEqual(good.uploaded_by_id, self.admin_user.id)
+            self.assertIsNone(good.synced_at)  # nothing claims a government sync
+
+        again = self._post_json(url, {"ids": [good.id], "batch_reference": "NAD-X"}, auth)
+        self.assertEqual(again.data["marked"], 0)
+        self.assertEqual(again.data["skipped"][0]["reason"], "already uploaded to nad")
+
+        export_after = self.client.get(reverse("abccreditentry-export"), **auth)
+        self.assertEqual(export_after["X-Entry-Count"], "0")

@@ -58,7 +58,7 @@ from campusflow_app.views.timetable_generation import (
     TimetableGenerationRunDraftView,
 )
 from campusflow_app.views.attendance_correction import (
-    GuardianCreateCorrectionRequestView, TeacherCorrectionRequestListView,
+    GuardianCreateCorrectionRequestView, GuardianMissedLecturesView, TeacherCorrectionRequestListView,
     TeacherCorrectionRequestActionView,
 )
 from campusflow_app.views.quick_create import QuickCreatePostView
@@ -70,7 +70,9 @@ from campusflow_app.views.admissions import (
 from campusflow_app.views.face_registration_queue import (
     FaceRegistrationQueueView, FaceRegistrationCaptureView, FaceRegistrationRetakeView,
 )
-from campusflow_app.views.promotion import PromoteClassView, PromoteClassRevertView
+from campusflow_app.views.promotion import (
+    PromoteClassView, PromoteClassRevertView, PromotionBatchListView, PromotionPreviewView,
+)
 from campusflow_app.views.parent_link_request import (
     ParentLinkRequestCreateView, AdminParentLinkRequestListView, AdminParentLinkRequestActionView,
 )
@@ -168,7 +170,9 @@ from campusflow_app.views.university_affiliation import (
     RecordAffiliationDecisionView, TeacherApprovalProposalViewSet, TeacherApprovalProposalDecisionView,
     FacultyWorkloadStatementViewSet, ReservationRosterEntryViewSet,
 )
-from campusflow_app.views.abc_credit import ABCCreditEntryListView, SyncABCCreditEntryView
+from campusflow_app.views.abc_credit import (
+    ABCCreditEntryListView, ABCExportView, ABCMarkUploadedView, ABCReadinessView,
+)
 from campusflow_app.views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet, LibraryBorrowerListView
 from campusflow_app.views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from campusflow_app.views.valuation import (
@@ -478,6 +482,8 @@ urlpatterns = [
 
     # ── Promote Class (year-end) ─────────────────────────────────────
     path('students/promote/', PromoteClassView.as_view(), name='students-promote'),
+    path('students/promote/preview/', PromotionPreviewView.as_view(), name='students-promote-preview'),
+    path('students/promote/batches/', PromotionBatchListView.as_view(), name='students-promote-batches'),
     path('students/promote/<int:batch_id>/revert/', PromoteClassRevertView.as_view(), name='students-promote-revert'),
 
     # ── Parent Link Manager (Admin) ──────────────────────────────────
@@ -652,9 +658,11 @@ urlpatterns = [
     path('reservation-roster-entries/', ReservationRosterEntryViewSet.as_view({'get': 'list', 'post': 'create'}), name='reservationrosterentry-list'),
     path('reservation-roster-entries/<int:pk>/', ReservationRosterEntryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='reservationrosterentry-detail'),
 
-    # ABC/APAAR Internal Modeling
+    # ABC / APAAR credits (Phase A: CSV upload on the NAD portal)
     path('abc-credit-entries/', ABCCreditEntryListView.as_view(), name='abccreditentry-list'),
-    path('abc-credit-entries/<int:pk>/sync/', SyncABCCreditEntryView.as_view(), name='abccreditentry-sync'),
+    path('abc-credit-entries/readiness/', ABCReadinessView.as_view(), name='abccreditentry-readiness'),
+    path('abc-credit-entries/export/', ABCExportView.as_view(), name='abccreditentry-export'),
+    path('abc-credit-entries/mark-uploaded/', ABCMarkUploadedView.as_view(), name='abccreditentry-mark-uploaded'),
 
     # Library Management
     path('books/', BookViewSet.as_view({'get': 'list', 'post': 'create'}), name='book-list'),
@@ -663,6 +671,7 @@ urlpatterns = [
     path('book-copies/<int:pk>/', BookCopyViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookcopy-detail'),
     path('book-issues/', BookIssueViewSet.as_view({'get': 'list', 'post': 'create'}), name='bookissue-list'),
     path('book-issues/<int:pk>/', BookIssueViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookissue-detail'),
+    path('book-issues/<int:pk>/renew/', BookIssueViewSet.as_view({'post': 'renew'}), name='bookissue-renew'),
     path('library/borrowers/', LibraryBorrowerListView.as_view(), name='library-borrowers'),
 
     # Inventory & Store
@@ -703,6 +712,7 @@ urlpatterns = [
     path('parent/children/', ParentChildrenListView.as_view(), name='parent-children-list'),
     path('parent/children/link/', ParentLinkChildView.as_view(), name='parent-link-child'),
     path('parent/children/<int:student_id>/attendance/', ParentChildAttendanceView.as_view(), name='parent-child-attendance'),
+    path('parent/children/<int:student_id>/missed-lectures/', GuardianMissedLecturesView.as_view(), name='parent-child-missed-lectures'),
     path('parent/children/<int:student_id>/fees/', ParentChildFeesView.as_view(), name='parent-child-fees'),
     path('parent/children/<int:student_id>/exams/', ParentChildExamsView.as_view(), name='parent-child-exams'),
     path('parent/children/<int:student_id>/assignments/', ParentChildAssignmentsView.as_view(), name='parent-child-assignments'),

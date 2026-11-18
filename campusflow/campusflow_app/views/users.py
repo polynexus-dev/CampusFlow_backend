@@ -1668,7 +1668,7 @@ class TeachingStaffUserProfileView(HODCanListMixin, APIView):
 
 # Staff roles whose day job involves looking students up without being
 # faculty (e.g. the Scholarship Officer adding a scholarship record).
-STUDENT_LOOKUP_MODULES = {"scholarship", "fees", "library", "hostel", "clearance", "certificates", "tpo", "admissions", "bus-tracking"}
+STUDENT_LOOKUP_MODULES = {"scholarship", "fees", "library", "hostel", "clearance", "certificates", "tpo", "admissions", "bus-tracking", "rubrics"}
 
 
 class StudentLookupView(APIView):

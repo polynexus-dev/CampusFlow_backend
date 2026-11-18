@@ -1145,13 +1145,33 @@ class FeeRegulatingAuthoritySubmissionSerializer(serializers.ModelSerializer):
 
 class ABCCreditEntrySerializer(serializers.ModelSerializer):
     student_id_display = serializers.CharField(source='student.student_id', read_only=True)
+    student_name = serializers.SerializerMethodField()
+    apaar_id = serializers.CharField(source='student.apaar_id', read_only=True, default='')
+    apaar_problem = serializers.SerializerMethodField()
     course_code = serializers.CharField(source='course.course_code', read_only=True)
+    course_name = serializers.CharField(source='course.course_name', read_only=True)
     academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
+    sync_status_display = serializers.CharField(source='get_sync_status_display', read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ABCCreditEntry
         fields = '__all__'
-        read_only_fields = ('credits_earned', 'grade', 'sync_status', 'synced_at')
+        read_only_fields = (
+            'credits_earned', 'grade', 'sync_status', 'synced_at',
+            'upload_batch_reference', 'uploaded_on', 'uploaded_by',
+        )
+
+    def get_student_name(self, obj):
+        return obj.student.user.get_full_name() or obj.student.user.username
+
+    def get_apaar_problem(self, obj):
+        from .models.abc_credit import apaar_problem
+        return apaar_problem(obj.student.apaar_id)
+
+    def get_uploaded_by_name(self, obj):
+        u = obj.uploaded_by
+        return (u.get_full_name() or u.username) if u else ""
 
 
 class AffiliationApplicationSerializer(serializers.ModelSerializer):
@@ -1280,10 +1300,16 @@ class BookIssueSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
     student_id = serializers.CharField(source='student.student_id', read_only=True)
     staff_name = serializers.CharField(source='staff_user.get_full_name', read_only=True)
+    renewals_left = serializers.SerializerMethodField()
 
     class Meta:
         model = BookIssue
         fields = '__all__'
+        read_only_fields = ('renewal_count',)
+
+    def get_renewals_left(self, obj):
+        from .views.library import MAX_RENEWALS
+        return max(0, MAX_RENEWALS - (obj.renewal_count or 0))
 
     def validate(self, attrs):
         book_copy = attrs.get('book_copy')

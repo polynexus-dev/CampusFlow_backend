@@ -6,6 +6,8 @@ approves it to Present, rejects it, or marks it Half Day. Distinct from
 the student-initiated ManualAttendanceRequest (views/lecturer_attendance.py).
 """
 
+import datetime
+
 from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
@@ -171,3 +173,58 @@ class TeacherCorrectionRequestActionView(APIView):
         )
 
         return Response(_serialize_request(correction), status=status.HTTP_200_OK)
+
+
+DISPUTE_WINDOW_DAYS = 30
+
+
+class GuardianMissedLecturesView(APIView):
+    """
+    GET /api/parent/children/<student_id>/missed-lectures/
+    Lectures in the last 30 days the child was expected at (the same set the
+    attendance percentage counts: their department's lectures that had an
+    attendance session) and has no attendance for, each with the status of
+    any dispute the family already filed. This is what the parent portal's
+    "Dispute" button works from.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, student_id):
+        guardian_profile = getattr(request.user, "guardian_profile", None)
+        if not guardian_profile or not guardian_profile.students.filter(id=student_id).exists():
+            return Response({"error": "Access denied or student not linked to this guardian."}, status=status.HTTP_403_FORBIDDEN)
+        student = StudentProfile.objects.select_related("user").get(id=student_id)
+        if not student.department_id:
+            return Response({"results": [], "window_days": DISPUTE_WINDOW_DAYS})
+
+        now = timezone.now()
+        start = now - datetime.timedelta(days=DISPUTE_WINDOW_DAYS)
+        lectures = (
+            Lecture.objects.filter(
+                faculty__teaching_staff_profile__department_id=student.department_id,
+                start_time__gte=start, start_time__lte=now,
+            )
+            .exclude(code__isnull=True).exclude(code="")
+            .exclude(attendance__user=student.user)
+            .select_related("faculty")
+            .order_by("-start_time")
+        )
+        requests_by_lecture = {
+            r.lecture_id: r for r in AttendanceCorrectionRequest.objects.filter(student=student, lecture__in=lectures)
+        }
+        rows = []
+        for lec in lectures:
+            req = requests_by_lecture.get(lec.id)
+            rows.append({
+                "lecture_id": lec.id,
+                "lecture_name": lec.name,
+                "subject": lec.subject,
+                "faculty": (lec.faculty.get_full_name() or lec.faculty.username) if lec.faculty_id else None,
+                "start_time": lec.start_time.isoformat(),
+                "date": timezone.localtime(lec.start_time).date().isoformat(),
+                "dispute": None if req is None else {
+                    "id": req.id, "status": req.status, "reason": req.reason,
+                    "requested_at": req.requested_at.isoformat(),
+                },
+            })
+        return Response({"results": rows, "window_days": DISPUTE_WINDOW_DAYS})

@@ -304,6 +304,8 @@ class Command(BaseCommand):
             self._step("announcements & notifications", self._announcements)
             self._step("clearance desks & final-year no-dues", self._clearance)
             self._step("certificates (bonafide, leaving, character)", self._certificates)
+            self._step("ABC credits & APAAR IDs", self._abc_credits)
+            self._step("LMS content & rubric assessments", self._lms_and_rubrics)
             if not options['skip_generic']:
                 self._generic_fill()
             self._report()
@@ -1257,6 +1259,156 @@ class Command(BaseCommand):
         for sp in final_year[::4][:60]:
             create_clearance_request(sp, ClearanceRequest.CYCLE_FINAL_EXIT, generated_by=self._user('admin'))
         return f"4 desks, {min(60, len(final_year[::4]))} final-exit requests"
+
+    def _lms_and_rubrics(self):
+        """Course content for the first offerings of each department (two
+        units of notes, links and video links, some already opened by
+        students) and three rubrics with assessments, so Learning Content
+        and Rubrics have something to show. Idempotent."""
+        from collections import defaultdict
+
+        from campusflow_app.models.lms import CourseModule, LearningResource, ResourceView
+        from campusflow_app.models.offerings import CourseOffering, StudentCourseRegistration
+        from campusflow_app.models.outcomes import CourseOutcome
+        from campusflow_app.models.rubrics import Rubric, RubricAssessment, RubricCriterion, RubricLevel, RubricScore
+
+        if CourseModule.objects.exists():
+            return "already seeded"
+
+        per_dept = defaultdict(list)
+        for o in CourseOffering.objects.select_related("course", "faculty").filter(faculty__isnull=False).order_by("id"):
+            dept = o.course.department_id
+            if len(per_dept[dept]) < 3:
+                per_dept[dept].append(o)
+        offerings = [o for group in per_dept.values() for o in group]
+
+        modules = resources = views = 0
+        for o in offerings:
+            name = o.course.course_name
+            for unit, (title, desc) in enumerate([
+                (f"Unit 1: Introduction to {name}", "Basics, definitions and the syllabus map."),
+                (f"Unit 2: Core concepts of {name}", "Worked examples and practice problems."),
+            ], start=1):
+                m = CourseModule.objects.create(offering=o, title=title, description=desc, order=unit, created_by=o.faculty)
+                modules += 1
+                items = [
+                    LearningResource(module=m, title=f"Unit {unit} lecture notes", resource_type=LearningResource.TYPE_NOTE,
+                                     body=(f"Key points for unit {unit} of {name}:\n\n"
+                                           "1. Read the chapter before class.\n"
+                                           "2. Solve the practice set at the end of the chapter.\n"
+                                           "3. Bring doubts to the tutorial."),
+                                     order=1, uploaded_by=o.faculty),
+                    LearningResource(module=m, title=f"Recorded lecture: unit {unit}", resource_type=LearningResource.TYPE_VIDEO,
+                                     url="https://www.youtube.com/@nptelhrd", order=2, uploaded_by=o.faculty),
+                    LearningResource(module=m, title="NPTEL reference course", resource_type=LearningResource.TYPE_LINK,
+                                     url="https://nptel.ac.in/courses", order=3, uploaded_by=o.faculty),
+                ]
+                LearningResource.objects.bulk_create(items)
+                resources += len(items)
+            # about two thirds of the class opened the first unit's notes
+            first_note = (LearningResource.objects.filter(module__offering=o, resource_type=LearningResource.TYPE_NOTE)
+                          .order_by("id").first())
+            regs = list(StudentCourseRegistration.objects.filter(
+                offering=o, status=StudentCourseRegistration.STATUS_REGISTERED).values_list("student_id", flat=True))
+            opened = [ResourceView(resource=first_note, student_id=sid, view_count=1 + (sid % 3))
+                      for i, sid in enumerate(regs) if i % 3 != 2]
+            ResourceView.objects.bulk_create(opened, ignore_conflicts=True)
+            views += len(opened)
+
+        # Rubrics: lab, project and viva on the first offering's course, CO-tagged where COs exist.
+        rubric_count = assessment_count = 0
+        if offerings:
+            o = offerings[0]
+            cos = list(CourseOutcome.objects.filter(course=o.course).order_by("code")[:3])
+            specs = [
+                ("Laboratory performance", Rubric.APPLIES_LAB,
+                 ["Experimental procedure", "Observations and results", "Lab journal"]),
+                ("Mini project evaluation", Rubric.APPLIES_PROJECT,
+                 ["Problem definition", "Design and implementation", "Presentation"]),
+                ("Viva voce", Rubric.APPLIES_VIVA, ["Conceptual clarity", "Communication"]),
+            ]
+            level_specs = [("Excellent", 4, "Complete, accurate and independent."),
+                           ("Good", 3, "Mostly correct with minor gaps."),
+                           ("Satisfactory", 2, "Basic understanding, needs guidance."),
+                           ("Needs improvement", 1, "Major gaps or incomplete.")]
+            regs = list(StudentCourseRegistration.objects.filter(
+                offering=o, status=StudentCourseRegistration.STATUS_REGISTERED).select_related("student")[:12])
+            for r_i, (rname, applies, criteria) in enumerate(specs):
+                rubric = Rubric.objects.create(
+                    name=f"{o.course.course_code} {rname}", course=o.course, applies_to=applies,
+                    description=f"Shared marking scheme for {rname.lower()}.", created_by=o.faculty)
+                rubric_count += 1
+                crit_objs = []
+                for c_i, title in enumerate(criteria):
+                    crit = RubricCriterion.objects.create(rubric=rubric, title=title, order=c_i,
+                                                          course_outcome=cos[c_i % len(cos)] if cos else None)
+                    for label, score, desc in level_specs:
+                        RubricLevel.objects.create(criterion=crit, label=label, score=score, descriptor=desc)
+                    crit_objs.append((crit, list(crit.levels.order_by("-score"))))
+                if r_i == 2:
+                    continue  # the viva rubric stays unused, so it can still be edited in a demo
+                for s_i, reg in enumerate(regs):
+                    a = RubricAssessment.objects.create(
+                        rubric=rubric, student=reg.student, evaluator=o.faculty,
+                        context_label=["Lab 3: Experiment", "Mini project review 1"][r_i],
+                        overall_comment="Good effort." if s_i % 2 == 0 else "")
+                    total = 0
+                    for c_i, (crit, levels) in enumerate(crit_objs):
+                        level = levels[(s_i + c_i) % 3]  # Excellent / Good / Satisfactory
+                        RubricScore.objects.create(assessment=a, criterion=crit, level=level)
+                        total += float(level.score)
+                    a.total_score = total
+                    a.max_score = 4 * len(crit_objs)
+                    a.save(update_fields=["total_score", "max_score"])
+                    assessment_count += 1
+
+        return (f"{modules} modules, {resources} resources, {views} views on {len(offerings)} offerings; "
+                f"{rubric_count} rubrics, {assessment_count} assessments")
+
+    def _abc_credits(self):
+        """APAAR IDs for most students (a few missing and two malformed, so the
+        ABC readiness check has something to show), one ABC credit entry per
+        published result, and the oldest year's credits already uploaded to
+        NAD. Idempotent."""
+        from campusflow_app.models import StudentExamResult, StudentProfile
+        from campusflow_app.models.abc_credit import ABCCreditEntry
+        from campusflow_app.services.abc_credit import record_credit_entry
+
+        if not StudentProfile.objects.exclude(apaar_id__isnull=True).exclude(apaar_id='').exists():
+            students = list(StudentProfile.objects.order_by('student_id'))
+            for i, sp in enumerate(students):
+                if i % 40 == 7:
+                    continue  # no APAAR ID yet
+                sp.apaar_id = str(700000000000 + sp.pk)
+            # Two typing mistakes the check should catch.
+            if len(students) > 30:
+                students[3].apaar_id = '70000012345'   # 11 digits
+                students[29].apaar_id = 'APAAR-PEND'
+            StudentProfile.objects.bulk_update(students, ['apaar_id'], batch_size=500)
+
+        results = StudentExamResult.objects.select_related('exam__term__academic_year', 'exam__course', 'student')
+        for result in results.filter(exam__term__isnull=False, exam__course__credits__gt=0):
+            if not ABCCreditEntry.objects.filter(
+                student=result.student, course=result.exam.course,
+                academic_year=result.exam.term.academic_year,
+            ).exists():
+                record_credit_entry(result)
+
+        # Senior-year (semester 5 and 7) credits went to NAD in the first batch;
+        # first- and second-year ones are still waiting, as the demo shows.
+        uploaded = ABCCreditEntry.objects.exclude(sync_status=ABCCreditEntry.SYNC_PENDING).count()
+        if not uploaded:
+            admin = self._user('admin')
+            odd = ABCCreditEntry.objects.select_related('student', 'course', 'academic_year').filter(
+                course__semester_number__in=[5, 7])
+            for e in odd:
+                apaar = e.student.apaar_id or ''
+                if len(apaar) == 12 and apaar.isdigit():
+                    e.mark_uploaded(f'NAD-{e.academic_year.name[:4]}-0001', date(2026, 11, 10), admin)
+            uploaded = ABCCreditEntry.objects.exclude(sync_status=ABCCreditEntry.SYNC_PENDING).count()
+
+        total = ABCCreditEntry.objects.count()
+        return f"{total} credit entries, {uploaded} already uploaded to NAD"
 
     def _certificates(self):
         """Standard certificate templates, a few final-year students whose No-Dues
