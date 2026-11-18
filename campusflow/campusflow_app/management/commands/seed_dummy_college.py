@@ -303,6 +303,7 @@ class Command(BaseCommand):
             self._step("auditor access to every financial year", self._audit_years)
             self._step("announcements & notifications", self._announcements)
             self._step("clearance desks & final-year no-dues", self._clearance)
+            self._step("certificates (bonafide, leaving, character)", self._certificates)
             if not options['skip_generic']:
                 self._generic_fill()
             self._report()
@@ -1232,7 +1233,6 @@ class Command(BaseCommand):
         final-exit no-dues request for final-semester students, so the Fee Counter
         has fee clearances to work. Idempotent."""
         from campusflow_app.models import ClearanceDesk, ClearanceRequest, StudentProfile
-        from campusflow_app.services.academics import get_current_term
         from campusflow_app.services.clearance import create_clearance_request
 
         for order, (name, code, group, module) in enumerate([
@@ -1245,14 +1245,103 @@ class Command(BaseCommand):
         # Placeholder desks from the generic pass would add sign-offs nobody owns.
         ClearanceDesk.objects.filter(code__startswith="dummy-").update(is_active=False)
 
-        ay = get_current_term().academic_year
-        if ClearanceRequest.objects.filter(cycle_type=ClearanceRequest.CYCLE_FINAL_EXIT, academic_year=ay).exists():
+        # Final-exit requests carry no term/year, exactly as FinalExitClearanceRequestView
+        # creates them; is_student_cleared(cycle_type=final_exit) looks them up that way,
+        # so a year-tagged one would never unlock the Leaving Certificate.
+        ClearanceRequest.objects.filter(cycle_type=ClearanceRequest.CYCLE_FINAL_EXIT).exclude(
+            academic_year=None, term=None).update(academic_year=None, term=None)
+        if ClearanceRequest.objects.filter(cycle_type=ClearanceRequest.CYCLE_FINAL_EXIT).exists():
             return "already seeded"
         final_year = [sp for sp in StudentProfile.objects.select_related('program', 'user').filter(user__username__startswith=U)
                       if sp.program and sp.current_semester_number and sp.current_semester_number >= sp.program.total_terms - 1]
         for sp in final_year[::4][:60]:
-            create_clearance_request(sp, ClearanceRequest.CYCLE_FINAL_EXIT, academic_year=ay, generated_by=self._user('admin'))
+            create_clearance_request(sp, ClearanceRequest.CYCLE_FINAL_EXIT, generated_by=self._user('admin'))
         return f"4 desks, {min(60, len(final_year[::4]))} final-exit requests"
+
+    def _certificates(self):
+        """Standard certificate templates, a few final-year students whose No-Dues
+        is fully signed off (so their Leaving Certificate can be issued), issued
+        Bonafide/Leaving/Character certificates, and a queue of student requests
+        for the office to work. Idempotent."""
+        from campusflow_app.models import ClearanceItem, ClearanceRequest, StudentProfile
+        from campusflow_app.models.certificates import CertificateRequest, CertificateTemplate, IssuedCertificate
+        from campusflow_app.services.certificates import ensure_default_templates, issue_certificate
+        from campusflow_app.services.clearance import get_reference_snapshot
+
+        ensure_default_templates()
+        if IssuedCertificate.objects.exists() or CertificateRequest.objects.exists():
+            return "already seeded"
+        self._load()
+        admin = self._user('admin')
+        tpl = {t.cert_type: t for t in CertificateTemplate.objects.all()}
+        now = timezone.now()
+
+        # Fully clear the first 8 final-exit No-Dues requests, each desk signed by its own role.
+        final_exit = list(ClearanceRequest.objects.filter(cycle_type=ClearanceRequest.CYCLE_FINAL_EXIT)
+                          .select_related('student__user').order_by('id'))
+        cleared, pending = final_exit[:8], final_exit[8:]
+        desk_remarks = {"fees": "All semester fees paid", "library": "No books outstanding",
+                        "hostel": "Room handed over", "department": "Lab equipment returned"}
+        for cr in cleared:
+            for item in cr.items.select_related('desk', 'desk__responsible_group'):
+                signer = (item.desk.responsible_group.user_set.filter(username__startswith=U).first()
+                          if item.desk.responsible_group_id else None) or admin
+                item.status = ClearanceItem.STATUS_CLEARED
+                item.cleared_by = signer
+                item.cleared_at = now - timedelta(days=self.rnd.randint(1, 6), hours=self.rnd.randint(0, 8))
+                item.remarks = desk_remarks.get(item.desk.code, "Cleared")
+                item.reference_snapshot = get_reference_snapshot(cr.student, item.desk)
+                item.save()
+            cr.recompute_status()
+        # A couple of partly-signed requests, so the list isn't all one state.
+        for cr in pending[:6]:
+            for item in cr.items.select_related('desk').filter(desk__code__in=["library", "hostel"]):
+                item.status = ClearanceItem.STATUS_CLEARED
+                item.cleared_by = admin
+                item.cleared_at = now - timedelta(days=2)
+                item.remarks = desk_remarks.get(item.desk.code, "Cleared")
+                item.save()
+            cr.recompute_status()
+
+        cleared_students = [cr.student for cr in cleared]
+        pending_students = [cr.student for cr in pending]
+        others = [sp for sp in self.students if sp.id not in {s.id for s in cleared_students + pending_students}]
+        self.rnd.shuffle(others)
+
+        issued = 0
+        # Leaving certificates for students whose No-Dues is complete.
+        for sp in cleared_students[:4]:
+            issue_certificate(tpl["leaving"], sp, issued_by=admin, purpose="Higher studies",
+                              extra_context={"reason_for_leaving": "Completed the programme", "conduct": "Good"})
+            issued += 1
+        purposes = ["Bank education loan", "Passport application", "Scholarship (MahaDBT)", "Internship joining",
+                    "Railway concession", "Visa application", "Hostel admission", "Driving licence"]
+        for sp, purpose in zip(others[:8], purposes):
+            issue_certificate(tpl["bonafide"], sp, issued_by=admin, purpose=purpose)
+            issued += 1
+        for sp in others[8:10]:
+            issue_certificate(tpl["character"], sp, issued_by=admin, purpose="Campus placement")
+            issued += 1
+        # Spread issue dates over the last few weeks so the register looks lived-in.
+        for k, cert in enumerate(IssuedCertificate.objects.order_by('id')):
+            IssuedCertificate.objects.filter(pk=cert.pk).update(issued_at=now - timedelta(days=2 + 2 * k, hours=k))
+
+        # Student requests waiting at the office.
+        queue = [(others[10], "bonafide", "Bank education loan"), (others[11], "bonafide", "Passport application"),
+                 (others[12], "bonafide", "Scholarship (MahaDBT)"), (others[13], "character", "Campus placement"),
+                 (others[14], "bonafide", "Internship joining"),
+                 (cleared_students[4], "leaving", "Admission to M.Tech"),
+                 (cleared_students[5], "leaving", "Joining employer"),
+                 (pending_students[0], "leaving", "Higher studies")]
+        for k, (sp, kind, purpose) in enumerate(queue):
+            req = CertificateRequest.objects.create(template=tpl[kind], student=sp, purpose=purpose)
+            CertificateRequest.objects.filter(pk=req.pk).update(created_at=now - timedelta(hours=3 + 5 * k))
+        rejected = CertificateRequest.objects.create(
+            template=tpl["bonafide"], student=others[15], purpose="Gym membership",
+            status=CertificateRequest.STATUS_REJECTED, remarks="Not an official purpose; please apply with a valid reason.",
+            reviewed_by=admin, reviewed_at=now - timedelta(days=1))
+        CertificateRequest.objects.filter(pk=rejected.pk).update(created_at=now - timedelta(days=2))
+        return f"{len(cleared)} no-dues cleared, {issued} certificates issued, {len(queue) + 1} requests"
 
     def _announcements(self):
         from campusflow_app.models import Announcement, Department, Notification
