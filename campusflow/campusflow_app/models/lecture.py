@@ -15,6 +15,14 @@ class Lecture(models.Model):
     code = models.CharField(max_length=20, unique=True, null=True, blank=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    # Online / hybrid class link. No Zoom/Meet API integration: faculty paste
+    # the meeting link and students open it from the timetable or mobile app.
+    MEETING_PROVIDER_CHOICES = [
+        ("zoom", "Zoom"), ("google_meet", "Google Meet"), ("teams", "Microsoft Teams"),
+        ("jitsi", "Jitsi"), ("other", "Other"),
+    ]
+    meeting_url = models.URLField(max_length=1000, blank=True, default="")
+    meeting_provider = models.CharField(max_length=20, choices=MEETING_PROVIDER_CHOICES, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

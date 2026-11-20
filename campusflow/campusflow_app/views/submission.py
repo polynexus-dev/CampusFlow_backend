@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -44,6 +46,7 @@ class SubmissionListCreateView(APIView):
                 "attachment": s.attachment.url if s.attachment else None,
                 "text_submission": s.text_submission,
                 "grade": s.grade,
+                "marks_obtained": str(s.marks_obtained) if s.marks_obtained is not None else None,
                 "feedback": s.feedback,
                 "status": s.status
             })
@@ -100,16 +103,34 @@ class SubmissionGradeView(APIView):
             return Response({"error": "Only Faculty and Admins can grade submissions."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            submission = AssignmentSubmission.objects.get(id=pk)
+            submission = AssignmentSubmission.objects.select_related('assignment').get(id=pk)
         except AssignmentSubmission.DoesNotExist:
             return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        grade = request.data.get('grade', '').strip()
-        feedback = request.data.get('feedback', '').strip()
+        grade = str(request.data.get('grade') or '').strip()
+        feedback = str(request.data.get('feedback') or '').strip()
+        raw_marks = request.data.get('marks_obtained')
+
+        marks_obtained = None
+        if raw_marks not in (None, ''):
+            try:
+                marks_obtained = Decimal(str(raw_marks))
+            except InvalidOperation:
+                return Response({"error": "marks_obtained must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+            max_marks = submission.assignment.max_marks
+            if marks_obtained < 0 or (max_marks is not None and marks_obtained > max_marks):
+                return Response(
+                    {"error": f"marks_obtained must be between 0 and {max_marks if max_marks is not None else 'the maximum'}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not grade:
+                grade = f"{marks_obtained}/{max_marks}" if max_marks is not None else str(marks_obtained)
 
         if not grade:
             return Response({"error": "Grade/marks is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        if marks_obtained is not None:
+            submission.marks_obtained = marks_obtained
         submission.grade = grade
         submission.feedback = feedback
         submission.status = 'graded'
@@ -118,5 +139,6 @@ class SubmissionGradeView(APIView):
         return Response({
             "message": "Submission graded successfully.",
             "status": submission.status,
-            "grade": submission.grade
+            "grade": submission.grade,
+            "marks_obtained": str(submission.marks_obtained) if submission.marks_obtained is not None else None,
         }, status=status.HTTP_200_OK)

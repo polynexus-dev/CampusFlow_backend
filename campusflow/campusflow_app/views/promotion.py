@@ -14,6 +14,7 @@ over automatically without any extra code here.
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Count
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -191,3 +192,85 @@ class PromoteClassRevertView(APIView):
         batch.save(update_fields=["status", "reverted_by", "reverted_at"])
 
         return Response({"batch_id": batch.id, "status": batch.status}, status=status.HTTP_200_OK)
+
+
+class PromotionPreviewView(APIView):
+    """
+    GET /api/students/promote/preview/?department_id=
+        -> {"classes": [{semester_year, section_division, students}]}
+    GET /api/students/promote/preview/?department_id=&from_semester_year=&from_section_division=
+        -> the class roster, each student with their clearance status, so the
+           screen can show who would block the promotion before submitting.
+    Read-only; the promotion itself is POST students/promote/.
+    """
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("academics")]
+
+    def get(self, request):
+        dept_id = request.query_params.get("department_id")
+        if not dept_id:
+            return Response({"error": "department_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        active = StudentProfile.objects.filter(department_id=dept_id).exclude(status="transferred")
+        from_year = request.query_params.get("from_semester_year")
+        if not from_year:
+            classes = (
+                active.exclude(current_semester_year__isnull=True).exclude(current_semester_year="")
+                .values("current_semester_year", "section_division")
+                .annotate(students=Count("id"))
+                .order_by("current_semester_year", "section_division")
+            )
+            return Response({"classes": [
+                {"semester_year": c["current_semester_year"], "section_division": c["section_division"] or "",
+                 "students": c["students"]}
+                for c in classes
+            ]})
+
+        section = request.query_params.get("from_section_division", "")
+        roster = StudentProfile.objects.filter(
+            department_id=dept_id, current_semester_year=from_year, section_division=section,
+        ).select_related("user").order_by("student_id")
+        rows = []
+        for sp in roster:
+            cleared, _ = is_student_cleared(sp)
+            rows.append({
+                "id": sp.id,
+                "student_id": sp.student_id,
+                "name": sp.user.get_full_name() or sp.user.username,
+                "status": sp.status or "active",
+                "is_cleared": cleared,
+            })
+        return Response({"students": rows, "not_cleared": sum(1 for r in rows if not r["is_cleared"])})
+
+
+class PromotionBatchListView(APIView):
+    """GET /api/students/promote/batches/ -> past promotions, newest first, with whether each can still be undone."""
+    permission_classes = [IsAuthenticated, IsSaaSOrCollegeAdmin, RequiresModule("academics")]
+
+    def get(self, request):
+        now = timezone.now()
+        batches = (
+            PromotionBatch.objects.select_related("department", "performed_by", "reverted_by")
+            .annotate(record_count=Count("records"))
+            .order_by("-applied_at")[:100]
+        )
+        data = []
+        for b in batches:
+            counts = dict(
+                b.records.values_list("decision").annotate(n=Count("id")).values_list("decision", "n")
+            )
+            data.append({
+                "id": b.id,
+                "department": b.department.name,
+                "from_class": f"{b.from_semester_year} {b.from_section_division}".strip(),
+                "to_class": f"{b.to_semester_year} {b.to_section_division}".strip(),
+                "from_academic_year": b.from_academic_year,
+                "to_academic_year": b.to_academic_year,
+                "promoted": counts.get(PromotionRecord.DECISION_PROMOTE, 0),
+                "held": counts.get(PromotionRecord.DECISION_HOLD, 0),
+                "excluded": counts.get(PromotionRecord.DECISION_EXCLUDE, 0),
+                "performed_by": (b.performed_by.get_full_name() or b.performed_by.username) if b.performed_by_id else "",
+                "applied_at": b.applied_at.isoformat(),
+                "status": b.status,
+                "can_revert": b.status == PromotionBatch.STATUS_APPLIED and now - b.applied_at <= REVERT_WINDOW,
+                "revert_until": (b.applied_at + REVERT_WINDOW).isoformat(),
+            })
+        return Response(data)

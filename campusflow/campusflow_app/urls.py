@@ -9,11 +9,15 @@ from campusflow_app.views.users import (
     ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
     DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
     CollegeEmployeesListView, UserPermissionsDetailView, ActiveTenantSettingsView,
-    GuardianConsentApprovalView, UserDataErasureView, UserWithdrawConsentView, UserGrantConsentView,
+    UserDataErasureView, UserWithdrawConsentView, UserGrantConsentView,
     StudentOnboardRequestOTPView, StudentOnboardVerifyPasswordView,
     ForgotPasswordRequestOTPView, ForgotPasswordVerifyOTPView, ForgotPasswordResetView,
     RolesListView
 )
+from campusflow_app.views.guardian_consent import (
+    GuardianConsentApprovalView, GuardianConsentPageView, GuardianConsentResendView,
+)
+from campusflow_app.captcha import captcha_page
 from campusflow_app.views.location import LocationDetailView
 from campusflow_app.views.attendance import (
     AttendanceMarkView, AllAttendanceView,
@@ -60,7 +64,7 @@ from campusflow_app.views.timetable_generation import (
     TimetableGenerationRunDraftView,
 )
 from campusflow_app.views.attendance_correction import (
-    GuardianCreateCorrectionRequestView, TeacherCorrectionRequestListView,
+    GuardianCreateCorrectionRequestView, GuardianMissedLecturesView, TeacherCorrectionRequestListView,
     TeacherCorrectionRequestActionView,
 )
 from campusflow_app.views.quick_create import QuickCreatePostView
@@ -72,7 +76,9 @@ from campusflow_app.views.admissions import (
 from campusflow_app.views.face_registration_queue import (
     FaceRegistrationQueueView, FaceRegistrationCaptureView, FaceRegistrationRetakeView,
 )
-from campusflow_app.views.promotion import PromoteClassView, PromoteClassRevertView
+from campusflow_app.views.promotion import (
+    PromoteClassView, PromoteClassRevertView, PromotionBatchListView, PromotionPreviewView,
+)
 from campusflow_app.views.parent_link_request import (
     ParentLinkRequestCreateView, AdminParentLinkRequestListView, AdminParentLinkRequestActionView,
 )
@@ -140,6 +146,12 @@ from campusflow_app.views.rbac import RoleDetailView, RoleListCreateView, RoleMe
 from campusflow_app.views.module_permissions import (
     TenantSubscriptionView, RoleModulePermissionView, MyAllowedModulesView, CustomRolesView
 )
+from campusflow_app.views.certificates import (
+    CertificateTemplateViewSet, CertificateRequestViewSet, IssuedCertificateViewSet,
+    StudentIDCardsView, CertificateVerifyView,
+)
+from campusflow_app.views.rubrics import RubricViewSet, RubricAssessmentViewSet
+from campusflow_app.views.lms import MyOfferingsView, CourseModuleViewSet, LearningResourceViewSet
 from campusflow_app.views.clearance import (
     ClearanceDeskViewSet, ClearanceSettingsView, ClearanceRequestViewSet,
     ClearanceBulkGenerateView, FinalExitClearanceRequestView,
@@ -164,7 +176,9 @@ from campusflow_app.views.university_affiliation import (
     RecordAffiliationDecisionView, TeacherApprovalProposalViewSet, TeacherApprovalProposalDecisionView,
     FacultyWorkloadStatementViewSet, ReservationRosterEntryViewSet,
 )
-from campusflow_app.views.abc_credit import ABCCreditEntryListView, SyncABCCreditEntryView
+from campusflow_app.views.abc_credit import (
+    ABCCreditEntryListView, ABCExportView, ABCMarkUploadedView, ABCReadinessView,
+)
 from campusflow_app.views.library import BookViewSet, BookCopyViewSet, BookIssueViewSet, LibraryBorrowerListView
 from campusflow_app.views.inventory import InventoryCategoryViewSet, InventoryItemViewSet, SupplierViewSet, InventoryTransactionViewSet
 from campusflow_app.views.valuation import (
@@ -260,6 +274,9 @@ urlpatterns = [
     
     # DPDP Consent/Compliance routes
     path('register/guardian-consent/', GuardianConsentApprovalView.as_view(), name='guardian_consent'),
+    path('register/guardian-consent/resend/', GuardianConsentResendView.as_view(), name='guardian_consent_resend'),
+    path('register/guardian-consent/<str:token>/', GuardianConsentPageView.as_view(), name='guardian_consent_page'),
+    path('captcha/', captcha_page, name='captcha_page'),
     path('user/request-erasure/', UserDataErasureView.as_view(), name='user_data_erasure'),
     path('user/withdraw-consent/', UserWithdrawConsentView.as_view(), name='user_withdraw_consent'),
     path('user/grant-consent/', UserGrantConsentView.as_view(), name='user_grant_consent'),
@@ -479,6 +496,8 @@ urlpatterns = [
 
     # ── Promote Class (year-end) ─────────────────────────────────────
     path('students/promote/', PromoteClassView.as_view(), name='students-promote'),
+    path('students/promote/preview/', PromotionPreviewView.as_view(), name='students-promote-preview'),
+    path('students/promote/batches/', PromotionBatchListView.as_view(), name='students-promote-batches'),
     path('students/promote/<int:batch_id>/revert/', PromoteClassRevertView.as_view(), name='students-promote-revert'),
 
     # ── Parent Link Manager (Admin) ──────────────────────────────────
@@ -653,9 +672,11 @@ urlpatterns = [
     path('reservation-roster-entries/', ReservationRosterEntryViewSet.as_view({'get': 'list', 'post': 'create'}), name='reservationrosterentry-list'),
     path('reservation-roster-entries/<int:pk>/', ReservationRosterEntryViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='reservationrosterentry-detail'),
 
-    # ABC/APAAR Internal Modeling
+    # ABC / APAAR credits (Phase A: CSV upload on the NAD portal)
     path('abc-credit-entries/', ABCCreditEntryListView.as_view(), name='abccreditentry-list'),
-    path('abc-credit-entries/<int:pk>/sync/', SyncABCCreditEntryView.as_view(), name='abccreditentry-sync'),
+    path('abc-credit-entries/readiness/', ABCReadinessView.as_view(), name='abccreditentry-readiness'),
+    path('abc-credit-entries/export/', ABCExportView.as_view(), name='abccreditentry-export'),
+    path('abc-credit-entries/mark-uploaded/', ABCMarkUploadedView.as_view(), name='abccreditentry-mark-uploaded'),
 
     # Library Management
     path('books/', BookViewSet.as_view({'get': 'list', 'post': 'create'}), name='book-list'),
@@ -664,6 +685,7 @@ urlpatterns = [
     path('book-copies/<int:pk>/', BookCopyViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookcopy-detail'),
     path('book-issues/', BookIssueViewSet.as_view({'get': 'list', 'post': 'create'}), name='bookissue-list'),
     path('book-issues/<int:pk>/', BookIssueViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='bookissue-detail'),
+    path('book-issues/<int:pk>/renew/', BookIssueViewSet.as_view({'post': 'renew'}), name='bookissue-renew'),
     path('library/borrowers/', LibraryBorrowerListView.as_view(), name='library-borrowers'),
 
     # Inventory & Store
@@ -704,6 +726,7 @@ urlpatterns = [
     path('parent/children/', ParentChildrenListView.as_view(), name='parent-children-list'),
     path('parent/children/link/', ParentLinkChildView.as_view(), name='parent-link-child'),
     path('parent/children/<int:student_id>/attendance/', ParentChildAttendanceView.as_view(), name='parent-child-attendance'),
+    path('parent/children/<int:student_id>/missed-lectures/', GuardianMissedLecturesView.as_view(), name='parent-child-missed-lectures'),
     path('parent/children/<int:student_id>/fees/', ParentChildFeesView.as_view(), name='parent-child-fees'),
     path('parent/children/<int:student_id>/exams/', ParentChildExamsView.as_view(), name='parent-child-exams'),
     path('parent/children/<int:student_id>/assignments/', ParentChildAssignmentsView.as_view(), name='parent-child-assignments'),
@@ -822,5 +845,34 @@ urlpatterns = [
     path('scholarship-records/', StudentScholarshipRecordViewSet.as_view({'get': 'list', 'post': 'create'}), name='scholarshiprecord-list'),
     path('scholarship-records/<int:pk>/', StudentScholarshipRecordViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='scholarshiprecord-detail'),
 
-]
+    # ── Gap closure Phase 1 (Docs/college_gap_closure_plan.md) ──
+    # Certificates & ID cards
+    path('certificate-templates/', CertificateTemplateViewSet.as_view({'get': 'list', 'post': 'create'}), name='certificatetemplate-list'),
+    path('certificate-templates/<int:pk>/', CertificateTemplateViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='certificatetemplate-detail'),
+    path('certificate-requests/', CertificateRequestViewSet.as_view({'get': 'list', 'post': 'create'}), name='certificaterequest-list'),
+    path('certificate-requests/<int:pk>/', CertificateRequestViewSet.as_view({'get': 'retrieve'}), name='certificaterequest-detail'),
+    path('certificate-requests/<int:pk>/approve/', CertificateRequestViewSet.as_view({'post': 'approve'}), name='certificaterequest-approve'),
+    path('certificate-requests/<int:pk>/reject/', CertificateRequestViewSet.as_view({'post': 'reject'}), name='certificaterequest-reject'),
+    path('issued-certificates/', IssuedCertificateViewSet.as_view({'get': 'list', 'post': 'create'}), name='issuedcertificate-list'),
+    path('issued-certificates/<int:pk>/', IssuedCertificateViewSet.as_view({'get': 'retrieve'}), name='issuedcertificate-detail'),
+    path('issued-certificates/<int:pk>/pdf/', IssuedCertificateViewSet.as_view({'get': 'pdf'}), name='issuedcertificate-pdf'),
+    path('issued-certificates/<int:pk>/revoke/', IssuedCertificateViewSet.as_view({'post': 'revoke'}), name='issuedcertificate-revoke'),
+    path('id-cards/', StudentIDCardsView.as_view(), name='student-id-cards'),
+    path('certificates/verify/<str:schema>/<uuid:token>/', CertificateVerifyView.as_view(), name='certificate-verify'),
 
+    # Rubrics
+    path('rubrics/', RubricViewSet.as_view({'get': 'list', 'post': 'create'}), name='rubric-list'),
+    path('rubrics/<int:pk>/', RubricViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='rubric-detail'),
+    path('rubric-assessments/', RubricAssessmentViewSet.as_view({'get': 'list', 'post': 'create'}), name='rubricassessment-list'),
+    path('rubric-assessments/<int:pk>/', RubricAssessmentViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='rubricassessment-detail'),
+
+    # LMS content library
+    path('lms/my-offerings/', MyOfferingsView.as_view(), name='lms-my-offerings'),
+    path('lms/modules/', CourseModuleViewSet.as_view({'get': 'list', 'post': 'create'}), name='lms-module-list'),
+    path('lms/modules/<int:pk>/', CourseModuleViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='lms-module-detail'),
+    path('lms/resources/', LearningResourceViewSet.as_view({'get': 'list', 'post': 'create'}), name='lms-resource-list'),
+    path('lms/resources/<int:pk>/', LearningResourceViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='lms-resource-detail'),
+    path('lms/resources/<int:pk>/view/', LearningResourceViewSet.as_view({'post': 'record_view'}), name='lms-resource-view'),
+    path('lms/resources/<int:pk>/engagement/', LearningResourceViewSet.as_view({'get': 'engagement'}), name='lms-resource-engagement'),
+
+]

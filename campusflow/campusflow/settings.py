@@ -223,6 +223,8 @@ REST_FRAMEWORK = {
         'otp_verify': os.environ.get('THROTTLE_OTP_VERIFY', '10/min'),
         'parent_link': os.environ.get('THROTTLE_PARENT_LINK', '10/hour'),
         'sso_handoff': os.environ.get('THROTTLE_SSO_HANDOFF', '30/min'),
+        'certificate_verify': os.environ.get('THROTTLE_CERTIFICATE_VERIFY', '30/min'),
+        'guardian_consent': os.environ.get('THROTTLE_GUARDIAN_CONSENT', '10/hour'),
     },
     # Client IP = the last X-Forwarded-For hop added by our reverse proxy
     # (nginx). Without this DRF trusts the whole header, which the client
@@ -237,6 +239,27 @@ AUTH_THROTTLE_ENABLED = (
     os.environ.get('AUTH_THROTTLE_ENABLED', 'True').lower() in ('true', '1', 'yes')
     and not (len(_sys.argv) > 1 and _sys.argv[1] == 'test')
 )
+
+# Cap CAPTCHA (self-hosted, see campusflow_app/captcha.py). Off until the Cap
+# server is running and the frontend sends tokens; always off in tests.
+CAP_ENABLED = (
+    os.environ.get('CAP_ENABLED', 'False').lower() in ('true', '1', 'yes')
+    and not (len(_sys.argv) > 1 and _sys.argv[1] == 'test')
+)
+CAP_API_ENDPOINT = os.environ.get('CAP_API_ENDPOINT', '')  # https://<cap-host>/<site-key>/
+CAP_SECRET = os.environ.get('CAP_SECRET', '')
+CAP_TIMEOUT = float(os.environ.get('CAP_TIMEOUT', '5'))
+# If the Cap server is down: False blocks the protected requests, True lets them through.
+CAP_FAIL_OPEN = os.environ.get('CAP_FAIL_OPEN', 'False').lower() in ('true', '1', 'yes')
+# Widget script for the /captcha/ page the mobile app opens. Pinned: an
+# unpinned CDN script on an auth page would run whatever gets published next.
+CAP_WIDGET_SRC = os.environ.get('CAP_WIDGET_SRC', 'https://cdn.jsdelivr.net/npm/cap-widget@0.1.63')
+# Base URL for links in emails (guardian consent), e.g. https://api.campusnexus.in.
+# Empty = build from the incoming request's host.
+PUBLIC_BACKEND_URL = os.environ.get('PUBLIC_BACKEND_URL', '')
+GUARDIAN_CONSENT_LINK_DAYS = int(os.environ.get('GUARDIAN_CONSENT_LINK_DAYS', '14'))
+# Login asks for a CAPTCHA only after this many failed attempts (per username or IP, 15 min window).
+LOGIN_CAPTCHA_AFTER_FAILURES = int(os.environ.get('LOGIN_CAPTCHA_AFTER_FAILURES', '3'))
 
 ROOT_URLCONF = "campusflow.urls"
 

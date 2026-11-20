@@ -29,6 +29,12 @@ class AssignmentSubmission(models.Model):
         max_length=20, blank=True, null=True,
         help_text="Grade or score assigned by the faculty."
     )
+    # `grade` above is free text ("A", "8/10", "Good") and can't be summed.
+    # marks_obtained is the numeric score CO attainment uses.
+    marks_obtained = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Numeric marks out of the assignment's max_marks.",
+    )
     feedback = models.TextField(
         blank=True, null=True,
         help_text="Grading feedback or remarks from the instructor."

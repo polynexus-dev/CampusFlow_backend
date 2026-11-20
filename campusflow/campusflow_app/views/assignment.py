@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django.db.models import Count
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
@@ -8,12 +10,53 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from ..models.assignment import Assignment
 from ..models.department import Department
 from ..models.course import Course
+from ..models.outcomes import CourseOutcome
 from ..permissions import IsFacultyOrAbove, RequiresModule, get_user_group, is_college_admin
 from ..utils.tenant_utils import ensure_tenant_schema
 from ..utils.file_validation import validate_attachment
 from ..services.notifications import notify_guardians_of_course_roster
 
 ASSIGNMENT_PERMS = [IsAuthenticated, RequiresModule("assignments")]
+
+
+def _parse_obe_fields(data, course):
+    """Validate the optional OBE fields (course_outcome_id, max_marks).
+
+    Returns (fields_dict, error). Only keys present in `data` appear in
+    fields_dict, so a PUT that omits them leaves the stored values alone.
+    The CO must belong to the assignment's course, otherwise its marks
+    would land in another course's attainment."""
+    fields = {}
+    if 'course_outcome_id' in data:
+        co_id = data.get('course_outcome_id')
+        if co_id in (None, '', 'null'):
+            fields['course_outcome'] = None
+        else:
+            co = CourseOutcome.objects.filter(id=co_id, course=course).first()
+            if co is None:
+                return None, "course_outcome_id must be a course outcome of this assignment's course."
+            fields['course_outcome'] = co
+    if 'max_marks' in data:
+        raw = data.get('max_marks')
+        if raw in (None, '', 'null'):
+            fields['max_marks'] = None
+        else:
+            try:
+                value = Decimal(str(raw))
+            except InvalidOperation:
+                return None, "max_marks must be a number."
+            if value <= 0:
+                return None, "max_marks must be greater than zero."
+            fields['max_marks'] = value
+    return fields, None
+
+
+def _obe_payload(a):
+    return {
+        "course_outcome_id": a.course_outcome_id,
+        "course_outcome_code": a.course_outcome.code if a.course_outcome_id else None,
+        "max_marks": str(a.max_marks) if a.max_marks is not None else None,
+    }
 
 
 class AssignmentListCreateView(APIView):
@@ -28,7 +71,7 @@ class AssignmentListCreateView(APIView):
         ensure_tenant_schema(request)
         user = request.user
         user_group = get_user_group(user)
-        qs = Assignment.objects.all().select_related('department', 'course', 'created_by')
+        qs = Assignment.objects.all().select_related('department', 'course', 'created_by', 'course_outcome')
 
         # Filters
         dept_id = request.query_params.get('department_id')
@@ -68,7 +111,8 @@ class AssignmentListCreateView(APIView):
                 "due_date": a.due_date.isoformat(),
                 "attachment": a.attachment.url if a.attachment else None,
                 "created_by": a.created_by.get_full_name() or a.created_by.username,
-                "created_at": a.created_at.isoformat()
+                "created_at": a.created_at.isoformat(),
+                **_obe_payload(a),
             }
             if is_staff_view:
                 item["submission_count"] = a.submission_count
@@ -111,6 +155,10 @@ class AssignmentListCreateView(APIView):
         except (Department.DoesNotExist, Course.DoesNotExist) as e:
             return Response({"error": "Invalid department or course selection."}, status=status.HTTP_400_BAD_REQUEST)
 
+        obe_fields, obe_error = _parse_obe_fields(request.data, course)
+        if obe_error:
+            return Response({"error": obe_error}, status=status.HTTP_400_BAD_REQUEST)
+
         assignment = Assignment.objects.create(
             title=title,
             description=description,
@@ -119,7 +167,8 @@ class AssignmentListCreateView(APIView):
             due_date=due_date,
             attachment=attachment,
             notify_parents=notify_parents,
-            created_by=request.user
+            created_by=request.user,
+            **obe_fields,
         )
 
         if notify_parents:
@@ -147,7 +196,7 @@ class AssignmentDetailView(APIView):
 
     def get(self, request, pk):
         try:
-            a = Assignment.objects.select_related('department', 'course', 'created_by').get(id=pk)
+            a = Assignment.objects.select_related('department', 'course', 'created_by', 'course_outcome').get(id=pk)
         except Assignment.DoesNotExist:
             return Response({"error": "Assignment not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -164,7 +213,8 @@ class AssignmentDetailView(APIView):
             "attachment": a.attachment.url if a.attachment else None,
             "created_by_id": a.created_by_id,
             "created_by": a.created_by.get_full_name() or a.created_by.username,
-            "created_at": a.created_at.isoformat()
+            "created_at": a.created_at.isoformat(),
+            **_obe_payload(a),
         }, status=status.HTTP_200_OK)
 
     def put(self, request, pk):
@@ -198,6 +248,12 @@ class AssignmentDetailView(APIView):
             if attachment_error:
                 return Response({"error": attachment_error}, status=status.HTTP_400_BAD_REQUEST)
             a.attachment = request.FILES['attachment']
+
+        obe_fields, obe_error = _parse_obe_fields(request.data, a.course)
+        if obe_error:
+            return Response({"error": obe_error}, status=status.HTTP_400_BAD_REQUEST)
+        for field, value in obe_fields.items():
+            setattr(a, field, value)
 
         a.save()
         return Response({"message": "Assignment updated."}, status=status.HTTP_200_OK)

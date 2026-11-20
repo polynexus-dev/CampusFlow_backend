@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Guardian consent · CampusNexus</title>
+  <style>
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f4f5f8; margin: 0; color: #2d3748; }
+    .card { max-width: 520px; margin: 48px auto; background: #fff; border-radius: 16px; border: 1px solid #eef0f5; overflow: hidden; }
+    .head { background: linear-gradient(135deg, #4A154B 0%, #2E0854 100%); color: #fff; padding: 28px; text-align: center; }
+    .head h1 { margin: 0; font-size: 22px; }
+    .body { padding: 32px; line-height: 1.6; font-size: 15px; }
+    .facts { background: #f7fafc; border-radius: 10px; padding: 16px 20px; margin: 20px 0; }
+    .facts div { margin: 4px 0; }
+    .muted { color: #718096; font-size: 13px; }
+    .actions { display: flex; gap: 12px; margin-top: 24px; }
+    button { flex: 1; padding: 14px; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; border: 0; }
+    .approve { background: #4A154B; color: #fff; }
+    .decline { background: #fff; color: #c53030; border: 1.5px solid #feb2b2; }
+    label { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; font-size: 14px; }
+    .msg { padding: 16px 20px; border-radius: 10px; }
+    .ok { background: #f0fff4; color: #276749; }
+    .err { background: #fff5f5; color: #9b2c2c; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="head"><h1>Guardian consent</h1></div>
+    <div class="body">
+      {% if error %}
+        <div class="msg err">{{ error }}</div>
+      {% elif done %}
+        <div class="msg ok">{{ done }}</div>
+        <p class="muted">You can close this page.</p>
+      {% else %}
+        <p>{{ college_name }} has registered the student below on CampusNexus, the college's academic system. Because the student is under 18, the account needs a parent or guardian's consent before it can be used.</p>
+        <div class="facts">
+          <div><strong>Student:</strong> {{ student_name }}</div>
+          <div><strong>College:</strong> {{ college_name }}</div>
+          {% if guardian_name %}<div><strong>Guardian on record:</strong> {{ guardian_name }}</div>{% endif %}
+        </div>
+        <p class="muted">Approving lets the college process the student's academic records (attendance, exams, fees and similar) under the Digital Personal Data Protection Act, 2023. You can withdraw consent later through the college.</p>
+        <form method="post">
+          <label><input type="checkbox" name="confirm" value="1" required> I am this student's parent or legal guardian.</label>
+          <div class="actions">
+            <button class="approve" type="submit" name="action" value="approve">Approve</button>
+            <button class="decline" type="submit" name="action" value="decline" formnovalidate>Decline</button>
+          </div>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

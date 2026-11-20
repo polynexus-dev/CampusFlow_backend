@@ -123,6 +123,8 @@ class TeacherTodayScheduleView(APIView):
                 "classroom": lecture.classroom.name if lecture.classroom else None,
                 "start_time": lecture.start_time.isoformat(),
                 "end_time": lecture.end_time.isoformat(),
+                "meeting_url": lecture.meeting_url or None,
+                "meeting_provider": lecture.meeting_provider or None,
                 "attendance_marked_count": marked_count,
                 "attendance_pending": marked_count == 0,
             })

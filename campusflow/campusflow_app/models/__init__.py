@@ -143,6 +143,11 @@ from .student_insight import StudentInsightSnapshot
 # ── Clearance (No-Dues) Workflow ──
 from .clearance import ClearanceDesk, ClearanceSettings, ClearanceRequest, ClearanceItem
 
+# ── Gap closure Phase 1 (Docs/college_gap_closure_plan.md) ──
+from .certificates import CertificateTemplate, CertificateRequest, IssuedCertificate
+from .rubrics import Rubric, RubricCriterion, RubricLevel, RubricAssessment, RubricScore
+from .lms import CourseModule, LearningResource, ResourceView
+
 
 
 

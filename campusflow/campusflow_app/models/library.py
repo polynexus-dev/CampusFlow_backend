@@ -46,6 +46,7 @@ class BookIssue(models.Model):
     due_date = models.DateField()
     returned_date = models.DateField(null=True, blank=True)
     fine_amount = models.DecimalField(max_digits=8, decimal_places=2, default=0.00)
+    renewal_count = models.PositiveSmallIntegerField(default=0, help_text="Times the borrower or library extended the due date.")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Issued')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

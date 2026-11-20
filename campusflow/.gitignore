@@ -196,3 +196,6 @@ doc/
 
 # BackgroundJob export files (FileField upload_to="background_jobs/")
 background_jobs/
+
+# Uploads written by tests (FileField upload_to=lms/...)
+lms/

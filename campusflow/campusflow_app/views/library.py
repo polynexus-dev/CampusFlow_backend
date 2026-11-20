@@ -1,4 +1,9 @@
-from rest_framework import viewsets
+import datetime
+
+from django.db import transaction
+from django.utils import timezone
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -27,6 +32,10 @@ class IsLibraryManagerOrReadOnly(BasePermission):
 
 LIBRARY_PERMS = [IsAuthenticated, RequiresModule("library"), IsLibraryManagerOrReadOnly]
 
+# Self-service renewal limits for students.
+RENEWAL_DAYS = 14
+MAX_RENEWALS = 2
+
 
 class BookViewSet(viewsets.ModelViewSet):
     queryset = Book.objects.all().order_by('title')
@@ -44,6 +53,13 @@ class BookIssueViewSet(viewsets.ModelViewSet):
     serializer_class = BookIssueSerializer
     permission_classes = LIBRARY_PERMS
 
+    def get_permissions(self):
+        # Borrowers renew their own books, so `renew` skips the
+        # librarian-only write check; the action itself checks ownership.
+        if getattr(self, "action", None) == "renew":
+            return [IsAuthenticated(), RequiresModule("library")()]
+        return super().get_permissions()
+
     def get_queryset(self):
         user = self.request.user
         queryset = BookIssue.objects.select_related('book_copy__book', 'student__user', 'staff_user').all().order_by('-issued_date')
@@ -53,6 +69,43 @@ class BookIssueViewSet(viewsets.ModelViewSet):
             return queryset.filter(student=user.student_profile)
             
         return queryset
+
+    @action(detail=True, methods=["post"])
+    def renew(self, request, pk=None):
+        """
+        POST /api/book-issues/<id>/renew/
+        Extends the due date by RENEWAL_DAYS from the current due date. The
+        borrowing student may renew their own book up to MAX_RENEWALS times
+        while it is not yet overdue; an overdue book has to come back to the
+        desk (fine first). The Librarian / College Admin can renew any loan.
+        """
+        manager = is_library_manager(request.user)
+        with transaction.atomic():
+            issue = BookIssue.objects.select_for_update(of=("self",)).select_related("book_copy__book", "student").filter(pk=pk).first()
+            if issue is None:
+                return Response({"error": "Loan not found."}, status=status.HTTP_404_NOT_FOUND)
+            student = getattr(request.user, "student_profile", None)
+            if not manager and (student is None or issue.student_id != student.id):
+                return Response({"error": "You can only renew your own books."}, status=status.HTTP_403_FORBIDDEN)
+            if issue.status == "Returned" or issue.returned_date:
+                return Response({"error": "This book has already been returned."}, status=status.HTTP_400_BAD_REQUEST)
+            today = timezone.localdate()
+            if not manager and issue.due_date < today:
+                return Response(
+                    {"error": "This book is overdue. Please return it at the library desk."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not manager and issue.renewal_count >= MAX_RENEWALS:
+                return Response(
+                    {"error": f"This book has already been renewed {MAX_RENEWALS} times. Please return it at the library desk."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            issue.due_date = max(issue.due_date, today) + datetime.timedelta(days=RENEWAL_DAYS)
+            issue.renewal_count += 1
+            if issue.status == "Overdue":
+                issue.status = "Issued"
+            issue.save(update_fields=["due_date", "renewal_count", "status", "updated_at"])
+        return Response(BookIssueSerializer(issue).data)
 
 
 class LibraryBorrowerListView(APIView):
