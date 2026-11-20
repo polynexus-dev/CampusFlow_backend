@@ -9,11 +9,15 @@ from campusflow_app.views.users import (
     ResetDeviceLockView, RequestBiometricResetView, PendingApprovalsView, ApproveUserView,
     DepartmentHeadUserProfileView, NonTeachingStaffUserProfileView,
     CollegeEmployeesListView, UserPermissionsDetailView, ActiveTenantSettingsView,
-    GuardianConsentApprovalView, UserDataErasureView, UserWithdrawConsentView, UserGrantConsentView,
+    UserDataErasureView, UserWithdrawConsentView, UserGrantConsentView,
     StudentOnboardRequestOTPView, StudentOnboardVerifyPasswordView,
     ForgotPasswordRequestOTPView, ForgotPasswordVerifyOTPView, ForgotPasswordResetView,
     RolesListView
 )
+from campusflow_app.views.guardian_consent import (
+    GuardianConsentApprovalView, GuardianConsentPageView, GuardianConsentResendView,
+)
+from campusflow_app.captcha import captcha_page
 from campusflow_app.views.location import LocationDetailView
 from campusflow_app.views.attendance import (
     AttendanceMarkView, AllAttendanceView,
@@ -268,6 +272,9 @@ urlpatterns = [
     
     # DPDP Consent/Compliance routes
     path('register/guardian-consent/', GuardianConsentApprovalView.as_view(), name='guardian_consent'),
+    path('register/guardian-consent/resend/', GuardianConsentResendView.as_view(), name='guardian_consent_resend'),
+    path('register/guardian-consent/<str:token>/', GuardianConsentPageView.as_view(), name='guardian_consent_page'),
+    path('captcha/', captcha_page, name='captcha_page'),
     path('user/request-erasure/', UserDataErasureView.as_view(), name='user_data_erasure'),
     path('user/withdraw-consent/', UserWithdrawConsentView.as_view(), name='user_withdraw_consent'),
     path('user/grant-consent/', UserGrantConsentView.as_view(), name='user_grant_consent'),

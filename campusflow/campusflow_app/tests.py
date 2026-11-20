@@ -113,7 +113,9 @@ class DPDPComplianceTests(TenantTestCase):
             'parent_guardian_name': 'John Doe',
             'parent_guardian_email': 'johndoe@test.com',
         }
-        response = self.client.post(url, data, format='json', **self.auth)
+        from django.core import mail
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url, data, format='json', **self.auth)
         if response.status_code != status.HTTP_201_CREATED:
             print("FAILED minor success test:", response.status_code, response.data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -122,6 +124,10 @@ class DPDPComplianceTests(TenantTestCase):
             profile = StudentProfile.objects.get(student_id='STU997')
             self.assertEqual(profile.status, 'pending_guardian')
             self.assertFalse(profile.guardian_consent_given)
+        # The guardian is emailed a signed approval link.
+        consent_mails = [m for m in mail.outbox if m.to == ['johndoe@test.com']]
+        self.assertEqual(len(consent_mails), 1)
+        self.assertIn('/register/guardian-consent/', consent_mails[0].body)
 
     def test_student_registration_adult_success(self):
         url = reverse('student_registration')
@@ -166,14 +172,17 @@ class DPDPComplianceTests(TenantTestCase):
                 status='pending_guardian'
             )
 
+        from .guardian_consent import make_token
+        with schema_context(self.tenant.schema_name):
+            token = make_token(profile, self.tenant.schema_name)
         url = reverse('guardian_consent')
-        data = {
-            'email': 'minor3@test.com',
-            'student_id': 'STU995',
-            'guardian_email': 'janedoe@test.com',
-            'action': 'approve',
-        }
-        response = self.client.post(url, data, format='json', **self.auth)
+        # Knowing the student's details is no longer enough.
+        guessed = self.client.post(url, {
+            'email': 'minor3@test.com', 'student_id': 'STU995',
+            'guardian_email': 'janedoe@test.com', 'action': 'approve',
+        }, format='json')
+        self.assertEqual(guessed.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.post(url, {'token': token, 'action': 'approve'}, format='json')
         if response.status_code != status.HTTP_200_OK:
             print("FAILED guardian consent approval:", response.status_code, response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)

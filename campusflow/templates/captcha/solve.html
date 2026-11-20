@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Security check</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; background: #fff; }
+    .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; text-align: center; }
+    p { color: #4a5568; font-size: 15px; margin: 0 0 20px; }
+    .err { color: #9b2c2c; font-size: 13px; margin-top: 16px; }
+  </style>
+  {% if enabled %}<script src="{{ widget_src }}"></script>{% endif %}
+</head>
+<body>
+  <div class="wrap">
+    <p>Please confirm you're not a robot.</p>
+    {% if enabled %}<cap-widget id="cap" data-cap-api-endpoint="{{ api_endpoint }}"></cap-widget>{% endif %}
+    <div class="err" id="err"></div>
+  </div>
+  <script>
+    // Hands the token to whoever opened this page: the mobile app's WebView
+    // (window.ReactNativeWebView) or a web page embedding it in an iframe.
+    function send(msg) {
+      var data = JSON.stringify(msg);
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(data);
+      if (window.parent && window.parent !== window) window.parent.postMessage(msg, "*");
+    }
+    {% if enabled %}
+    var cap = document.getElementById("cap");
+    cap.addEventListener("solve", function (e) { send({ type: "cap-token", token: e.detail.token }); });
+    cap.addEventListener("error", function (e) {
+      var m = (e.detail && e.detail.message) || "Could not complete the check.";
+      document.getElementById("err").textContent = m;
+      send({ type: "cap-error", message: m });
+    });
+    {% else %}
+    send({ type: "cap-disabled" });
+    {% endif %}
+  </script>
+</body>
+</html>

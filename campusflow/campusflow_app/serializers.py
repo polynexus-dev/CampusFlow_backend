@@ -901,8 +901,18 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             fields = {k: v for k, v in profile_data.items() if hasattr(StudentProfile, k)}
             if not is_demo and fields.get('status') != 'pending_guardian':
                 fields['status'] = 'pending'
-            StudentProfile.objects.create(user=user, **fields)
+            student_profile = StudentProfile.objects.create(user=user, **fields)
             assign_role_permissions(user, 'student')
+            if student_profile.status == 'pending_guardian':
+                # Email the guardian a signed approval link once the account is saved.
+                from django_tenants.utils import schema_context
+                from .guardian_consent import send_consent_request
+                schema, request = connection.schema_name, self.context.get('request')
+
+                def _send():
+                    with schema_context(schema):
+                        send_consent_request(StudentProfile.objects.get(pk=student_profile.pk), request)
+                transaction.on_commit(_send)
         elif role == 'Faculty':
             fields = {k: v for k, v in profile_data.items() if hasattr(TeachingStaffProfile, k)}
             if 'staff_role' not in fields or not fields['staff_role']:

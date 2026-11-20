@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Guardian consent needed</title>
+</head>
+<body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f5f8; margin: 0; padding: 0;">
+  <div style="width: 100%; background-color: #f4f5f8; padding: 40px 0;">
+    <div style="max-width: 580px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #eef0f5;">
+      <div style="background: #4A154B; background: linear-gradient(135deg, #4A154B 0%, #2E0854 100%); padding: 35px 30px; text-align: center;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800;">CampusNexus</h1>
+      </div>
+      <div style="padding: 40px; color: #4a5568; font-size: 15px; line-height: 24px;">
+        <p style="margin-top: 0;">Dear {{ guardian_name }},</p>
+        <p>{{ college_name }} has registered <strong>{{ student_name }}</strong> on CampusNexus. Because the student is under 18, the account stays inactive until a parent or guardian agrees.</p>
+        <p style="text-align: center; margin: 32px 0;">
+          <a href="{{ url }}" style="background-color: #4A154B; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; display: inline-block;">Review and respond</a>
+        </p>
+        <p style="font-size: 13px; color: #718096;">The link is valid for {{ days }} days. If the button doesn't work, copy this address into your browser:<br><span style="word-break: break-all;">{{ url }}</span></p>
+        <p style="font-size: 13px; color: #718096; margin-bottom: 0;">If you don't recognise this, ignore this email or choose “Decline” on the page.</p>
+      </div>
+      <div style="background-color: #f7fafc; padding: 24px; text-align: center; border-top: 1px solid #edf2f7; color: #a0aec0; font-size: 12px; line-height: 18px;">
+        <p style="margin: 0;">&copy; 2026 CampusNexus. All rights reserved.</p>
+        <p style="margin: 0;">Polynexus Technologies Private Limited (polynexus.in)</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

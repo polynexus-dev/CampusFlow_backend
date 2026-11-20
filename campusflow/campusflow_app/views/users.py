@@ -68,6 +68,9 @@ from ..serializers import (
 )
 from ..utils import mask_sensitive_field
 from ..throttling import AuthScopedRateThrottle
+from ..captcha import CaptchaRequired, captcha_enabled, captcha_failed_payload, request_passes_captcha
+from rest_framework.exceptions import AuthenticationFailed, ValidationError as DRFValidationError
+from rest_framework.throttling import BaseThrottle
 
 
 # ── One-time codes ───────────────────────────────────────────────────────────
@@ -239,11 +242,57 @@ def password_error_response(password, user=None):
     return None
 
 
+LOGIN_CAPTCHA_WINDOW_SECONDS = 15 * 60
+# A whole campus can share one IP, so the per-IP bar is much higher than the
+# per-username one.
+LOGIN_CAPTCHA_IP_MULTIPLIER = 7
+
+
+def _login_captcha_keys(request, username):
+    ip = BaseThrottle().get_ident(request) or "unknown"
+    return (
+        (f"login_captcha:user:{username.lower()}", settings.LOGIN_CAPTCHA_AFTER_FAILURES),
+        (f"login_captcha:ip:{ip}", settings.LOGIN_CAPTCHA_AFTER_FAILURES * LOGIN_CAPTCHA_IP_MULTIPLIER),
+    )
+
+
+def _login_needs_captcha(keys):
+    return any((cache.get(key) or 0) >= limit for key, limit in keys)
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class MyObtainTokenPairView(TokenObtainPairView):
+    """
+    POST {username, password, cap_token?}. After a few failed attempts for a
+    username (or many from one IP) the reply carries "captcha_required": true
+    and further attempts need a Cap token (see campusflow_app/captcha.py).
+    """
     serializer_class = MyTokenObtainPairSerializer
     throttle_classes = [AuthScopedRateThrottle]
     throttle_scope = 'login'
+
+    def post(self, request, *args, **kwargs):
+        username = str(request.data.get('username', '')).strip()
+        keys = _login_captcha_keys(request, username)
+        if captcha_enabled() and _login_needs_captcha(keys) and not request_passes_captcha(request):
+            return Response(captcha_failed_payload(), status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            response = super().post(request, *args, **kwargs)
+        except (DRFValidationError, AuthenticationFailed) as exc:
+            # Failed logins arrive as exceptions; count them, then let DRF
+            # build the usual error reply.
+            response = self.handle_exception(exc)
+            if 'redirect_domain' not in str(response.data):
+                for key, _ in keys:
+                    cache.set(key, (cache.get(key) or 0) + 1, timeout=LOGIN_CAPTCHA_WINDOW_SECONDS)
+                if captcha_enabled() and _login_needs_captcha(keys) and isinstance(response.data, dict):
+                    response.data['captcha_required'] = True
+            return response
+
+        if response.status_code == status.HTTP_200_OK:
+            cache.delete(keys[0][0])
+        return response
 
 
 class LoginOTPRequestView(APIView):
@@ -2878,66 +2927,6 @@ class ActiveTenantSettingsView(APIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class GuardianConsentApprovalView(APIView):
-    """
-    Public endpoint for parent/guardian consent approval of minor registrations.
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        email = request.data.get('email', '').strip().lower()
-        student_id = request.data.get('student_id', '').strip()
-        guardian_email = request.data.get('guardian_email', '').strip().lower()
-        action = request.data.get('action', 'approve').strip().lower()
-
-        if not email or not student_id or not guardian_email:
-            return Response({"error": "email, student_id, and guardian_email are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # ── Auto-tenant routing by student email domain ──
-        if connection.schema_name == 'public':
-            email_domain = email.split('@')[-1]
-            from tenants.models import Tenant
-            target_tenant = Tenant.objects.filter(permitted_email_domain=email_domain).first()
-            if target_tenant:
-                connection.set_tenant(target_tenant)
-
-        profile = StudentProfile.objects.filter(
-            user__email=email,
-            student_id=student_id,
-            parent_guardian_email=guardian_email
-        ).first()
-
-        if not profile:
-            return Response({"error": "No student profile found with the provided details."}, status=status.HTTP_404_NOT_FOUND)
-
-        if profile.status != 'pending_guardian':
-            return Response({"error": f"Student registration status is '{profile.status}', not pending guardian consent."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if action == 'approve':
-            profile.guardian_consent_given = True
-            profile.status = 'active'
-            profile.save()
-            
-            # Record in AuditLog
-            from ..models.audit import AuditLog
-            AuditLog.objects.create(
-                user=None,
-                action='UPDATE',
-                model_name='StudentProfile',
-                object_id=str(profile.pk),
-                object_repr=f"Guardian approved consent for {profile.user.username}",
-                changes={"status": {"old": "pending_guardian", "new": "active"}, "guardian_consent_given": {"old": False, "new": True}},
-                ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
-                endpoint=request.path[:500]
-            )
-            return Response({"message": "Guardian consent successfully verified. Student account is now active."}, status=status.HTTP_200_OK)
-        else:
-            profile.status = 'rejected'
-            profile.save()
-            return Response({"message": "Student registration rejected by guardian."}, status=status.HTTP_200_OK)
 
 
 class UserDataErasureView(APIView):

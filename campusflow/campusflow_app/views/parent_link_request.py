@@ -20,6 +20,7 @@ from ..models import StudentProfile, GuardianProfile, ParentLinkRequest
 from ..permissions import IsSaaSOrCollegeAdmin
 from ..services.notifications import notify_user
 from ..throttling import AuthScopedRateThrottle
+from ..captcha import CaptchaRequired
 
 
 def _serialize(req):
@@ -45,7 +46,7 @@ class ParentLinkRequestCreateView(APIView):
     student_code is the student ID printed on ID cards (e.g. "STU001") — what
     a parent actually knows. student_id (the internal database id) still works.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CaptchaRequired]
     throttle_classes = [AuthScopedRateThrottle]
     throttle_scope = "parent_link"
 
