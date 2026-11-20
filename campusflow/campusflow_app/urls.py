@@ -39,6 +39,8 @@ from campusflow_app.views.lecture import (
 
 # ── New Module Imports ──
 from campusflow_app.views.audit import AuditLogListView, MyActivityView
+from campusflow_app.views.background_jobs import BackgroundJobListCreateView, BackgroundJobDetailView, BackgroundJobDownloadView
+from campusflow_app.views.app_version import AppVersionView
 from campusflow_app.views.announcement import AnnouncementListCreateView, AnnouncementDetailView
 from campusflow_app.views.leave import (
     LeaveTypeListCreateView, LeaveTypeDetailView,
@@ -388,6 +390,11 @@ urlpatterns = [
     # ── Audit Logs ────────────────────────────────────────────────────
     path('audit-logs/', AuditLogListView.as_view(), name='audit-logs'),
     path('audit-logs/mine/', MyActivityView.as_view(), name='my-activity'),
+    # Background jobs (long exports/reports the apps poll) + mobile version check
+    path('jobs/', BackgroundJobListCreateView.as_view(), name='background-jobs'),
+    path('jobs/<int:pk>/', BackgroundJobDetailView.as_view(), name='background-job-detail'),
+    path('jobs/<int:pk>/download/', BackgroundJobDownloadView.as_view(), name='background-job-download'),
+    path('app-version/', AppVersionView.as_view(), name='app-version'),
 
     # ── Announcements ─────────────────────────────────────────────────
     path('announcements/', AnnouncementListCreateView.as_view(), name='announcement-list-create'),

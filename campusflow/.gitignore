@@ -193,3 +193,6 @@ Doc/
 doc/
 
 
+
+# BackgroundJob export files (FileField upload_to="background_jobs/")
+background_jobs/

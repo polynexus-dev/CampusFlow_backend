@@ -386,6 +386,7 @@ CELERY_TASK_ROUTES = {
     "campusflow_app.run_accreditation_narrative_draft": {"queue": "background"},
     "campusflow_app.run_student_insight_generation": {"queue": "background"},
     "campusflow_app.run_generate_timetable": {"queue": "background"},
+    "campusflow_app.run_background_job": {"queue": "background"},
 }
 
 # ============================================================
