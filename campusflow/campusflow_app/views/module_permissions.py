@@ -48,7 +48,9 @@ RESTRICTED_ROLE_MODULES = {
 }
 
 ROLE_DEFAULT_MODULES = {
-    "SaaS Admin": ["dashboard", "settings"],
+    "SaaS Admin": [
+        "dashboard", "settings", "profile", "tenants", "colleges", "subscriptions", "module-permissions"
+    ],
     "Management": ALL_ERP_MODULES,
     "Administrator": ALL_ERP_MODULES,
     "Department Head": [
@@ -329,8 +331,9 @@ def get_effective_allowed_modules(user):
     Returns a set for cheap `in` checks from RequiresModule.
     """
     if user.is_superuser:
-        subscribed = getattr(connection.tenant, 'subscribed_modules', None) or []
-        return {m.lower().replace(" ", "-") for m in subscribed}
+        return {
+            "dashboard", "settings", "profile", "tenants", "colleges", "subscriptions", "module-permissions"
+        }
 
     group_name = get_user_role_name(user)
     if not group_name:
@@ -406,6 +409,7 @@ class MyAllowedModulesView(APIView):
         allowed_modules = get_effective_allowed_modules(user)
         return Response({
             "role": role,
+            "is_superuser": user.is_superuser,
             "allowed_modules": sorted(allowed_modules),
             "module_actions": module_actions_for(user),
         })

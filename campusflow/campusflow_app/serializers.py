@@ -212,6 +212,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Add the schema name to the token payload so it can be verified later
         # This prevents a token from one college being used in another college.
         token['tenant_schema'] = connection.schema_name
+        token['is_superuser'] = user.is_superuser
+        token['role'] = "SaaS Admin" if user.is_superuser else (get_user_group(user) or "None")
         return token
 
     def check_credentials(self, user, attrs, client_ip, user_agent_string):
@@ -457,7 +459,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         data['user_id'] = user.id
         data['user'] = user.username
-        data['roleName'] = user_group.name if user_group else "Superuser"
+        data['roleName'] = "SaaS Admin" if user.is_superuser else (user_group.name if user_group else "Superuser")
+        data['is_superuser'] = user.is_superuser
         if target_tenant and target_tenant.schema_name != 'public':
             try:
                 schema = target_tenant.schema_name
