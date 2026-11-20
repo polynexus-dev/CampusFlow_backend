@@ -362,3 +362,58 @@ def run_generate_timetable(schema_name: str, run_id: int) -> None:
         run.status = "completed"
         run.solve_time_seconds = solve_time
         run.save(update_fields=["status", "solve_time_seconds"])
+
+
+@shared_task(name="campusflow_app.run_background_job", time_limit=900, soft_time_limit=870)
+def run_background_job(schema_name: str, job_id: int) -> None:
+    """
+    Generic runner for BackgroundJob rows (exports/reports the apps poll via
+    GET /api/jobs/<id>/). Looks the handler up by job.kind in
+    services/background_jobs.py. Same shape as the tasks above:
+    schema_context-wrapped, never raises past the task boundary — a failure
+    always lands as a visible status="failed" row with an error message.
+    """
+    from django.core.files.base import ContentFile
+
+    from .models.background_job import BackgroundJob
+    from .services.background_jobs import JOB_HANDLERS
+
+    with schema_context(schema_name):
+        try:
+            job = BackgroundJob.objects.get(pk=job_id)
+        except BackgroundJob.DoesNotExist:
+            logger.error("run_background_job: job %s not found in schema %s", job_id, schema_name)
+            return
+
+        handler = JOB_HANDLERS.get(job.kind)
+        if handler is None:
+            job.status = BackgroundJob.STATUS_FAILED
+            job.error = f"Unknown job type '{job.kind}'."
+            job.finished_at = timezone.now()
+            job.save(update_fields=["status", "error", "finished_at"])
+            return
+
+        job.status = BackgroundJob.STATUS_RUNNING
+        job.started_at = timezone.now()
+        job.save(update_fields=["status", "started_at"])
+
+        def report(progress=None, message=""):
+            BackgroundJob.objects.filter(pk=job.pk).update(progress=progress, message=message[:255])
+
+        try:
+            filename, content = handler["run"](job, report)
+        except Exception as e:  # noqa: BLE001 - always surface as a failed job
+            logger.exception("run_background_job: job %s (%s) failed", job_id, job.kind)
+            job.status = BackgroundJob.STATUS_FAILED
+            job.error = "Something went wrong while preparing this file. Please try again." if settings.DEBUG is False else str(e)
+            job.finished_at = timezone.now()
+            job.save(update_fields=["status", "error", "finished_at"])
+            return
+
+        job.result_file.save(filename, ContentFile(content), save=False)
+        job.result_filename = filename
+        job.status = BackgroundJob.STATUS_DONE
+        job.progress = 100
+        job.message = ""
+        job.finished_at = timezone.now()
+        job.save(update_fields=["result_file", "result_filename", "status", "progress", "message", "finished_at"])

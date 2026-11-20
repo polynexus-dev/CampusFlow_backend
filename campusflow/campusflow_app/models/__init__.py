@@ -145,3 +145,6 @@ from .clearance import ClearanceDesk, ClearanceSettings, ClearanceRequest, Clear
 
 
 
+
+# ── Background jobs (exports/reports polled by the apps) ──
+from .background_job import BackgroundJob
