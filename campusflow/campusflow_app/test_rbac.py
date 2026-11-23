@@ -409,3 +409,37 @@ class SamplePdfTests(TenantTestCase):
         self.assertIn(b"SAMPLE", pdf)
         xref = int(pdf.rsplit(b"startxref\n", 1)[1].split(b"\n")[0])
         self.assertEqual(pdf[xref:xref + 4], b"xref")
+
+
+class SubscriptionCatalogTests(_RbacFixtureMixin, TenantTestCase):
+    """The SaaS Admin's module toggles: what can be toggled, and that a toggle reaches the sidebar."""
+
+    def setUp(self):
+        super().setUp()
+        with schema_context(self.tenant.schema_name):
+            self._build_fixture()
+            self.saas = User.objects.create_superuser("saas_root", "root@example.com", PASSWORD)
+
+    def test_catalog_lists_exactly_the_premium_modules(self):
+        from .views.module_permissions import PREMIUM_MODULES
+
+        response = self.client.get(reverse("saas-module-catalog"), **self._auth(self.saas))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual({m["key"] for m in response.data["modules"]}, PREMIUM_MODULES)
+        self.assertTrue(all(m["label"] for m in response.data["modules"]))
+
+    def test_catalog_is_saas_admin_only(self):
+        response = self.client.get(reverse("saas-module-catalog"), **self._auth(self.admin))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unsubscribing_hides_the_module_and_core_modules_stay(self):
+        def allowed():
+            response = self.client.get(reverse("user-allowed-modules"), **self._auth(self.admin))
+            return set(response.data["allowed_modules"])
+
+        self.assertIn("fees", allowed())
+        self.tenant.subscribed_modules = ["announcements"]
+        self.tenant.save(update_fields=["subscribed_modules"])
+        modules = allowed()
+        self.assertNotIn("fees", modules)
+        self.assertIn("student", modules)  # core: never gated by the subscription

@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework import serializers as drf_serializers
 from django.db import IntegrityError, transaction
 from django.db.models import Sum, Q
@@ -182,6 +183,54 @@ class FeePaymentSerializer(drf_serializers.ModelSerializer):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Paging & search for the invoice / receipt lists
+# ─────────────────────────────────────────────────────────────────────────────
+
+class OptionalPagePagination(PageNumberPagination):
+    """
+    Pages only when the caller asks (?page=N): the Fees screen does, and gets
+    {count, next, previous, results}. Callers that send no page (the student
+    profile, the mobile app) still get the plain list they were written for.
+    """
+    page_size = 50
+    page_size_query_param = "page_size"
+    max_page_size = 200
+
+    def paginate_queryset(self, queryset, request, view=None):
+        if "page" not in request.query_params:
+            return None
+        return super().paginate_queryset(queryset, request, view)
+
+
+def _search_terms(qs, query, student_path, extra_fields):
+    """
+    Every word must match somewhere, so "megha gupta" finds Megha Gupta and
+    "gupta 2019" finds her invoice DMY-INV-02019. Matches the student's first
+    or last name, username, roll number (student_id), plus `extra_fields`.
+    """
+    for word in (query or "").split():
+        match = Q()
+        for field in ("first_name", "last_name", "username", "student_profile__student_id"):
+            match |= Q(**{f"{student_path}__{field}__icontains": word})
+        for field in extra_fields:
+            match |= Q(**{f"{field}__icontains": word})
+        qs = qs.filter(match)
+    return qs
+
+
+def _date_range(qs, params, field):
+    """?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD, both inclusive; bad dates are ignored."""
+    from django.utils.dateparse import parse_date
+    start = parse_date(params.get("date_from") or "")
+    end = parse_date(params.get("date_to") or "")
+    if start:
+        qs = qs.filter(**{f"{field}__gte": start})
+    if end:
+        qs = qs.filter(**{f"{field}__lte": end})
+    return qs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ViewSets & Views
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -216,24 +265,31 @@ class StudentFeeInvoiceViewSet(viewsets.ModelViewSet):
     """
     serializer_class = StudentFeeInvoiceSerializer
     permission_classes = FEES_PERMS
+    pagination_class = OptionalPagePagination
 
     def get_queryset(self):
         user = self.request.user
+        params = self.request.query_params
         qs = StudentFeeInvoice.objects.select_related("student", "fee_structure").prefetch_related("items__category").order_by("-created_at")
-        
+
         # If student, restrict to own invoices
         if user.groups.filter(name="student").exists():
-            return qs.filter(student=user)
-        
-        # Admin filters
-        student_id = self.request.query_params.get("student_id")
-        status_filter = self.request.query_params.get("status")
-        if student_id:
-            qs = qs.filter(student_id=student_id)
-        if status_filter:
+            qs = qs.filter(student=user)
+        else:
+            student_id = params.get("student_id")
+            if student_id:
+                qs = qs.filter(student_id=student_id)
+
+        # ?status=paid|unpaid|partially_paid, or "outstanding" for both of the unpaid kinds
+        status_filter = params.get("status")
+        if status_filter == "outstanding":
+            qs = qs.filter(status__in=[StudentFeeInvoice.STATUS_UNPAID, StudentFeeInvoice.STATUS_PARTIALLY_PAID])
+        elif status_filter:
             qs = qs.filter(status=status_filter)
-            
-        return qs
+
+        # ?q= student name / roll number / invoice number; ?date_from/date_to on the due date
+        qs = _search_terms(qs, params.get("q"), "student", ["invoice_number"])
+        return _date_range(qs, params, "due_date")
 
     def get_permissions(self):
         if self.action in ["create", "update", "partial_update", "destroy"]:
@@ -469,20 +525,31 @@ class FeePaymentListView(generics.ListAPIView):
     """
     serializer_class = FeePaymentSerializer
     permission_classes = FEES_PERMS
+    pagination_class = OptionalPagePagination
 
     def get_queryset(self):
         user = self.request.user
+        params = self.request.query_params
         qs = FeePayment.objects.select_related("invoice__student", "invoice__fee_structure").order_by("-payment_date")
 
         # If student, restrict
         if user.groups.filter(name="student").exists():
-            return qs.filter(invoice__student=user)
+            qs = qs.filter(invoice__student=user)
+        else:
+            invoice_id = params.get("invoice_id")
+            if invoice_id:
+                qs = qs.filter(invoice_id=invoice_id)
 
-        # Admin filters
-        invoice_id = self.request.query_params.get("invoice_id")
-        if invoice_id:
-            qs = qs.filter(invoice_id=invoice_id)
-        return qs
+        method = params.get("method")
+        if method:
+            qs = qs.filter(payment_method=method)
+
+        # ?q= student name / roll number / receipt / invoice / transaction ref; ?date_from/date_to on payment date
+        qs = _search_terms(
+            qs, params.get("q"), "invoice__student",
+            ["receipt_number", "invoice__invoice_number", "transaction_reference"],
+        )
+        return _date_range(qs, params, "payment_date__date")
 
 
 class FeeDashboardView(APIView):

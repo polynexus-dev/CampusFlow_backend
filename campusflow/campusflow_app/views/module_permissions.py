@@ -41,6 +41,38 @@ PREMIUM_MODULES = {
     "compliance-center", "ledger", "audit-portal", "scholarship", "clearance",
 }
 
+# What the SaaS Admin's "Manage Subscribed Modules" screen shows, in display
+# order. Only PREMIUM_MODULES are gated by Tenant.subscribed_modules; every other
+# module is core and always on, so a checkbox for one would do nothing. The
+# frontend builds its checkboxes from ModuleCatalogView instead of its own
+# copy, so adding a premium module here is all it takes to make it toggleable.
+PREMIUM_MODULE_LABELS = {
+    "attendance": "Attendance Tracker",
+    "leave": "Leave Management",
+    "payroll": "Payroll & Salaries",
+    "exams": "Examinations Control",
+    "assignments": "Assignments Upload",
+    "announcements": "Announcements & Broadcasts",
+    "fees": "Fee Collection",
+    "scholarship": "Scholarships",
+    "clearance": "Clearance (No-Dues)",
+    "ledger": "Accounts Ledger",
+    "admissions": "Admissions",
+    "bus-tracking": "Real-Time Bus Tracking",
+    "hostel": "Hostel Allocations",
+    "tpo": "Training & Placements",
+    "library": "Library Management",
+    "inventory": "Inventory & Store",
+    "valuation": "Digital Valuation Cockpit",
+    "ai-valuation": "AI Valuation",
+    "at-risk-prediction": "At-Risk Prediction",
+    "timetable-generation": "Timetable Generation",
+    "syllabus-tracker": "Syllabus Tracker",
+    "compliance-center": "Compliance Center (NAAC/NBA/AICTE)",
+    "audit-portal": "CA Audit Portal",
+}
+assert set(PREMIUM_MODULE_LABELS) == PREMIUM_MODULES, "label every premium module"
+
 # Modules that only their one designated role may ever be granted, regardless
 # of what a College Admin submits via RoleModulePermissionView. `audit-portal`
 # is the CA's entire module namespace (see Docs/compliance_and_audit_portal_plan.md
@@ -165,6 +197,20 @@ class TenantSubscriptionView(APIView):
         return Response({
             "message": "Tenant subscriptions updated successfully.",
             "subscribed_modules": tenant.subscribed_modules
+        })
+
+
+class ModuleCatalogView(APIView):
+    """
+    SaaS Admin: the modules a tenant's subscription can switch on or off.
+    GET /api/saas/module-catalog/
+    """
+    permission_classes = [IsAuthenticated, IsSaaSAdmin]
+
+    def get(self, request):
+        return Response({
+            "modules": [{"key": key, "label": label} for key, label in PREMIUM_MODULE_LABELS.items()],
+            "restricted_role_modules": RESTRICTED_ROLE_MODULES,
         })
 
 
