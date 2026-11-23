@@ -450,7 +450,8 @@ def get_role_modules(group_name):
 
 class MyAllowedModulesView(APIView):
     """
-    Returns the intersection of the Tenant's subscribed modules and the user's role permissions.
+    Returns the user's role, default role modules, tenant subscribed modules,
+    and final effective allowed modules + actions for the authenticated user.
     GET /api/user/allowed-modules/
     """
     permission_classes = [IsAuthenticated]
@@ -458,13 +459,41 @@ class MyAllowedModulesView(APIView):
     def get(self, request):
         user = request.user
         role = "SaaS Admin" if user.is_superuser else (get_user_group(user) or "None")
+
+        # Subscribed modules of the college tenant
+        tenant = getattr(connection, "tenant", None)
+        subscribed_modules = getattr(tenant, "subscribed_modules", None) or []
+
+        # Default modules for this role
+        group_name = get_user_role_name(user) if not user.is_superuser else "SaaS Admin"
+        perm = TenantModulePermission.objects.filter(group_name=group_name).first() if not user.is_superuser else None
+
+        default_modules = (
+            ROLE_DEFAULT_MODULES.get(role)
+            or (perm and ROLE_DEFAULT_MODULES.get(perm.based_on))
+            or ["dashboard", "settings", "profile"]
+        )
+
+        # Core free modules for this role (non-premium foundational modules)
+        core_free_modules = [
+            m for m in default_modules
+            if m.lower().replace(" ", "-") not in PREMIUM_MODULES
+        ]
+        # Always guarantee core basics
+        for basic in ["dashboard", "settings", "profile"]:
+            if basic not in core_free_modules:
+                core_free_modules.append(basic)
+
         allowed_modules = get_effective_allowed_modules(user)
+
         return Response({
             "role": role,
             "is_superuser": user.is_superuser,
-            "allowed_modules": sorted(allowed_modules),
-            "module_actions": module_actions_for(user),
-        })
+            "core_free_modules": sorted(list(set(core_free_modules))),
+            "subscribed_modules": sorted(list(set(subscribed_modules))),
+            "allowed_modules": sorted(list(allowed_modules))
+            
+        }, status=status.HTTP_200_OK)
 
 
 class CustomRolesView(APIView):

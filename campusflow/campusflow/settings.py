@@ -290,7 +290,7 @@ WSGI_APPLICATION = "campusflow.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django_tenants.postgresql_backend",
-        'NAME': os.environ.get('POSTGRES_DB', 'campusflow'),
+        'NAME': os.environ.get('POSTGRES_DB', 'campusflow_v2'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '5432'),
         'USER': os.environ.get('POSTGRES_USER', 'postgres'),

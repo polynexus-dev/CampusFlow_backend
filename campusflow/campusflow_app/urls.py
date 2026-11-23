@@ -601,6 +601,7 @@ urlpatterns = [
     path('tenant/rbac/roles/<int:pk>/members/', RoleMembersView.as_view(), name='rbac-role-members'),
     path('tenant/rbac/roles/<int:pk>/members/<int:user_id>/', RoleMemberDetailView.as_view(), name='rbac-role-member-detail'),
     path('user/allowed-modules/', MyAllowedModulesView.as_view(), name='user-allowed-modules'),
+    path('userallowed-modules/', MyAllowedModulesView.as_view(), name='userallowed-modules'),
 
     # ── Clearance (No-Dues) ──────────────────────────────────────────
     path('clearance/desks/', ClearanceDeskViewSet.as_view({'get': 'list', 'post': 'create'}), name='clearance-desk-list'),
