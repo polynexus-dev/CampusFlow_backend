@@ -385,12 +385,40 @@ class ClearanceFlowViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         if _student_of(request.user) is not None:
             return Response({"error": "Students can't build clearance flows."}, status=status.HTTP_403_FORBIDDEN)
-        return self._require_builder() or super().create(request, *args, **kwargs)
+        denied = self._require_builder()
+        if denied:
+            return denied
+        response = super().create(request, *args, **kwargs)
+        return self._send_on_publish(response, was_published=False)
 
     def update(self, request, *args, **kwargs):
-        if not _can_manage_flow(request.user, self.get_object()):
+        flow = self.get_object()
+        if not _can_manage_flow(request.user, flow):
             return Response({"error": "You can't edit this flow."}, status=status.HTTP_403_FORBIDDEN)
-        return super().update(request, *args, **kwargs)
+        was_published = flow.status == ClearanceFlow.STATUS_PUBLISHED
+        response = super().update(request, *args, **kwargs)
+        return self._send_on_publish(response, was_published)
+
+    def _send_on_publish(self, response, was_published):
+        """
+        Publishing sends the flow: every eligible student gets a request at
+        once, so it shows under their Clearance without a separate Launch.
+        Flows students apply for themselves (TC, final exit) are not pushed
+        to everyone. Launch stays for late joiners or a narrower send.
+        """
+        if response.status_code >= 300 or was_published or response.data.get("status") != ClearanceFlow.STATUS_PUBLISHED:
+            return response
+        flow = ClearanceFlow.objects.get(pk=response.data["id"])
+        if flow.allow_student_apply:
+            return response
+        term, academic_year, error = _cycle_from_payload(flow, {})
+        if error:
+            response.data["launched"] = {"created": 0, "skipped_existing": 0, "error": error.data["error"]}
+            return response
+        created, skipped = launch_flow(flow, term=term, academic_year=academic_year, generated_by=self.request.user)
+        response.data["launched"] = {"created": created, "skipped_existing": skipped}
+        response.data["request_count"] = created + skipped
+        return response
 
     def destroy(self, request, *args, **kwargs):
         flow = self.get_object()

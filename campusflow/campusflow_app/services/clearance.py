@@ -89,6 +89,23 @@ def is_clearance_overseer(user):
     return is_college_admin(user) or get_user_group(user) == PRINCIPAL_ROLE
 
 
+def is_clearance_approver(user):
+    """
+    Whether a flow routes sign-offs to this user: named on a step, owed an
+    item, or holding the role of an active office. Such a user gets the
+    clearance module even when their role doesn't (a lab assistant picked
+    as a "specific person", a Store Manager office), else their inbox 403s
+    and the student's request stalls on that step.
+    """
+    if not user.is_authenticated or getattr(user, "student_profile", None) is not None:
+        return False
+    return (
+        ClearanceFlowStep.objects.filter(approver_user=user).exists()
+        or ClearanceItem.objects.filter(approver=user).exists()
+        or ClearanceDesk.objects.filter(is_active=True, responsible_group__name__in=_user_role_names(user)).exists()
+    )
+
+
 def items_assigned_to(user):
     """Every item routed to this user, directly or through their role."""
     return ClearanceItem.objects.filter(
