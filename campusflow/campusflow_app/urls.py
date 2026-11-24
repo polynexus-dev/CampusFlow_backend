@@ -158,6 +158,9 @@ from campusflow_app.views.clearance import (
     ClearanceItemClearView, ClearanceItemRejectView,
     StudentClearanceStatusView, ClearanceCertificateView,
     MyClearanceStatusView, MyClearanceCertificateView,
+    ClearanceFlowViewSet, ClearanceFlowLaunchView, ClearanceFlowProgressView, ClearanceFlowApplyView,
+    MyClearanceFlowsView, ClearanceInboxView, ClearanceInboxSummaryView,
+    ClearanceItemDetailView, ClearanceItemResubmitView, ClearanceApproverCandidatesView,
 )
 from campusflow_app.views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
 from campusflow_app.views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
@@ -610,6 +613,17 @@ urlpatterns = [
     path('clearance/requests/<int:pk>/', ClearanceRequestViewSet.as_view({'get': 'retrieve'}), name='clearance-request-detail'),
     path('clearance/requests/bulk-generate/', ClearanceBulkGenerateView.as_view(), name='clearance-bulk-generate'),
     path('clearance/requests/final-exit/', FinalExitClearanceRequestView.as_view(), name='clearance-final-exit-request'),
+    path('clearance/flows/', ClearanceFlowViewSet.as_view({'get': 'list', 'post': 'create'}), name='clearance-flow-list'),
+    path('clearance/flows/<int:pk>/', ClearanceFlowViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='clearance-flow-detail'),
+    path('clearance/flows/<int:pk>/launch/', ClearanceFlowLaunchView.as_view(), name='clearance-flow-launch'),
+    path('clearance/flows/<int:pk>/progress/', ClearanceFlowProgressView.as_view(), name='clearance-flow-progress'),
+    path('clearance/flows/<int:pk>/apply/', ClearanceFlowApplyView.as_view(), name='clearance-flow-apply'),
+    path('clearance/approver-candidates/', ClearanceApproverCandidatesView.as_view(), name='clearance-approver-candidates'),
+    path('clearance/inbox/', ClearanceInboxView.as_view(), name='clearance-inbox'),
+    path('clearance/inbox/summary/', ClearanceInboxSummaryView.as_view(), name='clearance-inbox-summary'),
+    path('clearance/items/<int:pk>/', ClearanceItemDetailView.as_view(), name='clearance-item-detail'),
+    path('clearance/items/<int:pk>/resubmit/', ClearanceItemResubmitView.as_view(), name='clearance-item-resubmit'),
+    path('clearance/me/flows/', MyClearanceFlowsView.as_view(), name='clearance-my-flows'),
     path('clearance/items/<int:pk>/clear/', ClearanceItemClearView.as_view(), name='clearance-item-clear'),
     path('clearance/items/<int:pk>/reject/', ClearanceItemRejectView.as_view(), name='clearance-item-reject'),
     path('clearance/students/<int:pk>/status/', StudentClearanceStatusView.as_view(), name='clearance-student-status'),

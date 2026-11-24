@@ -1247,6 +1247,23 @@ class Command(BaseCommand):
         # Placeholder desks from the generic pass would add sign-offs nobody owns.
         ClearanceDesk.objects.filter(code__startswith="dummy-").update(is_active=False)
 
+        # A sample HOD-built department flow (subject-wise -> mentor -> HOD), left
+        # as a draft so it shows the builder without gating anyone's promotion.
+        from campusflow_app.models import ClearanceFlow, ClearanceFlowStep, Department
+        dept = Department.objects.order_by('id').first()
+        if dept and not ClearanceFlow.objects.filter(department=dept).exists():
+            flow = ClearanceFlow.objects.create(
+                name="Semester-End Department Clearance", department=dept, created_by=dept.hod,
+                purpose=ClearanceFlow.PURPOSE_PERIODIC, approval_mode=ClearanceFlow.MODE_SEQUENTIAL,
+                description="Each subject teacher signs off journals and assignments, then the mentor, then the HOD.",
+            )
+            for order, (title, kind, note) in enumerate([
+                ("Subject sign-off", ClearanceFlowStep.APPROVER_SUBJECT_FACULTY, "Journal, assignments and lab work complete."),
+                ("Mentor sign-off", ClearanceFlowStep.APPROVER_SECTION_MENTOR, "Attendance and conduct are in order."),
+                ("HOD sign-off", ClearanceFlowStep.APPROVER_DEPARTMENT_HOD, "Department equipment returned."),
+            ], start=1):
+                ClearanceFlowStep.objects.create(flow=flow, order=order, title=title, approver_type=kind, instructions=note)
+
         # Final-exit requests carry no term/year, exactly as FinalExitClearanceRequestView
         # creates them; is_student_cleared(cycle_type=final_exit) looks them up that way,
         # so a year-tagged one would never unlock the Leaving Certificate.
