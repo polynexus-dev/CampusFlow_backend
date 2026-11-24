@@ -391,7 +391,20 @@ def get_effective_allowed_modules(user):
     if not group_name:
         return {"dashboard", "settings", "profile"}
 
-    return get_role_modules(group_name)
+    modules = get_role_modules(group_name)
+    # Clearance follows the flows, not only the role: anyone a flow routes
+    # sign-offs to may open their inbox (the views still limit them to their
+    # own items). Only while the college subscribes to clearance.
+    if "clearance" not in modules and _tenant_subscribes("clearance"):
+        from ..services.clearance import is_clearance_approver
+        if is_clearance_approver(user):
+            modules.add("clearance")
+    return modules
+
+
+def _tenant_subscribes(module_key):
+    subscribed = getattr(connection.tenant, 'subscribed_modules', None) or []
+    return module_key in {m.lower().replace(" ", "-") for m in subscribed}
 
 
 def get_role_modules(group_name):
@@ -491,8 +504,9 @@ class MyAllowedModulesView(APIView):
             "is_superuser": user.is_superuser,
             "core_free_modules": sorted(list(set(core_free_modules))),
             "subscribed_modules": sorted(list(set(subscribed_modules))),
-            "allowed_modules": sorted(list(allowed_modules))
-            
+            "allowed_modules": sorted(list(allowed_modules)),
+            # The frontend (usePermissions) hides buttons from this; keep it.
+            "module_actions": module_actions_for(user),
         }, status=status.HTTP_200_OK)
 
 

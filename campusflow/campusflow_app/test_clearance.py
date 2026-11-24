@@ -13,11 +13,11 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
-    AcademicYear, ClearanceDesk, ClearanceItem, ClearanceRequest, ClearanceSettings,
-    Department, PromotionRecord, StudentProfile, Term,
+    AcademicYear, ClearanceDesk, ClearanceFlow, ClearanceFlowStep, ClearanceItem, ClearanceRequest,
+    ClearanceSettings, Department, PromotionRecord, StudentProfile, Term,
 )
 from .services.academics import set_current_term
-from .services.clearance import is_student_cleared
+from .services.clearance import ensure_default_flow, is_student_cleared
 
 
 class _ClearanceFixtureMixin:
@@ -86,15 +86,15 @@ class ClearanceModelTests(_ClearanceFixtureMixin, TenantTestCase):
         with schema_context(self.tenant.schema_name):
             self.fixture = self._build_fixture()
 
-    def test_no_active_desks_means_not_gated(self):
+    def test_no_published_flow_means_not_gated(self):
         with schema_context(self.tenant.schema_name):
-            ClearanceDesk.objects.all().delete()
             is_cleared, request_obj = is_student_cleared(self.fixture["student"])
             self.assertTrue(is_cleared)
             self.assertIsNone(request_obj)
 
     def test_no_request_yet_means_not_cleared(self):
         with schema_context(self.tenant.schema_name):
+            ensure_default_flow(ClearanceFlow.PURPOSE_PERIODIC)
             is_cleared, request_obj = is_student_cleared(self.fixture["student"])
             self.assertFalse(is_cleared)
             self.assertIsNone(request_obj)
@@ -319,9 +319,362 @@ class ClearanceAPITests(_ClearanceFixtureMixin, TenantTestCase):
         self.assertEqual(len(response.data["desks"]), 2)
 
     def test_my_status_endpoint_is_student_only(self):
+        with schema_context(self.tenant.schema_name):
+            ensure_default_flow(ClearanceFlow.PURPOSE_PERIODIC)
         response = self.client.get(reverse("clearance-my-status"), **self._auth(self.fixture["admin_user"]))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
         response = self.client.get(reverse("clearance-my-status"), **self._auth(self.fixture["student_user"]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data["is_cleared"])
+
+
+class ClearanceFlowTests(_ClearanceFixtureMixin, TenantTestCase):
+    """Flows built by Admin/HOD, subject-wise routing, sequencing, resubmission, gates."""
+
+    def setUp(self):
+        super().setUp()
+        from .models.academics import Batch, Program, Regulation, Section
+        from .models.course import Course
+        from .models.offerings import CourseOffering, StudentCourseRegistration
+        from .services.academics import get_default_grading_scheme
+
+        with schema_context(self.tenant.schema_name):
+            f = self.fixture = self._build_fixture()
+            for role in ("Department Head", "Faculty"):
+                Group.objects.get_or_create(name=role)
+
+            def make_user(name, role):
+                u = User.objects.create_user(username=name, password="pw12345!", first_name=name.title())
+                u.groups.add(Group.objects.get(name=role))
+                return u
+
+            f["hod"] = make_user("hodcse", "Department Head")
+            f["department"].hod = f["hod"]
+            f["department"].save(update_fields=["hod"])
+            f["other_dept"] = Department.objects.create(name="Mechanical", code="ME")
+            f["other_hod"] = make_user("hodme", "Department Head")
+            f["other_dept"].hod = f["other_hod"]
+            f["other_dept"].save(update_fields=["hod"])
+            f["teacher_a"] = make_user("teachera", "Faculty")
+            f["teacher_b"] = make_user("teacherb", "Faculty")
+            f["mentor"] = make_user("mentor1", "Faculty")
+
+            program = Program.objects.create(name="B.Tech CSE", code="BTCSE", department=f["department"])
+            regulation = Regulation.objects.create(
+                program=program, code="R2023", effective_from_year=2023, grading_scheme=get_default_grading_scheme(),
+            )
+            batch = Batch.objects.create(program=program, regulation=regulation, admission_year=2023, name="2023-2027")
+            section = Section.objects.create(batch=batch, name="A", semester_number=1, mentor=f["mentor"])
+            student = f["student"]
+            student.program, student.batch, student.section = program, batch, section
+            student.current_semester_number = 1
+            student.save()
+
+            for code, teacher in (("CS101", f["teacher_a"]), ("CS102", f["teacher_b"])):
+                course = Course.objects.create(
+                    course_code=code, course_name=f"Course {code}", department=f["department"],
+                    regulation=regulation, semester_number=1, credits=4,
+                )
+                offering = CourseOffering.objects.create(course=course, term=f["term"], batch=batch, faculty=teacher)
+                StudentCourseRegistration.objects.create(student=student, offering=offering, term=f["term"])
+
+    def _dept_flow_payload(self, **overrides):
+        payload = {
+            "name": "CSE Semester Clearance", "purpose": "periodic", "approval_mode": "sequential",
+            "status": "published",
+            "steps": [
+                {"order": 1, "title": "Subject sign-off", "approver_type": "subject_faculty"},
+                {"order": 2, "title": "Mentor", "approver_type": "section_mentor"},
+                {"order": 3, "title": "HOD", "approver_type": "department_hod"},
+            ],
+        }
+        payload.update(overrides)
+        return payload
+
+    def _create_dept_flow(self):
+        response = self.client.post(
+            reverse("clearance-flow-list"), self._dept_flow_payload(), content_type="application/json",
+            **self._auth(self.fixture["hod"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        return response.data["id"]
+
+    def _launch(self, flow_id, user):
+        return self.client.post(
+            reverse("clearance-flow-launch", args=[flow_id]), {"term_id": self.fixture["term"].id},
+            content_type="application/json", **self._auth(user),
+        )
+
+    def test_hod_builds_only_own_department_flows_with_department_steps(self):
+        flow_id = self._create_dept_flow()
+        with schema_context(self.tenant.schema_name):
+            self.assertEqual(ClearanceFlow.objects.get(pk=flow_id).department_id, self.fixture["department"].id)
+
+        # A college office step is refused in a department flow.
+        bad = self._dept_flow_payload(steps=[
+            {"order": 1, "title": "Library", "approver_type": "desk", "desk": self.fixture["library_desk"].id},
+        ])
+        response = self.client.post(reverse("clearance-flow-list"), bad, content_type="application/json", **self._auth(self.fixture["hod"]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Another department's HOD can't build for CSE or edit CSE's flow.
+        other = self._dept_flow_payload(department=self.fixture["department"].id)
+        response = self.client.post(reverse("clearance-flow-list"), other, content_type="application/json", **self._auth(self.fixture["other_hod"]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.patch(
+            reverse("clearance-flow-detail", args=[flow_id]), {"name": "x"}, content_type="application/json",
+            **self._auth(self.fixture["other_hod"]),
+        )
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+
+        # A plain approver can't build flows at all.
+        response = self.client.post(
+            reverse("clearance-flow-list"), self._dept_flow_payload(), content_type="application/json",
+            **self._auth(self.fixture["librarian_user"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_subject_wise_sequential_flow_routes_to_each_teacher_then_mentor_then_hod(self):
+        flow_id = self._create_dept_flow()
+        # Publishing already sent it; launching again only skips.
+        response = self._launch(flow_id, self.fixture["hod"])
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data, {"created": 0, "skipped_existing": 1})
+
+        with schema_context(self.tenant.schema_name):
+            req = ClearanceRequest.objects.get(flow_id=flow_id)
+            subject_items = list(req.items.filter(step_order=1))
+            self.assertEqual(len(subject_items), 2)
+            self.assertTrue(all(i.status == ClearanceItem.STATUS_PENDING for i in subject_items))
+            self.assertEqual(req.items.filter(status=ClearanceItem.STATUS_WAITING).count(), 2)
+            item_a = req.items.get(approver=self.fixture["teacher_a"])
+            item_b = req.items.get(approver=self.fixture["teacher_b"])
+            mentor_item = req.items.get(step_order=2)
+            self.assertEqual(mentor_item.approver, self.fixture["mentor"])
+
+        # Each teacher's inbox holds only their own subject.
+        response = self.client.get(reverse("clearance-inbox"), **self._auth(self.fixture["teacher_a"]))
+        self.assertEqual([row["id"] for row in response.data], [item_a.id])
+
+        # Teacher A can't sign Teacher B's subject; the mentor can't act before their turn.
+        response = self.client.post(reverse("clearance-item-clear", args=[item_b.id]), {}, content_type="application/json", **self._auth(self.fixture["teacher_a"]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        response = self.client.post(reverse("clearance-item-clear", args=[mentor_item.id]), {}, content_type="application/json", **self._auth(self.fixture["mentor"]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        for item, teacher in ((item_a, "teacher_a"), (item_b, "teacher_b")):
+            response = self.client.post(reverse("clearance-item-clear", args=[item.id]), {}, content_type="application/json", **self._auth(self.fixture[teacher]))
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        with schema_context(self.tenant.schema_name):
+            mentor_item.refresh_from_db()
+            self.assertEqual(mentor_item.status, ClearanceItem.STATUS_PENDING)
+            self.assertEqual(req.items.get(step_order=3).status, ClearanceItem.STATUS_WAITING)
+
+    def test_rejected_step_is_resubmitted_by_student_back_to_same_approver(self):
+        flow_id = self._create_dept_flow()
+        self._launch(flow_id, self.fixture["hod"])
+        with schema_context(self.tenant.schema_name):
+            item_a = ClearanceItem.objects.get(approver=self.fixture["teacher_a"])
+
+        response = self.client.post(
+            reverse("clearance-item-reject", args=[item_a.id]), {"remarks": "Journal incomplete"},
+            content_type="application/json", **self._auth(self.fixture["teacher_a"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Only the student can resubmit, and only a rejected item.
+        response = self.client.post(reverse("clearance-item-resubmit", args=[item_a.id]), {}, content_type="application/json", **self._auth(self.fixture["teacher_a"]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        response = self.client.post(
+            reverse("clearance-item-resubmit", args=[item_a.id]), {"note": "Journal completed"},
+            content_type="application/json", **self._auth(self.fixture["student_user"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], ClearanceItem.STATUS_PENDING)
+        self.assertEqual(response.data["resubmit_count"], 1)
+
+        response = self.client.get(reverse("clearance-item-detail", args=[item_a.id]), **self._auth(self.fixture["teacher_a"]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["can_act"])
+        self.assertEqual([h["action"] for h in response.data["history"]], ["activated", "rejected", "resubmitted"])
+
+    def test_gate_needs_every_applicable_flow_cleared(self):
+        student = self.fixture["student"]
+        with schema_context(self.tenant.schema_name):
+            college_flow = ensure_default_flow(ClearanceFlow.PURPOSE_PERIODIC)
+        flow_id = self._create_dept_flow()
+        self._launch(flow_id, self.fixture["hod"])
+        self._launch(college_flow.id, self.fixture["admin_user"])
+
+        with schema_context(self.tenant.schema_name):
+            for item in ClearanceItem.objects.filter(request__flow=college_flow):
+                item.status = ClearanceItem.STATUS_CLEARED
+                item.save(update_fields=["status"])
+            ClearanceRequest.objects.get(flow=college_flow).recompute_status()
+            cleared, blocking = is_student_cleared(student)
+            self.assertFalse(cleared)
+            self.assertEqual(blocking.flow_id, flow_id)
+
+            # Another department's flow doesn't apply to this student.
+            other = ClearanceFlow.objects.create(
+                name="ME flow", department=self.fixture["other_dept"], status=ClearanceFlow.STATUS_PUBLISHED,
+            )
+            ClearanceFlowStep.objects.create(flow=other, title="HOD", approver_type="department_hod")
+
+            for item in ClearanceItem.objects.filter(request__flow_id=flow_id):
+                item.status = ClearanceItem.STATUS_CLEARED
+                item.save(update_fields=["status"])
+            ClearanceRequest.objects.get(flow_id=flow_id).recompute_status()
+            cleared, _ = is_student_cleared(student)
+            self.assertTrue(cleared)
+
+    def test_student_applies_only_when_flow_allows_it(self):
+        with schema_context(self.tenant.schema_name):
+            flow = ClearanceFlow.objects.create(
+                name="TC Clearance", purpose=ClearanceFlow.PURPOSE_FINAL_EXIT, status=ClearanceFlow.STATUS_PUBLISHED,
+            )
+            ClearanceFlowStep.objects.create(flow=flow, title="Library", approver_type="desk", desk=self.fixture["library_desk"])
+
+        url = reverse("clearance-flow-apply", args=[flow.id])
+        response = self.client.post(url, {}, content_type="application/json", **self._auth(self.fixture["student_user"]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        with schema_context(self.tenant.schema_name):
+            flow.allow_student_apply = True
+            flow.save(update_fields=["allow_student_apply"])
+        response = self.client.get(reverse("clearance-my-flows"), **self._auth(self.fixture["student_user"]))
+        self.assertEqual([f["id"] for f in response.data], [flow.id])
+        response = self.client.post(url, {}, content_type="application/json", **self._auth(self.fixture["student_user"]))
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        response = self.client.post(url, {}, content_type="application/json", **self._auth(self.fixture["student_user"]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # The desk role sees it in its inbox and on its dashboard count.
+        response = self.client.get(reverse("clearance-inbox-summary"), **self._auth(self.fixture["librarian_user"]))
+        self.assertEqual(response.data["pending"], 1)
+
+    def test_launched_flow_steps_are_locked_and_flow_cannot_be_deleted(self):
+        flow_id = self._create_dept_flow()
+        self._launch(flow_id, self.fixture["hod"])
+        changed = self._dept_flow_payload(steps=[{"order": 1, "title": "HOD only", "approver_type": "department_hod"}])
+        response = self.client.put(reverse("clearance-flow-detail", args=[flow_id]), changed, content_type="application/json", **self._auth(self.fixture["hod"]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        response = self.client.patch(reverse("clearance-flow-detail", args=[flow_id]), {"status": "closed"}, content_type="application/json", **self._auth(self.fixture["hod"]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = self.client.delete(reverse("clearance-flow-detail", args=[flow_id]), **self._auth(self.fixture["hod"]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_college_wide_flow_reaches_every_student(self):
+        f = self.fixture
+        response = self.client.post(
+            reverse("clearance-flow-list"),
+            {
+                "name": "College No-Dues", "purpose": "other", "approval_mode": "parallel", "status": "published",
+                "department": None,
+                "steps": [{"order": 1, "title": "Library", "approver_type": "desk", "desk": f["library_desk"].id}],
+            },
+            content_type="application/json", **self._auth(f["admin_user"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertIsNone(response.data["department"])
+        flow_id = response.data["id"]
+        # Publishing sends it: no separate Launch needed.
+        self.assertEqual(response.data["launched"]["created"], 1)
+
+        # Launch again is safe (late joiners) and skips who already has it.
+        response = self.client.post(
+            reverse("clearance-flow-launch", args=[flow_id]), {}, content_type="application/json",
+            **self._auth(f["admin_user"]),
+        )
+        self.assertEqual(response.data, {"created": 0, "skipped_existing": 1})
+
+        response = self.client.get(reverse("clearance-request-list"), **self._auth(f["student_user"]))
+        rows = response.data.get("results", response.data) if isinstance(response.data, dict) else response.data
+        self.assertEqual([r["flow"] for r in rows], [flow_id])
+
+    def test_publishing_a_draft_sends_it_but_student_apply_flows_are_not_pushed(self):
+        f = self.fixture
+        response = self.client.post(
+            reverse("clearance-flow-list"), self._dept_flow_payload(status="draft"), content_type="application/json",
+            **self._auth(f["hod"]),
+        )
+        self.assertNotIn("launched", response.data)
+        flow_id = response.data["id"]
+        with schema_context(self.tenant.schema_name):
+            self.assertFalse(ClearanceRequest.objects.filter(flow_id=flow_id).exists())
+
+        response = self.client.patch(
+            reverse("clearance-flow-detail", args=[flow_id]), {"status": "published"}, content_type="application/json",
+            **self._auth(f["hod"]),
+        )
+        self.assertEqual(response.data["launched"]["created"], 1)
+        # Saving an already-published flow doesn't send it again.
+        response = self.client.patch(
+            reverse("clearance-flow-detail", args=[flow_id]), {"name": "Renamed"}, content_type="application/json",
+            **self._auth(f["hod"]),
+        )
+        self.assertNotIn("launched", response.data)
+
+        response = self.client.post(
+            reverse("clearance-flow-list"),
+            self._dept_flow_payload(name="TC", purpose="final_exit", allow_student_apply=True),
+            content_type="application/json", **self._auth(f["hod"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertNotIn("launched", response.data)
+        with schema_context(self.tenant.schema_name):
+            self.assertFalse(ClearanceRequest.objects.filter(flow_id=response.data["id"]).exists())
+
+    def test_specific_person_without_the_module_still_gets_their_inbox(self):
+        f = self.fixture
+        Group.objects.get_or_create(name="Support Staff")
+        lab_assistant = User.objects.create_user(username="labasst", password="pw12345!", first_name="Lab")
+        lab_assistant.groups.add(Group.objects.get(name="Support Staff"))
+        bystander = User.objects.create_user(username="clerk1", password="pw12345!")
+        bystander.groups.add(Group.objects.get(name="Support Staff"))
+
+        # Not a clearance role, and no flow names them yet.
+        response = self.client.get(reverse("clearance-inbox"), **self._auth(lab_assistant))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.client.post(
+            reverse("clearance-flow-list"),
+            self._dept_flow_payload(
+                approval_mode="parallel",
+                steps=[{"order": 1, "title": "Lab equipment", "approver_type": "specific_user", "approver_user": lab_assistant.id}],
+            ),
+            content_type="application/json", **self._auth(f["hod"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["launched"]["created"], 1)
+
+        response = self.client.get(reverse("user-allowed-modules"), **self._auth(lab_assistant))
+        self.assertIn("clearance", response.data["allowed_modules"])
+        response = self.client.get(reverse("clearance-inbox"), **self._auth(lab_assistant))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        response = self.client.post(
+            reverse("clearance-item-clear", args=[response.data[0]["id"]]), {}, content_type="application/json",
+            **self._auth(lab_assistant),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        # Being an approver doesn't make them a flow builder, and others in the role get nothing.
+        response = self.client.post(
+            reverse("clearance-flow-list"), self._dept_flow_payload(), content_type="application/json",
+            **self._auth(lab_assistant),
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        response = self.client.get(reverse("clearance-inbox"), **self._auth(bystander))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_launch_requires_published_flow(self):
+        response = self.client.post(
+            reverse("clearance-flow-list"), self._dept_flow_payload(status="draft"), content_type="application/json",
+            **self._auth(self.fixture["hod"]),
+        )
+        response = self._launch(response.data["id"], self.fixture["hod"])
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
