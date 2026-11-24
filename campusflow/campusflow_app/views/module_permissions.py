@@ -504,8 +504,9 @@ class MyAllowedModulesView(APIView):
             "is_superuser": user.is_superuser,
             "core_free_modules": sorted(list(set(core_free_modules))),
             "subscribed_modules": sorted(list(set(subscribed_modules))),
-            "allowed_modules": sorted(list(allowed_modules))
-            
+            "allowed_modules": sorted(list(allowed_modules)),
+            # The frontend (usePermissions) hides buttons from this; keep it.
+            "module_actions": module_actions_for(user),
         }, status=status.HTTP_200_OK)
 
 
