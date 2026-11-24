@@ -274,7 +274,7 @@ class CanCreateLecture(BasePermission):
         if is_saas_admin(request.user):
             return True
         group = get_user_group(request.user)
-        return group in ('Management', 'Administrator', 'Department Head', 'Faculty')
+        return group in ('Management', 'Administrator', 'Principal', 'Department Head', 'Faculty')
 
 
 class CanMarkAttendanceManually(BasePermission):
@@ -291,7 +291,7 @@ class CanMarkAttendanceManually(BasePermission):
         if is_saas_admin(request.user):
             return True
         group = get_user_group(request.user)
-        return group in ('Management', 'Administrator', 'Department Head', 'Faculty')
+        return group in ('Management', 'Administrator', 'Principal', 'Department Head', 'Faculty')
 
 
 class CanManageLocation(BasePermission):
@@ -479,4 +479,4 @@ class CanGenerateQR(BasePermission):
         if is_saas_admin(request.user):
             return True
         group = get_user_group(request.user)
-        return group in ('Management', 'Administrator', 'Department Head', 'Faculty')
+        return group in ('Management', 'Administrator', 'Principal', 'Department Head', 'Faculty')

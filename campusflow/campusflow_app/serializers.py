@@ -126,11 +126,41 @@ class LectureAttendanceCodeSerializer(serializers.Serializer):
 
 
 class AttendanceMarkSerializer(serializers.Serializer):
-    student_id = serializers.IntegerField()
-    location_id = serializers.CharField()
-    latitude = serializers.DecimalField(max_digits=9, decimal_places=6)
-    longitude = serializers.DecimalField(max_digits=9, decimal_places=6)
-    lecture_id = serializers.IntegerField(required=False)
+    student_id = serializers.IntegerField(required=False, allow_null=True)
+    student_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, allow_empty=True
+    )
+    schedule_id = serializers.IntegerField(required=False, allow_null=True)
+    lecture_id = serializers.IntegerField(required=False, allow_null=True)
+    status = serializers.ChoiceField(
+        choices=['present', 'absent'],
+        required=False,
+        default='present'
+    )
+    location_id = serializers.CharField(required=False, allow_blank=True, default="manual")
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+
+    def validate(self, data):
+        student_id = data.get('student_id')
+        student_ids = data.get('student_ids')
+        if not student_id and not student_ids:
+            raise serializers.ValidationError("Either student_id or student_ids list is required.")
+        return data
+
+    def validate_lecture_id(self, value):
+        if value is not None:
+            from campusflow_app.models.lecture import Lecture
+            if not Lecture.objects.filter(id=value).exists():
+                raise serializers.ValidationError(f"Lecture with id {value} does not exist.")
+        return value
+
+    def validate_schedule_id(self, value):
+        if value is not None:
+            from campusflow_app.models.schedule import Schedule
+            if not Schedule.objects.filter(id=value).exists():
+                raise serializers.ValidationError(f"Schedule with id {value} does not exist.")
+        return value
 
 class LocationValidationSerializer(serializers.Serializer):
     classroom_id = serializers.IntegerField()
@@ -647,7 +677,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(queryset=Department.objects.all(), write_only=True, required=False, allow_null=True)
     program_enrolled_in_id = serializers.CharField(write_only=True, required=False, allow_null=True)
     student_id = serializers.CharField(required=False, allow_blank=True, max_length=20)
-    employee_id = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    employee_id = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    auto_generate_employee_id = serializers.BooleanField(required=False, default=False)
     middle_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
     contact_number = serializers.CharField(max_length=15, required=False, allow_blank=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
@@ -719,7 +750,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'username', 'email', 'password', 'password2', 'first_name', 'last_name', 'role',
-            'department_id', 'student_id', 'employee_id', 'program_enrolled_in_id',
+            'department_id', 'student_id', 'employee_id', 'auto_generate_employee_id', 'program_enrolled_in_id',
             'middle_name', 'contact_number', 'date_of_birth', 'gender', 'blood_group',
             'aadhaar_number', 'nationality', 'emergency_contact_name',
             'emergency_contact_relationship', 'emergency_contact_phone', 'alternate_phone_number',
@@ -794,15 +825,17 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                         "parent_guardian_name": "Parent or guardian details (name and email) are required for students under 18 years of age."
                     })
         elif role in ('Faculty', 'Management', 'Administrator', 'Principal', 'Department Head', *NON_TEACHING_STAFF_ROLES):
-            if not employee_id:
-                raise serializers.ValidationError({"employee_id": "Employee ID is required for staff/admin/HOD members."})
-            if (TeachingStaffProfile.objects.filter(employee_id=employee_id).exists() or
-                NonTeachingStaffProfile.objects.filter(employee_id=employee_id).exists() or
-                ManagementProfile.objects.filter(employee_id=employee_id).exists() or
-                AdministratorProfile.objects.filter(employee_id=employee_id).exists() or
-                PrincipalProfile.objects.filter(employee_id=employee_id).exists() or
-                DepartmentHeadProfile.objects.filter(employee_id=employee_id).exists()):
-                raise serializers.ValidationError({"employee_id": "An employee with this ID already exists."})
+            auto_gen = data.get('auto_generate_employee_id', False)
+            if not auto_gen:
+                if not employee_id:
+                    raise serializers.ValidationError({"employee_id": "Employee ID is required when auto_generate_employee_id is false."})
+                if (TeachingStaffProfile.objects.filter(employee_id=employee_id).exists() or
+                    NonTeachingStaffProfile.objects.filter(employee_id=employee_id).exists() or
+                    ManagementProfile.objects.filter(employee_id=employee_id).exists() or
+                    AdministratorProfile.objects.filter(employee_id=employee_id).exists() or
+                    PrincipalProfile.objects.filter(employee_id=employee_id).exists() or
+                    DepartmentHeadProfile.objects.filter(employee_id=employee_id).exists()):
+                    raise serializers.ValidationError({"employee_id": "An employee with this ID already exists."})
             if student_id:
                 raise serializers.ValidationError({"student_id": "Student ID should not be provided for staff."})
         
@@ -831,7 +864,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         role = validated_data.pop('role')
         profile_data = {}
         profile_field_names = [
-            'department_id', 'student_id', 'employee_id', 'program_enrolled_in_id',
+            'department_id', 'student_id', 'employee_id', 'auto_generate_employee_id', 'program_enrolled_in_id',
             'middle_name', 'contact_number', 'date_of_birth', 'gender', 'blood_group',
             'aadhaar_number', 'nationality', 'emergency_contact_name',
             'emergency_contact_relationship', 'emergency_contact_phone', 'alternate_phone_number',
@@ -853,6 +886,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             'office_location_details', 'consent_given', 'consent_version',
             'parent_guardian_name', 'parent_guardian_email',
         ]
+        auto_gen_eid = validated_data.pop('auto_generate_employee_id', False)
+
         for field_name in profile_field_names:
             if field_name in validated_data:
                 if validated_data[field_name] == '':
@@ -866,6 +901,12 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                     profile_data['program_enrolled_in'] = validated_data.pop(field_name)
                 else:
                     profile_data[field_name] = validated_data.pop(field_name)
+
+        if auto_gen_eid and role != 'student' and role != 'guardian':
+            from campusflow_app.utils.id_generator import generate_unique_employee_id
+            dept = profile_data.get('department')
+            desig = profile_data.get('designation')
+            profile_data['employee_id'] = generate_unique_employee_id(role=role, department=dept, designation=desig)
 
         # Set consent timestamp if consent was given
         if profile_data.get('consent_given'):

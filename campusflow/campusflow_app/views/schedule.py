@@ -23,9 +23,18 @@ class ScheduleListView(APIView):
         user = request.user
         user_group = get_user_group(user)
 
-        if is_saas_admin(user) or user_group in ('Management', 'Administrator'):
-            # Admin roles see everything
+        if is_saas_admin(user) or user_group in ('Management', 'Administrator', 'Principal'):
+            # Admin and Principal roles see all schedules across the college
             qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
+        elif user_group == 'Department Head':
+            # Department Head sees all schedules in their department (or all if no department set)
+            hod_profile = getattr(user, 'department_head_profile', None)
+            if hod_profile and hod_profile.department:
+                qs = Schedule.objects.filter(
+                    course__department=hod_profile.department, is_draft=False,
+                ).select_related('course', 'classroom', 'faculty')
+            else:
+                qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
         elif user_group == 'student':
             # Students see their department's schedules
             profile = getattr(user, 'student_profile', None)
@@ -37,12 +46,22 @@ class ScheduleListView(APIView):
                 # No department set — show all schedules (demo/testing mode)
                 qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
         elif user_group == 'Faculty':
-            # Faculty see their own scheduled classes (including substitutions)
-            qs = Schedule.objects.filter(
-                Q(faculty=user) | Q(substitute_faculty=user), is_draft=False,
-            ).select_related('course', 'classroom', 'faculty')
+            # Faculty see their own scheduled classes (including substitutions),
+            # or all classes in their department if requested or none assigned
+            teaching_profile = getattr(user, 'teaching_staff_profile', None)
+            dept = getattr(teaching_profile, 'department', None)
+            if dept:
+                # See their own or their department's schedules
+                qs = Schedule.objects.filter(
+                    Q(faculty=user) | Q(substitute_faculty=user) | Q(course__department=dept),
+                    is_draft=False,
+                ).select_related('course', 'classroom', 'faculty')
+            else:
+                qs = Schedule.objects.filter(
+                    Q(faculty=user) | Q(substitute_faculty=user), is_draft=False,
+                ).select_related('course', 'classroom', 'faculty')
         else:
-            qs = Schedule.objects.none()
+            qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
 
         # Optional day-of-week filter
         day = request.query_params.get('day_of_week')
@@ -60,6 +79,17 @@ class ScheduleListView(APIView):
         academic_year = request.query_params.get('academic_year')
         if academic_year:
             qs = qs.filter(academic_year=academic_year)
+
+        # Optional date filter (calculates day of week automatically from date YYYY-MM-DD)
+        date_param = request.query_params.get('date')
+        if date_param:
+            try:
+                import datetime
+                dt = datetime.date.fromisoformat(date_param)
+                day_name = dt.strftime('%A')
+                qs = qs.filter(day_of_week=day_name)
+            except Exception:
+                pass
 
         days_order = {
             'Monday': 1, 'Tuesday': 2, 'Wednesday': 3,
@@ -83,9 +113,9 @@ class ScheduleListView(APIView):
         user = request.user
         user_group = get_user_group(user)
 
-        if not (is_saas_admin(user) or user_group in ('Management', 'Administrator')):
+        if not (is_saas_admin(user) or user_group in ('Management', 'Administrator', 'Department Head', 'Faculty')):
             return Response(
-                {"error": "Only College Admins can create schedules."},
+                {"error": "Only College Admins, Department Heads, or Faculty can create schedules."},
                 status=status.HTTP_403_FORBIDDEN
             )
 

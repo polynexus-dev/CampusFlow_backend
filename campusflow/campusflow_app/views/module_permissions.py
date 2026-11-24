@@ -101,7 +101,7 @@ ROLE_DEFAULT_MODULES = {
     # modules whose APIs already accept Principal via is_faculty_or_above /
     # is_hm_or_above, so nothing in the sidebar leads to a 403.
     "Principal": [
-        "dashboard", "settings", "leave", "announcements", "exams", "analytics",
+        "dashboard", "settings", "schedule", "leave", "announcements", "exams", "analytics",
         "certificates", "lms", "rubrics"
     ],
     # "staff"/"student": faculty add Support Staff and students to their own

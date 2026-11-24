@@ -52,10 +52,14 @@ def _serialize_program(p):
 
 
 def _serialize_regulation(r):
+    dept = getattr(r.program, 'department', None) if r.program_id else None
     return {
         "id": r.id,
         "program_id": r.program_id,
         "program_code": r.program.code if r.program_id else None,
+        "program_name": r.program.name if r.program_id else None,
+        "department_id": dept.id if dept else None,
+        "department_name": dept.name if dept else None,
         "code": r.code,
         "name": r.name,
         "effective_from_year": r.effective_from_year,
@@ -73,10 +77,14 @@ def _serialize_regulation(r):
 
 
 def _serialize_batch(b):
+    dept = getattr(b.program, 'department', None) if b.program_id else None
     return {
         "id": b.id,
         "program_id": b.program_id,
         "program_code": b.program.code if b.program_id else None,
+        "program_name": b.program.name if b.program_id else None,
+        "department_id": dept.id if dept else None,
+        "department_name": dept.name if dept else None,
         "regulation_id": b.regulation_id,
         "regulation_code": b.regulation.code if b.regulation_id else None,
         "admission_year": b.admission_year,
@@ -88,10 +96,18 @@ def _serialize_batch(b):
 
 
 def _serialize_section(s):
+    batch = s.batch if s.batch_id else None
+    program = getattr(batch, 'program', None) if batch else None
+    dept = getattr(program, 'department', None) if program else None
     return {
         "id": s.id,
         "batch_id": s.batch_id,
-        "batch_name": s.batch.name if s.batch_id else None,
+        "batch_name": batch.name if batch else None,
+        "program_id": program.id if program else None,
+        "program_code": program.code if program else None,
+        "program_name": program.name if program else None,
+        "department_id": dept.id if dept else None,
+        "department_name": dept.name if dept else None,
         "name": s.name,
         "semester_number": s.semester_number,
         "capacity": s.capacity,
@@ -271,7 +287,7 @@ class RegulationListCreateView(_AdminWriteMixin, APIView):
     """
 
     def get(self, request):
-        regulations = Regulation.objects.select_related("program", "grading_scheme")
+        regulations = Regulation.objects.select_related("program", "program__department", "grading_scheme")
         program_id = request.query_params.get("program_id")
         if program_id:
             regulations = regulations.filter(program_id=program_id)
@@ -405,7 +421,7 @@ class BatchListCreateView(_AdminWriteMixin, APIView):
     """
 
     def get(self, request):
-        batches = Batch.objects.select_related("program", "regulation")
+        batches = Batch.objects.select_related("program", "program__department", "regulation")
         program_id = request.query_params.get("program_id")
         if program_id:
             batches = batches.filter(program_id=program_id)
@@ -529,7 +545,7 @@ class SectionListCreateView(_AdminWriteMixin, APIView):
     """
 
     def get(self, request):
-        sections = Section.objects.select_related("batch", "mentor")
+        sections = Section.objects.select_related("batch", "batch__program", "batch__program__department", "mentor")
         batch_id = request.query_params.get("batch_id")
         if batch_id:
             sections = sections.filter(batch_id=batch_id)

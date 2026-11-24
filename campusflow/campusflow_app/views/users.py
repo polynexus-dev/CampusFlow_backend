@@ -731,11 +731,20 @@ class StaffRegistrationView(generics.CreateAPIView):
             TeachingStaffProfile.objects.filter(user=new_user).update(status='active')
             NonTeachingStaffProfile.objects.filter(user=new_user).update(status='active')
 
+        # Find employee_id from profile
+        employee_id = None
+        for prof_attr in ('teaching_staff_profile', 'non_teaching_staff_profile', 'department_head_profile', 'administrator_profile', 'management_profile', 'principal_profile'):
+            prof = getattr(new_user, prof_attr, None)
+            if prof and hasattr(prof, 'employee_id'):
+                employee_id = prof.employee_id
+                break
+
         return Response(
             {
                 "message": f"{role} account created successfully.",
                 "username": new_user.username,
-                "role": role
+                "role": role,
+                "employee_id": employee_id
             },
             status=status.HTTP_201_CREATED
         )
@@ -1789,6 +1798,23 @@ class StudentUserProfileView(APIView):
                 Q(department__name__icontains=search_query) |
                 Q(contact_number__icontains=search_query)
             )
+
+        # Filters by department, section, batch, and semester
+        dept_id = request.query_params.get('department_id')
+        if dept_id:
+            student_profiles = student_profiles.filter(department_id=dept_id)
+
+        sec = request.query_params.get('section_division') or request.query_params.get('section')
+        if sec:
+            student_profiles = student_profiles.filter(section_division__iexact=sec.strip())
+
+        batch_name = request.query_params.get('batch_academic_year') or request.query_params.get('batch')
+        if batch_name:
+            student_profiles = student_profiles.filter(batch_academic_year__icontains=batch_name.strip())
+
+        sem = request.query_params.get('current_semester_year') or request.query_params.get('semester')
+        if sem:
+            student_profiles = student_profiles.filter(current_semester_year__icontains=sem.strip())
 
         # Get pagination parameters
         page = request.query_params.get('page')

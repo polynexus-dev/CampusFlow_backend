@@ -27,7 +27,7 @@ class LectureListCreateView(APIView):
     permission_classes = [IsAuthenticated, CanCreateLecture]
 
     def get(self, request):
-        """List all lectures. For students, filter by active code & department."""
+        """List all lectures. Supports filtering by date, department_id, and faculty_id."""
         user = request.user
         is_demo = is_demo_tenant() or connection.schema_name == 'demo'
         if hasattr(user, 'student_profile'):
@@ -43,7 +43,25 @@ class LectureListCreateView(APIView):
                 ).exclude(code='').select_related('classroom', 'faculty')
         else:
             lectures = Lecture.objects.all().select_related('classroom', 'faculty')
-        
+
+        # Filter by date (YYYY-MM-DD)
+        date_param = request.query_params.get('date')
+        if date_param:
+            lectures = lectures.filter(start_time__date=date_param)
+
+        # Filter by department_id
+        dept_id = request.query_params.get('department_id')
+        if dept_id:
+            lectures = lectures.filter(
+                faculty__teaching_staff_profile__department_id=dept_id
+            )
+
+        # Filter by faculty_id
+        faculty_id = request.query_params.get('faculty_id')
+        if faculty_id:
+            lectures = lectures.filter(faculty_id=faculty_id)
+
+        lectures = lectures.order_by('start_time')
         serializer = LectureSerializer(lectures, many=True)
         return Response(serializer.data)
 
