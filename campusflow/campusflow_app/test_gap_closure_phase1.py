@@ -306,6 +306,8 @@ class CertificateTests(_Phase1Fixture, TenantTestCase):
             ClearanceDesk.objects.create(
                 name="Library", code="library", responsible_group=Group.objects.get_or_create(name="Librarian")[0], order=1,
             )
+            from .services.clearance import ensure_default_flow
+            ensure_default_flow("final_exit")
         response = self.client.post(
             reverse("issuedcertificate-list"), {"template": leaving["id"], "student": self.student_a.id},
             content_type=JSON, **self._auth(self.admin),

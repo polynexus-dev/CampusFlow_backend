@@ -225,6 +225,10 @@ class MigrationAndConvocationTests(_Phase4FixtureMixin, TenantTestCase):
         with schema_context(self.tenant.schema_name):
             group, _ = Group.objects.get_or_create(name="Librarian")
             ClearanceDesk.objects.create(name="Library", code="library", responsible_group=group)
+            # Desks gate students only through a published flow (the data migration
+            # creates this one for colleges that had desks before flows existed).
+            from .services.clearance import ensure_default_flow
+            ensure_default_flow("final_exit")
 
         create_response = self.client.post(
             reverse("migrationrequest-create"),
