@@ -62,10 +62,6 @@ class Migration(migrations.Migration):
                 'ordering': ['created_at', 'id'],
             },
         ),
-        migrations.RemoveField(
-            model_name='location',
-            name='department_owner',
-        ),
         migrations.AlterModelOptions(
             name='clearanceitem',
             options={'ordering': ['step_order', 'id'], 'verbose_name': 'Clearance Item', 'verbose_name_plural': 'Clearance Items'},
