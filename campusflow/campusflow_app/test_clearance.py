@@ -671,6 +671,72 @@ class ClearanceFlowTests(_ClearanceFixtureMixin, TenantTestCase):
         response = self.client.get(reverse("clearance-inbox"), **self._auth(bystander))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_no_dues_pdf_then_submit_to_department_and_receive(self):
+        f = self.fixture
+        response = self.client.post(
+            reverse("clearance-flow-list"),
+            self._dept_flow_payload(approval_mode="parallel", steps=[{"order": 1, "title": "HOD", "approver_type": "department_hod"}]),
+            content_type="application/json", **self._auth(f["hod"]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        with schema_context(self.tenant.schema_name):
+            req = ClearanceRequest.objects.get(flow_id=response.data["id"])
+            item = req.items.get()
+        pdf_url = reverse("clearance-request-pdf", args=[req.id])
+
+        # Not cleared yet: no PDF, no submission.
+        self.assertEqual(self.client.get(pdf_url, **self._auth(f["student_user"])).status_code, status.HTTP_400_BAD_REQUEST)
+        submit_url = reverse("clearance-request-submit", args=[req.id])
+        self.assertEqual(
+            self.client.post(submit_url, {}, content_type="application/json", **self._auth(f["student_user"])).status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.client.post(reverse("clearance-item-clear", args=[item.id]), {}, content_type="application/json", **self._auth(f["hod"]))
+
+        response = self.client.get(pdf_url, **self._auth(f["student_user"]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        # Another department's HOD can't download it.
+        self.assertEqual(self.client.get(pdf_url, **self._auth(f["other_hod"])).status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.client.post(submit_url, {"note": "Original handed in too"}, content_type="application/json", **self._auth(f["student_user"]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIsNotNone(response.data["submitted_at"])
+        self.assertEqual(
+            self.client.post(submit_url, {}, content_type="application/json", **self._auth(f["student_user"])).status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        response = self.client.get(reverse("clearance-submissions"), **self._auth(f["hod"]))
+        self.assertEqual([r["id"] for r in response.data], [req.id])
+        response = self.client.get(reverse("clearance-submissions"), **self._auth(f["other_hod"]))
+        self.assertEqual(response.data, [])
+        self.assertEqual(self.client.get(reverse("clearance-submissions"), **self._auth(f["teacher_a"])).status_code, status.HTTP_403_FORBIDDEN)
+
+        receive_url = reverse("clearance-request-receive", args=[req.id])
+        self.assertEqual(
+            self.client.post(receive_url, {}, content_type="application/json", **self._auth(f["other_hod"])).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        response = self.client.post(receive_url, {}, content_type="application/json", **self._auth(f["hod"]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["received_by_name"], "Hodcse")
+        response = self.client.get(reverse("clearance-submissions") + "?status=received", **self._auth(f["hod"]))
+        self.assertEqual([r["id"] for r in response.data], [req.id])
+
+        # The QR link verifies without a login.
+        with schema_context(self.tenant.schema_name):
+            req.refresh_from_db()
+        response = self.client.get(reverse("clearance-verify", args=[self.tenant.schema_name, req.verification_token]))
+        # A login-free request leaves the connection on the public schema; put it back for the next test.
+        from django.db import connection
+        connection.set_tenant(self.tenant)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["valid"])
+        self.assertEqual(response.data["student_id"], "CSE001")
+
     def test_launch_requires_published_flow(self):
         response = self.client.post(
             reverse("clearance-flow-list"), self._dept_flow_payload(status="draft"), content_type="application/json",

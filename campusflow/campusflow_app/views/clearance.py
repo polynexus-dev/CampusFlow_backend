@@ -14,9 +14,11 @@ Rules live in services/clearance.py.
 from django.contrib.auth.models import Group, User
 from django.db import transaction
 from django.db.models import Count, Q
+from django.http import HttpResponse
+from django_tenants.utils import get_tenant_model, schema_context
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status, viewsets
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -33,6 +35,7 @@ from ..services.clearance import (
     clearance_status, create_request_for_flow, department_ids_led_by, ensure_default_flow,
     get_clearance_settings, is_clearance_overseer, items_assigned_to, launch_flow,
     refresh_snapshot, resolve_cycle, resubmit_item,
+    clearance_pdf, clearance_verification_path, receive_submission, submit_to_department,
 )
 
 CLEARANCE_PERMS = [IsAuthenticated, IsNotDemoTenant, RequiresModule("clearance")]
@@ -263,6 +266,7 @@ class ClearanceRequestSerializer(serializers.ModelSerializer):
     approval_mode = serializers.CharField(source="flow.approval_mode", read_only=True, default="parallel")
     term_name = serializers.CharField(source="term.name", read_only=True, default=None)
     academic_year_name = serializers.CharField(source="academic_year.name", read_only=True, default=None)
+    received_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ClearanceRequest
@@ -271,7 +275,11 @@ class ClearanceRequestSerializer(serializers.ModelSerializer):
             "flow", "flow_name", "approval_mode", "cycle_type",
             "term", "term_name", "academic_year", "academic_year_name",
             "status", "generated_by", "items", "created_at", "completed_at",
+            "submitted_at", "submission_note", "received_at", "received_by_name",
         ]
+
+    def get_received_by_name(self, obj):
+        return _name(obj.received_by) if obj.received_by_id else None
 
     def get_flow_name(self, obj):
         return obj.flow.name if obj.flow_id else obj.get_cycle_type_display()
@@ -905,3 +913,135 @@ class MyClearanceCertificateView(APIView):
         if student is None:
             return Response({"error": "Only a student account has a clearance certificate."}, status=status.HTTP_403_FORBIDDEN)
         return _clearance_certificate_response(student)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# No-Dues PDF, submission to the department, public verification
+# ─────────────────────────────────────────────────────────────────────────────
+
+REQUEST_RELATED = ("student__user", "student__department", "flow", "term", "academic_year", "received_by")
+
+
+def _can_handle_submission(user, request_obj):
+    """The student's HOD, or a College Admin / Principal."""
+    return is_clearance_overseer(user) or request_obj.student.department_id in department_ids_led_by(user)
+
+
+class ClearanceRequestPdfView(APIView):
+    """GET /clearance/requests/<id>/pdf/ — the No-Dues PDF, only once every step is cleared."""
+    permission_classes = CLEARANCE_PERMS
+
+    def get(self, request, pk):
+        request_obj = get_object_or_404(ClearanceRequest.objects.select_related(*REQUEST_RELATED), pk=pk)
+        student = _student_of(request.user)
+        if student is not None:
+            if request_obj.student_id != student.pk:
+                return Response({"error": "You can only download your own clearance."}, status=status.HTTP_403_FORBIDDEN)
+        elif not _can_handle_submission(request.user, request_obj):
+            return Response({"error": "You can't download this clearance."}, status=status.HTTP_403_FORBIDDEN)
+        if request_obj.status != ClearanceRequest.STATUS_CLEARED:
+            return Response(
+                {"error": "The No-Dues PDF is available once every step is cleared."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        verify_url = request.build_absolute_uri(clearance_verification_path(request_obj))
+        response = HttpResponse(clearance_pdf(request_obj, verify_url), content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="NoDues_{request_obj.student.student_id}_{request_obj.id}.pdf"'
+        return response
+
+
+class ClearanceRequestSubmitView(APIView):
+    """POST /clearance/requests/<id>/submit/ {note} — the student submits their cleared No-Dues to their department."""
+    permission_classes = CLEARANCE_PERMS
+
+    def post(self, request, pk):
+        request_obj = get_object_or_404(ClearanceRequest.objects.select_related(*REQUEST_RELATED), pk=pk)
+        student = _student_of(request.user)
+        if student is None or request_obj.student_id != student.pk:
+            return Response({"error": "Only the student can submit their own No-Dues."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            submit_to_department(request_obj, request.user, (request.data.get("note") or "").strip())
+        except ClearanceActionError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ClearanceRequestSerializer(request_obj).data)
+
+
+class ClearanceSubmissionsView(APIView):
+    """
+    GET /clearance/submissions/?status=waiting|received|all&q=
+    No-Dues submitted by students: an HOD sees their department's, an overseer all.
+    """
+    permission_classes = CLEARANCE_PERMS
+
+    def get(self, request):
+        qs = (
+            ClearanceRequest.objects.filter(submitted_at__isnull=False)
+            .select_related(*REQUEST_RELATED)
+            .prefetch_related("items__desk", "items__step", "items__approver", "items__approver_group", "items__cleared_by")
+            .order_by("-submitted_at")
+        )
+        if not is_clearance_overseer(request.user):
+            led = department_ids_led_by(request.user)
+            if not led:
+                return Response({"error": "Only a Department Head or College Admin receives No-Dues."}, status=status.HTTP_403_FORBIDDEN)
+            qs = qs.filter(student__department_id__in=led)
+        wanted = request.query_params.get("status", "waiting")
+        if wanted == "waiting":
+            qs = qs.filter(received_at__isnull=True)
+        elif wanted == "received":
+            qs = qs.filter(received_at__isnull=False)
+        if request.query_params.get("q"):
+            q = request.query_params["q"].strip()
+            qs = qs.filter(
+                Q(student__student_id__icontains=q) | Q(student__user__first_name__icontains=q)
+                | Q(student__user__last_name__icontains=q)
+            )
+        return Response(ClearanceRequestSerializer(qs[:500], many=True).data)
+
+
+class ClearanceRequestReceiveView(APIView):
+    """POST /clearance/requests/<id>/receive/ — the department confirms it has the No-Dues."""
+    permission_classes = CLEARANCE_PERMS
+
+    def post(self, request, pk):
+        request_obj = get_object_or_404(ClearanceRequest.objects.select_related(*REQUEST_RELATED), pk=pk)
+        if not _can_handle_submission(request.user, request_obj):
+            return Response({"error": "Only the student's HOD or a College Admin can receive this."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            receive_submission(request_obj, request.user)
+        except ClearanceActionError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ClearanceRequestSerializer(request_obj).data)
+
+
+class ClearanceVerifyView(APIView):
+    """
+    GET /clearance/verify/<schema>/<token>/ — no login. What someone sees after
+    scanning the QR on a No-Dues PDF: enough to confirm it is genuine.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, schema, token):
+        tenant = get_tenant_model().objects.filter(schema_name=schema, is_active=True).first()
+        if tenant is None or schema == "public":
+            return Response({"valid": False, "error": "Clearance not found."}, status=status.HTTP_404_NOT_FOUND)
+        with schema_context(schema):
+            request_obj = (
+                ClearanceRequest.objects.select_related("student__user", "student__department", "flow")
+                .filter(verification_token=token).first()
+            )
+            if request_obj is None:
+                return Response({"valid": False, "error": "Clearance not found."}, status=status.HTTP_404_NOT_FOUND)
+            student = request_obj.student
+            cleared = request_obj.status == ClearanceRequest.STATUS_CLEARED
+            return Response({
+                "valid": cleared,
+                "status": "cleared" if cleared else "no longer cleared",
+                "institution": tenant.name,
+                "clearance": request_obj.flow.name if request_obj.flow_id else request_obj.get_cycle_type_display(),
+                "student_name": student.user.get_full_name() or student.user.username,
+                "student_id": student.student_id,
+                "department": student.department.name if student.department_id else None,
+                "cleared_on": request_obj.completed_at,
+            })

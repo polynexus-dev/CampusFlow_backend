@@ -161,6 +161,8 @@ from campusflow_app.views.clearance import (
     ClearanceFlowViewSet, ClearanceFlowLaunchView, ClearanceFlowProgressView, ClearanceFlowApplyView,
     MyClearanceFlowsView, ClearanceInboxView, ClearanceInboxSummaryView,
     ClearanceItemDetailView, ClearanceItemResubmitView, ClearanceApproverCandidatesView,
+    ClearanceRequestPdfView, ClearanceRequestSubmitView, ClearanceRequestReceiveView,
+    ClearanceSubmissionsView, ClearanceVerifyView,
 )
 from campusflow_app.views.hostel import HostelViewSet, HostelRoomViewSet, HostelAllocationViewSet
 from campusflow_app.views.tpo import RecruitmentDriveViewSet, PlacementApplicationViewSet
@@ -612,6 +614,11 @@ urlpatterns = [
     path('clearance/settings/', ClearanceSettingsView.as_view(), name='clearance-settings'),
     path('clearance/requests/', ClearanceRequestViewSet.as_view({'get': 'list'}), name='clearance-request-list'),
     path('clearance/requests/<int:pk>/', ClearanceRequestViewSet.as_view({'get': 'retrieve'}), name='clearance-request-detail'),
+    path('clearance/requests/<int:pk>/pdf/', ClearanceRequestPdfView.as_view(), name='clearance-request-pdf'),
+    path('clearance/requests/<int:pk>/submit/', ClearanceRequestSubmitView.as_view(), name='clearance-request-submit'),
+    path('clearance/requests/<int:pk>/receive/', ClearanceRequestReceiveView.as_view(), name='clearance-request-receive'),
+    path('clearance/submissions/', ClearanceSubmissionsView.as_view(), name='clearance-submissions'),
+    path('clearance/verify/<str:schema>/<uuid:token>/', ClearanceVerifyView.as_view(), name='clearance-verify'),
     path('clearance/requests/bulk-generate/', ClearanceBulkGenerateView.as_view(), name='clearance-bulk-generate'),
     path('clearance/requests/final-exit/', FinalExitClearanceRequestView.as_view(), name='clearance-final-exit-request'),
     path('clearance/flows/', ClearanceFlowViewSet.as_view({'get': 'list', 'post': 'create'}), name='clearance-flow-list'),

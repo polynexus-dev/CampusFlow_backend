@@ -255,6 +255,16 @@ class ClearanceRequest(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
+    # Once cleared: the student downloads the No-Dues PDF (QR -> verification_token,
+    # set on first download) and submits it to their department, which receives it.
+    verification_token = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    submission_note = models.TextField(blank=True, default="")
+    received_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="clearance_submissions_received",
+    )
+    received_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         verbose_name = "Clearance Request"
         verbose_name_plural = "Clearance Requests"

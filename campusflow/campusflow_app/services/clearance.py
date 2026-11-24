@@ -507,3 +507,155 @@ def is_student_cleared(student, cycle_type=ClearanceFlow.PURPOSE_PERIODIC, term=
     if blocking:
         return cleared, blocking[0]
     return cleared, (max(requests, key=lambda r: r.created_at) if requests else None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# No-Dues PDF and submission to the department
+# ─────────────────────────────────────────────────────────────────────────────
+
+def clearance_verification_path(request_obj):
+    """Public verify link (QR). Carries the schema so it resolves without login."""
+    import uuid
+
+    from django.db import connection
+
+    if not request_obj.verification_token:
+        request_obj.verification_token = uuid.uuid4()
+        request_obj.save(update_fields=["verification_token"])
+    return f"/api/clearance/verify/{connection.schema_name}/{request_obj.verification_token}/"
+
+
+def clearance_pdf(request_obj, verify_url):
+    """A4 No-Dues certificate for one fully cleared request: who signed each step and when."""
+    import io
+    from xml.sax.saxutils import escape
+
+    from django.db import connection
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    from .certificates import _fmt_date, _logo_image, _qr_image, college_name
+
+    student = request_obj.student
+    user = student.user
+    styles = getSampleStyleSheet()
+    college = ParagraphStyle("college", parent=styles["Title"], fontSize=18, leading=22)
+    address = ParagraphStyle("addr", parent=styles["Normal"], alignment=TA_CENTER, fontSize=9, textColor=colors.grey)
+    title = ParagraphStyle("title", parent=styles["Heading1"], alignment=TA_CENTER, fontSize=15, spaceBefore=14, spaceAfter=4)
+    sub = ParagraphStyle("sub", parent=styles["Normal"], alignment=TA_CENTER, fontSize=10, textColor=colors.HexColor("#1F3A5F"))
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=10.5, leading=16)
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=12)
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8.5, textColor=colors.grey)
+
+    flow_name = request_obj.flow.name if request_obj.flow_id else request_obj.get_cycle_type_display()
+    cycle = " · ".join(x for x in (
+        request_obj.academic_year.name if request_obj.academic_year_id else "",
+        request_obj.term.name if request_obj.term_id else "",
+    ) if x)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,
+                            topMargin=1.6 * cm, bottomMargin=1.6 * cm, title=f"No-Dues Certificate - {student.student_id}")
+    story = []
+    logo = _logo_image(2.2, 2.2)
+    if logo is not None:
+        story.append(logo)
+    story.append(Paragraph(escape(college_name()), college))
+    tenant_address = getattr(connection.tenant, "address", "") or ""
+    if tenant_address:
+        story.append(Paragraph(escape(tenant_address), address))
+    story.append(Table([[""]], colWidths=[17 * cm], style=TableStyle([
+        ("LINEABOVE", (0, 0), (-1, 0), 1.2, colors.HexColor("#1F3A5F")),
+    ])))
+    story.append(Paragraph("No-Dues Clearance Certificate", title))
+    story.append(Paragraph(escape(flow_name + (f" ({cycle})" if cycle else "")), sub))
+    story.append(Spacer(1, 0.5 * cm))
+
+    details = [
+        ("Student", user.get_full_name() or user.username),
+        ("Student ID", student.student_id),
+        ("Department", student.department.name if student.department_id else "-"),
+        ("Program", student.program.name if getattr(student, "program_id", None) else "-"),
+        ("Cleared on", _fmt_date(timezone.localtime(request_obj.completed_at).date()) if request_obj.completed_at else "-"),
+    ]
+    story.append(Table(
+        [[Paragraph(f"<b>{escape(k)}</b>", cell), Paragraph(escape(str(v)), cell)] for k, v in details],
+        colWidths=[4 * cm, 13 * cm],
+        style=TableStyle([("BOTTOMPADDING", (0, 0), (-1, -1), 3)]),
+    ))
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(Paragraph(
+        "This is to certify that the above student has no dues outstanding and every sign-off below has been cleared.",
+        body,
+    ))
+    story.append(Spacer(1, 0.3 * cm))
+
+    rows = [[Paragraph(f"<b>{h}</b>", cell) for h in ("#", "Sign-off", "Cleared by", "Date", "Remarks")]]
+    items = request_obj.items.select_related("desk", "cleared_by").order_by("step_order", "id")
+    for n, item in enumerate(items, start=1):
+        cleared_by = (item.cleared_by.get_full_name() or item.cleared_by.username) if item.cleared_by_id else "-"
+        rows.append([
+            Paragraph(str(n), cell),
+            Paragraph(escape(item.display_title), cell),
+            Paragraph(escape(cleared_by), cell),
+            Paragraph(_fmt_date(timezone.localtime(item.cleared_at).date()) if item.cleared_at else "-", cell),
+            Paragraph(escape(item.remarks or ""), cell),
+        ])
+    story.append(Table(rows, colWidths=[0.8 * cm, 6.2 * cm, 3.8 * cm, 2.4 * cm, 3.8 * cm], repeatRows=1, style=TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF5")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#C8D3E0")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ])))
+    story.append(Spacer(1, 1.2 * cm))
+    story.append(Table(
+        [[_qr_image(verify_url, 2.6), Paragraph("<br/><br/><br/>Head of Department / Authorised Signatory", small)],
+         [Paragraph("Scan to verify", small), ""]],
+        colWidths=[8.5 * cm, 8.5 * cm],
+        style=TableStyle([("ALIGN", (1, 0), (1, 0), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "BOTTOM")]),
+    ))
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(Paragraph(
+        f"Generated by CampusNexus on {_fmt_date(timezone.localdate())}. Submit this to your department office.", small,
+    ))
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def submit_to_department(request_obj, student_user, note=""):
+    """The student hands their cleared No-Dues to their department; the HOD is notified."""
+    if request_obj.status != ClearanceRequest.STATUS_CLEARED:
+        raise ClearanceActionError("Finish every step before submitting your No-Dues to the department.")
+    if request_obj.submitted_at:
+        raise ClearanceActionError("Already submitted to your department.")
+    request_obj.submitted_at = timezone.now()
+    request_obj.submission_note = note
+    request_obj.save(update_fields=["submitted_at", "submission_note"])
+    hod = _hod_of(request_obj.student)
+    if hod:
+        notify_user(
+            hod, f"No-Dues submitted: {student_user.get_full_name() or request_obj.student.student_id}",
+            body=request_obj.flow.name if request_obj.flow_id else "Clearance",
+            category="clearance_submitted", data={"request_id": request_obj.id},
+        )
+    return request_obj
+
+
+def receive_submission(request_obj, receiver):
+    """The department confirms it has the student's No-Dues; the student is notified."""
+    if not request_obj.submitted_at:
+        raise ClearanceActionError("The student has not submitted this yet.")
+    if request_obj.received_at:
+        raise ClearanceActionError("Already received.")
+    request_obj.received_by = receiver
+    request_obj.received_at = timezone.now()
+    request_obj.save(update_fields=["received_by", "received_at"])
+    notify_user(
+        request_obj.student.user, "Your No-Dues was received by your department",
+        body=request_obj.flow.name if request_obj.flow_id else "Clearance",
+        category="clearance_received", data={"request_id": request_obj.id},
+    )
+    return request_obj
