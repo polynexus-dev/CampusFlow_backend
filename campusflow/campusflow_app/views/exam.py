@@ -12,7 +12,7 @@ from ..models.exam import ExamType, Exam
 from ..permissions import (
     can_manage_exam,
     IsCollegeAdmin, IsFacultyOrAbove, IsNotStudent, RequiresModule,
-    get_user_group, is_college_admin, is_saas_admin
+    get_user_group, is_college_admin, is_saas_admin, is_hm_or_above
 )
 from ..services.clearance import is_student_cleared
 from ..services.detention import is_student_detained
@@ -62,8 +62,8 @@ class ExamTypeListCreateView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
     def post(self, request):
-        if not is_college_admin(request.user):
-            return Response({"error": "Only College Admin can create exam types."}, status=status.HTTP_403_FORBIDDEN)
+        if not (is_college_admin(request.user) or is_hm_or_above(request.user)):
+            return Response({"error": "Only College Admin or Department Head can create exam types."}, status=status.HTTP_403_FORBIDDEN)
 
         name = request.data.get('name', '').strip()
         code = request.data.get('code', '').strip().upper()
