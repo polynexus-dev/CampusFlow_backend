@@ -79,12 +79,22 @@ class AttendanceMarkView(APIView):
         # Filter by batch
         batch_name = request.query_params.get('batch_academic_year') or request.query_params.get('batch')
         if batch_name:
-            student_profiles = student_profiles.filter(batch_academic_year__icontains=batch_name.strip())
+            student_profiles = student_profiles.filter(
+                Q(batch_academic_year__icontains=batch_name.strip()) |
+                Q(batch__name__icontains=batch_name.strip())
+            )
 
-        # Filter by semester
+        # Filter by semester (supports "4", "sem 4", "Semester 4")
         sem = request.query_params.get('current_semester_year') or request.query_params.get('semester')
         if sem:
-            student_profiles = student_profiles.filter(current_semester_year__icontains=sem.strip())
+            sem_clean = sem.strip()
+            num_only = "".join(filter(str.isdigit, sem_clean))
+            q_sem = Q(current_semester_year__icontains=sem_clean)
+            if num_only:
+                q_sem |= Q(current_semester_year__icontains=num_only)
+                if num_only.isdigit():
+                    q_sem |= Q(section__semester_number=int(num_only))
+            student_profiles = student_profiles.filter(q_sem)
 
         # Search query
         search_query = request.query_params.get('search')
