@@ -1129,6 +1129,7 @@ class ScheduleSerializer(serializers.ModelSerializer):
     classroom_code = serializers.CharField(source='classroom.code', read_only=True)
     faculty_name = serializers.SerializerMethodField()
     faculty_username = serializers.CharField(source='faculty.username', read_only=True)
+    section_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Schedule
@@ -1137,11 +1138,16 @@ class ScheduleSerializer(serializers.ModelSerializer):
             'faculty', 'faculty_name', 'faculty_username',
             'classroom', 'classroom_name', 'classroom_code',
             'day_of_week', 'start_time', 'end_time',
-            'semester', 'academic_year'
+            'semester', 'academic_year', 'section_name'
         ]
 
     def get_faculty_name(self, obj):
         return obj.faculty.get_full_name() or obj.faculty.username
+
+    def get_section_name(self, obj):
+        if obj.course_offering and obj.course_offering.section:
+            return obj.course_offering.section.name
+        return None
 
 
 # ── Hostel Management Serializers ──

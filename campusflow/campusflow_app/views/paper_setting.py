@@ -20,17 +20,24 @@ from rest_framework.views import APIView
 
 from ..ai_question_generation import QuestionGenerationError, generate_question
 from ..models import Exam, SyllabusTopic, Question, PaperBlueprintTopic, ExamQuestion, PaperSetVariant
-from ..permissions import IsFacultyOrAbove, RequiresModule, can_manage_exam
+from ..permissions import IsFacultyOrAbove, RequiresModule, can_manage_exam, is_faculty_or_above
 
 PAPER_SETTING_PERMS = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
 from ..services.paper_sync import sync_question_structure
 
 
-def _get_exam(pk, user):
+def _get_exam(pk, user, for_write=False):
     """The exam, or None if it doesn't exist or this user may not manage it —
-    a question paper is confidential to the exam's own staff (see can_manage_exam)."""
+    Faculty and above may view question papers (read-only, e.g. GET /api/exams/<id>/paper/).
+    Writing/generating requires can_manage_exam permission."""
     exam = Exam.objects.filter(pk=pk).first()
-    return exam if exam and can_manage_exam(user, exam) else None
+    if not exam:
+        return None
+    if can_manage_exam(user, exam):
+        return exam
+    if not for_write and is_faculty_or_above(user):
+        return exam
+    return None
 
 
 def _serialize_exam_question(eq):
@@ -68,7 +75,7 @@ class PaperBlueprintView(APIView):
         }, status=status.HTTP_200_OK)
 
     def put(self, request, pk):
-        exam = _get_exam(pk, request.user)
+        exam = _get_exam(pk, request.user, for_write=True)
         if not exam:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         if exam.paper_finalized:
@@ -209,7 +216,7 @@ class GeneratePaperView(APIView):
     permission_classes = PAPER_SETTING_PERMS
 
     def post(self, request, pk):
-        exam = _get_exam(pk, request.user)
+        exam = _get_exam(pk, request.user, for_write=True)
         if not exam:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         if exam.paper_finalized:
@@ -257,7 +264,7 @@ class GeneratePaperSetsView(APIView):
     permission_classes = PAPER_SETTING_PERMS
 
     def post(self, request, pk):
-        exam = _get_exam(pk, request.user)
+        exam = _get_exam(pk, request.user, for_write=True)
         if not exam:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         if exam.paper_finalized:
@@ -389,7 +396,7 @@ class ExamQuestionAddView(APIView):
     permission_classes = PAPER_SETTING_PERMS
 
     def post(self, request, pk):
-        exam = _get_exam(pk, request.user)
+        exam = _get_exam(pk, request.user, for_write=True)
         if not exam:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         if exam.paper_finalized:
@@ -429,7 +436,7 @@ class ExamQuestionReplaceView(APIView):
     permission_classes = PAPER_SETTING_PERMS
 
     def post(self, request, pk, exam_question_id):
-        exam = _get_exam(pk, request.user)
+        exam = _get_exam(pk, request.user, for_write=True)
         if not exam:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         if exam.paper_finalized:
@@ -462,8 +469,8 @@ class ExamQuestionDetailView(APIView):
     """
     permission_classes = PAPER_SETTING_PERMS
 
-    def _get_locked_exam_and_question(self, pk, exam_question_id):
-        exam = _get_exam(pk, request.user)
+    def _get_locked_exam_and_question(self, pk, exam_question_id, user):
+        exam = _get_exam(pk, user, for_write=True)
         if not exam:
             return None, None, Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         if exam.paper_finalized:
@@ -475,7 +482,7 @@ class ExamQuestionDetailView(APIView):
         return exam, eq, None
 
     def patch(self, request, pk, exam_question_id):
-        exam, eq, error = self._get_locked_exam_and_question(pk, exam_question_id)
+        exam, eq, error = self._get_locked_exam_and_question(pk, exam_question_id, request.user)
         if error:
             return error
 
@@ -491,7 +498,7 @@ class ExamQuestionDetailView(APIView):
         return Response(_serialize_exam_question(eq), status=status.HTTP_200_OK)
 
     def delete(self, request, pk, exam_question_id):
-        exam, eq, error = self._get_locked_exam_and_question(pk, exam_question_id)
+        exam, eq, error = self._get_locked_exam_and_question(pk, exam_question_id, request.user)
         if error:
             return error
 
@@ -511,7 +518,7 @@ class FinalizePaperView(APIView):
     def post(self, request, pk):
         from django.utils import timezone
 
-        exam = _get_exam(pk, request.user)
+        exam = _get_exam(pk, request.user, for_write=True)
         if not exam:
             return Response({"error": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
         if exam.paper_finalized:

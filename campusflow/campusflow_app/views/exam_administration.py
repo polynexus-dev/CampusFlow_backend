@@ -112,9 +112,19 @@ class RevaluationRequestListView(APIView):
             "result__student__user", "result__exam", "requested_by",
         )
         if not is_college_admin(request.user):
+            dept_ids = set()
+            hod_profile = getattr(request.user, "department_head_profile", None)
+            if hod_profile and hod_profile.department_id:
+                dept_ids.add(hod_profile.department_id)
             departments = getattr(request.user, "departments_led", None)
-            dept_ids = list(departments.values_list("id", flat=True)) if departments is not None else []
-            qs = qs.filter(result__exam__department_id__in=dept_ids)
+            if departments is not None:
+                dept_ids.update(departments.values_list("id", flat=True))
+            staff_profile = getattr(request.user, "teaching_staff_profile", None)
+            if staff_profile and staff_profile.department_id:
+                dept_ids.add(staff_profile.department_id)
+
+            if dept_ids:
+                qs = qs.filter(result__exam__department_id__in=list(dept_ids))
 
         exam_id = request.query_params.get("exam_id")
         if exam_id:

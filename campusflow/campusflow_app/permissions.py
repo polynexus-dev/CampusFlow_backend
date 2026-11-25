@@ -366,7 +366,15 @@ def can_manage_exam(user, exam):
         if user.id in (exam.created_by_id, exam.invigilator_id):
             return True
         from .models.offerings import CourseOffering
-        return CourseOffering.objects.filter(course_id=exam.course_id, faculty=user).exists()
+        if CourseOffering.objects.filter(course_id=exam.course_id, faculty=user).exists():
+            return True
+        staff_profile = getattr(user, 'teaching_staff_profile', None)
+        if staff_profile and staff_profile.department_id and exam.department_id:
+            if staff_profile.department_id == exam.department_id:
+                return True
+        elif not exam.department_id:
+            return True
+        return False
     return False
 
 

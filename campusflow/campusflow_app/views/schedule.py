@@ -25,43 +25,64 @@ class ScheduleListView(APIView):
 
         if is_saas_admin(user) or user_group in ('Management', 'Administrator', 'Principal'):
             # Admin and Principal roles see all schedules across the college
-            qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
+            qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty', 'course_offering__section')
         elif user_group == 'Department Head':
             # Department Head sees all schedules in their department (or all if no department set)
             hod_profile = getattr(user, 'department_head_profile', None)
             if hod_profile and hod_profile.department:
                 qs = Schedule.objects.filter(
                     course__department=hod_profile.department, is_draft=False,
-                ).select_related('course', 'classroom', 'faculty')
+                ).select_related('course', 'classroom', 'faculty', 'course_offering__section')
             else:
-                qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
+                qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty', 'course_offering__section')
         elif user_group == 'student':
-            # Students see their department's schedules
+            # Students see their department's and section-wise schedules
             profile = getattr(user, 'student_profile', None)
             if profile and hasattr(profile, 'department') and profile.department:
                 qs = Schedule.objects.filter(
                     course__department=profile.department, is_draft=False,
-                ).select_related('course', 'classroom', 'faculty')
+                ).select_related('course', 'classroom', 'faculty', 'course_offering__section')
+
+                # Filter section-wise if student has a section assigned
+                student_section = (
+                    getattr(profile, 'section_division', None)
+                    or (profile.section.name if getattr(profile, 'section', None) else None)
+                )
+                if student_section:
+                    qs = qs.filter(
+                        Q(course_offering__section__name__iexact=student_section) |
+                        Q(course_offering__section__isnull=True) |
+                        Q(course_offering__isnull=True)
+                    )
+
+                # Filter by student's current semester if set
+                sem = getattr(profile, 'current_semester_year', None) or getattr(profile, 'current_semester_number', None)
+                if sem:
+                    qs = qs.filter(semester__icontains=str(sem))
             else:
                 # No department set — show all schedules (demo/testing mode)
-                qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
+                qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty', 'course_offering__section')
         elif user_group == 'Faculty':
-            # Faculty see their own scheduled classes (including substitutions),
-            # or all classes in their department if requested or none assigned
-            teaching_profile = getattr(user, 'teaching_staff_profile', None)
-            dept = getattr(teaching_profile, 'department', None)
-            if dept:
-                # See their own or their department's schedules
-                qs = Schedule.objects.filter(
-                    Q(faculty=user) | Q(substitute_faculty=user) | Q(course__department=dept),
-                    is_draft=False,
-                ).select_related('course', 'classroom', 'faculty')
-            else:
-                qs = Schedule.objects.filter(
-                    Q(faculty=user) | Q(substitute_faculty=user), is_draft=False,
-                ).select_related('course', 'classroom', 'faculty')
+            # Faculty see only their own sessions (including substitutions)
+            qs = Schedule.objects.filter(
+                Q(faculty=user) | Q(substitute_faculty=user), is_draft=False,
+            ).select_related('course', 'classroom', 'faculty', 'course_offering__section')
         else:
-            qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty')
+            qs = Schedule.objects.filter(is_draft=False).select_related('course', 'classroom', 'faculty', 'course_offering__section')
+
+        # Allow HOD / Admin to filter by a specific faculty member
+        faculty_id = request.query_params.get('faculty_id')
+        if faculty_id and (is_saas_admin(user) or user_group in ('Management', 'Administrator', 'Principal', 'Department Head')):
+            qs = qs.filter(Q(faculty_id=faculty_id) | Q(substitute_faculty_id=faculty_id))
+
+        # Optional section / section_division filter
+        section_param = request.query_params.get('section') or request.query_params.get('section_division')
+        if section_param:
+            qs = qs.filter(
+                Q(course_offering__section__name__iexact=section_param) |
+                Q(course_offering__section__isnull=True) |
+                Q(course_offering__isnull=True)
+            )
 
         # Optional day-of-week filter
         day = request.query_params.get('day_of_week')
