@@ -46,6 +46,135 @@ class AttendanceMarkView(APIView):
     """
     permission_classes = [IsAuthenticated, CanMarkAttendanceManually, RequiresModule("attendance")]
 
+    def get(self, request):
+        """
+        List students and their attendance status for manual roll call.
+        Supports filtering by:
+          - department_id: Department ID (e.g. ?department_id=1)
+          - section_division / section: Section name (e.g. ?section_division=A)
+          - batch_academic_year / batch: Batch year (e.g. ?batch_academic_year=2024-2028)
+          - current_semester_year / semester: Semester (e.g. ?semester=3)
+          - lecture_id: Check status for a specific conducted lecture (e.g. ?lecture_id=1)
+          - schedule_id: Check status for a specific timetable schedule (e.g. ?schedule_id=4)
+          - date: Date to check (YYYY-MM-DD, defaults to today)
+          - search: Search by student roll number, username, or name
+        """
+        from ..models.profile import StudentProfile
+        from ..services.rbac import scope_students
+        from datetime import datetime
+
+        user = request.user
+        student_profiles = scope_students(StudentProfile.objects.all(), user).select_related('user', 'department')
+
+        # Filter by department
+        dept_id = request.query_params.get('department_id')
+        if dept_id:
+            student_profiles = student_profiles.filter(department_id=dept_id)
+
+        # Filter by section
+        sec = request.query_params.get('section_division') or request.query_params.get('section')
+        if sec:
+            student_profiles = student_profiles.filter(section_division__iexact=sec.strip())
+
+        # Filter by batch
+        batch_name = request.query_params.get('batch_academic_year') or request.query_params.get('batch')
+        if batch_name:
+            student_profiles = student_profiles.filter(batch_academic_year__icontains=batch_name.strip())
+
+        # Filter by semester
+        sem = request.query_params.get('current_semester_year') or request.query_params.get('semester')
+        if sem:
+            student_profiles = student_profiles.filter(current_semester_year__icontains=sem.strip())
+
+        # Search query
+        search_query = request.query_params.get('search')
+        if search_query:
+            student_profiles = student_profiles.filter(
+                Q(student_id__icontains=search_query) |
+                Q(user__username__icontains=search_query) |
+                Q(user__first_name__icontains=search_query) |
+                Q(user__last_name__icontains=search_query)
+            )
+
+        lecture_id = request.query_params.get('lecture_id')
+        schedule_id = request.query_params.get('schedule_id')
+        date_str = request.query_params.get('date')
+
+        # Resolve date
+        check_date = now().date()
+        if date_str:
+            try:
+                check_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                check_date = now().date()
+
+        # Build attendance lookup
+        lecture = Lecture.objects.filter(id=lecture_id).first() if lecture_id else None
+        schedule = Schedule.objects.filter(id=schedule_id).first() if schedule_id else None
+
+        user_ids = list(student_profiles.values_list('user_id', flat=True))
+
+        att_qs = Attendance.objects.filter(user_id__in=user_ids)
+        if lecture and schedule:
+            att_qs = att_qs.filter(Q(lecture=lecture) | Q(schedule=schedule, check_in_time__date=check_date))
+        elif lecture:
+            att_qs = att_qs.filter(lecture=lecture)
+        elif schedule:
+            att_qs = att_qs.filter(schedule=schedule, check_in_time__date=check_date)
+        else:
+            att_qs = att_qs.filter(check_in_time__date=check_date)
+
+        # Map user_id -> Attendance (prioritize valid records)
+        att_map = {}
+        for att in att_qs:
+            if att.user_id not in att_map or att.is_geofence_valid:
+                att_map[att.user_id] = att
+
+        results = []
+        present_count = 0
+        absent_count = 0
+
+        for s in student_profiles.order_by('student_id', 'user__first_name'):
+            att_record = att_map.get(s.user_id)
+            is_present = att_record is not None and att_record.is_geofence_valid
+            if is_present:
+                present_count += 1
+            else:
+                absent_count += 1
+
+            results.append({
+                "id": s.id,
+                "user_id": s.user_id,
+                "student_id": s.student_id,
+                "first_name": s.user.first_name,
+                "last_name": s.user.last_name,
+                "full_name": s.user.get_full_name() or s.user.username,
+                "username": s.user.username,
+                "email": s.user.email,
+                "department_id": s.department_id,
+                "department_name": s.department.name if s.department else None,
+                "section_division": s.section_division,
+                "batch_academic_year": s.batch_academic_year,
+                "current_semester_year": s.current_semester_year,
+                "is_present": is_present,
+                "status": "present" if is_present else "absent",
+                "attendance_id": att_record.id if att_record else None,
+                "check_in_time": att_record.check_in_time.isoformat() if att_record else None,
+                "verification_method": att_record.verification_method if att_record else None,
+            })
+
+        return Response({
+            "total_count": len(results),
+            "present_count": present_count,
+            "absent_count": absent_count,
+            "department_id": int(dept_id) if dept_id and str(dept_id).isdigit() else None,
+            "section_division": sec if sec else None,
+            "lecture_id": lecture.id if lecture else None,
+            "schedule_id": schedule.id if schedule else None,
+            "date": str(check_date),
+            "results": results
+        }, status=status.HTTP_200_OK)
+
     def post(self, request):
         serializer = AttendanceMarkSerializer(data=request.data)
         if not serializer.is_valid():
