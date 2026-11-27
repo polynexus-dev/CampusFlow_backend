@@ -98,23 +98,51 @@ class FeeStructureSerializer(drf_serializers.ModelSerializer):
     def get_total_amount(self, obj):
         return sum(item.amount for item in obj.items.all())
 
+    def validate(self, attrs):
+        request = self.context.get("request")
+        if request and "items" in request.data:
+            items_data = request.data.get("items") or []
+            seen_categories = set()
+            for item in items_data:
+                cat = item.get("category")
+                cat_id = cat.get("id") if isinstance(cat, dict) else cat
+                if cat_id is not None:
+                    if cat_id in seen_categories:
+                        cat_obj = FeeCategory.objects.filter(id=cat_id).first()
+                        cat_label = f" '{cat_obj.name}' (ID: {cat_id})" if cat_obj else f" (ID: {cat_id})"
+                        raise drf_serializers.ValidationError({
+                            "items": f"Duplicate fee category{cat_label} detected. Each fee category can only appear once per fee structure. Please combine amounts into a single item or remove duplicates."
+                        })
+                    seen_categories.add(cat_id)
+        return attrs
+
     @transaction.atomic
     def create(self, validated_data):
         validated_data.pop('items', None)
-        items_data = self.context['request'].data.get('items', [])
+        items_data = self.context.get('request').data.get('items', []) if self.context.get('request') else []
         structure = FeeStructure.objects.create(**validated_data)
+        
+        # Aggregate amounts by category defensively to prevent DB IntegrityError
+        category_amounts = {}
         for item_data in items_data:
+            cat = item_data.get('category')
+            cat_id = cat.get('id') if isinstance(cat, dict) else cat
+            if cat_id is not None and item_data.get('amount') is not None:
+                category_amounts[cat_id] = category_amounts.get(cat_id, Decimal('0.00')) + Decimal(str(item_data['amount']))
+
+        for cat_id, amt in category_amounts.items():
             FeeStructureItem.objects.create(
                 fee_structure=structure,
-                category_id=item_data['category'],
-                amount=Decimal(str(item_data['amount']))
+                category_id=cat_id,
+                amount=amt
             )
         return structure
 
     @transaction.atomic
     def update(self, instance, validated_data):
         validated_data.pop('items', None)
-        items_data = self.context['request'].data.get('items', None)
+        request = self.context.get('request')
+        items_data = request.data.get('items', None) if request else None
         instance.name = validated_data.get('name', instance.name)
         instance.department = validated_data.get('department', instance.department)
         instance.batch_academic_year = validated_data.get('batch_academic_year', instance.batch_academic_year)
@@ -129,11 +157,18 @@ class FeeStructureSerializer(drf_serializers.ModelSerializer):
         if items_data is not None:
             # Recreate items simply to avoid diff complications
             instance.items.all().delete()
+            category_amounts = {}
             for item_data in items_data:
+                cat = item_data.get('category')
+                cat_id = cat.get('id') if isinstance(cat, dict) else cat
+                if cat_id is not None and item_data.get('amount') is not None:
+                    category_amounts[cat_id] = category_amounts.get(cat_id, Decimal('0.00')) + Decimal(str(item_data['amount']))
+
+            for cat_id, amt in category_amounts.items():
                 FeeStructureItem.objects.create(
                     fee_structure=instance,
-                    category_id=item_data['category'],
-                    amount=Decimal(str(item_data['amount']))
+                    category_id=cat_id,
+                    amount=amt
                 )
         return instance
 

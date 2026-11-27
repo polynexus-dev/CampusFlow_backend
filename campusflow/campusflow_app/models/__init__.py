@@ -41,7 +41,7 @@ from .manual_attendance_request import ManualAttendanceRequest
 from .attendance_correction import AttendanceCorrectionRequest
 
 # ── Bus Tracking ──
-from .bus_tracking import BusRoute, BusLocation, BusTrail, BusTrip, BusSubscription, BusAttendance, BusScanEvent
+from .bus_tracking import BusRoute, BusLocation, BusTrail, BusTrip, BusSubscription, BusAttendance, BusScanEvent, BusStopFare
 
 # ── Notifications ──
 from .notification import Notification

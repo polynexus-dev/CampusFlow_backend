@@ -30,22 +30,29 @@ from rest_framework import serializers as drf_serializers
 from django.utils import timezone
 from datetime import timedelta
 
+from decimal import Decimal
 from campusflow_app.models import (
     BusRoute, BusLocation, BusTrail, BusTrip,
-    BusSubscription, BusAttendance, BusScanEvent,
+    BusSubscription, BusAttendance, BusScanEvent, BusStopFare,
 )
 from campusflow_app.permissions import IsSaaSOrCollegeAdmin, RequiresModule, is_saas_or_college_admin, get_user_group
 from campusflow_app.services.qr_branding import render_branded_qr
 from campusflow_app.services.notifications import notify_guardians_of_student
 
 BUS_PERMS = [IsAuthenticated, RequiresModule("bus-tracking")]
+def is_transport_or_accountant(user):
+    """College Admins, Transport Coordinator, Accounts Officer, and Fee Counter can manage transport & subscriptions."""
+    group = get_user_group(user)
+    return is_saas_or_college_admin(user) or group in ('Transport Coordinator', 'Accounts Officer', 'Fee Counter')
+
+
 def is_transport_manager(user):
     """College Admins and the Transport Coordinator run the fleet (routes, passes, QR codes, oversight)."""
-    return is_saas_or_college_admin(user) or get_user_group(user) == 'Transport Coordinator'
+    return is_transport_or_accountant(user)
 
 
 class IsTransportManager(BasePermission):
-    message = "Only the Transport Coordinator or a College Admin can manage transport."
+    message = "Only the Transport Coordinator, Accountant, or a College Admin can manage transport."
 
     def has_permission(self, request, view):
         return is_transport_manager(request.user)
@@ -58,35 +65,120 @@ BUS_ADMIN_PERMS = [IsAuthenticated, IsTransportManager, RequiresModule("bus-trac
 # Serializers
 # ─────────────────────────────────────────────────────────────────────────────
 
+class BusStopFareSerializer(drf_serializers.ModelSerializer):
+    route_name = drf_serializers.CharField(source="route.name", read_only=True)
+    created_by_name = drf_serializers.SerializerMethodField()
+
+    class Meta:
+        model = BusStopFare
+        fields = [
+            "id", "route", "route_name", "stop_name", "standard_amount",
+            "term", "created_by", "created_by_name", "created_at", "updated_at"
+        ]
+        read_only_fields = ["created_by", "created_at", "updated_at"]
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return None
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            validated_data["created_by"] = request.user
+        return super().create(validated_data)
+
+
 class BusSubscriptionSerializer(drf_serializers.ModelSerializer):
     student_name = drf_serializers.SerializerMethodField()
-    route_name   = drf_serializers.SerializerMethodField()
-    is_valid     = drf_serializers.SerializerMethodField()
+    identifier = drf_serializers.SerializerMethodField()
+    user_type = drf_serializers.SerializerMethodField()
+    route_name = drf_serializers.SerializerMethodField()
+    is_valid = drf_serializers.SerializerMethodField()
+    created_by_name = drf_serializers.SerializerMethodField()
     allocated_fee = drf_serializers.SerializerMethodField()
-    paid_fee      = drf_serializers.SerializerMethodField()
-    balance_fee   = drf_serializers.SerializerMethodField()
+    paid_fee = drf_serializers.SerializerMethodField()
+    balance_fee = drf_serializers.SerializerMethodField()
     last_payment_date = drf_serializers.SerializerMethodField()
+    discount_amount = drf_serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True, default=Decimal('0.00'))
+    discount_reason = drf_serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    base_amount = drf_serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True, default=Decimal('0.00'))
 
     class Meta:
         model = BusSubscription
         fields = [
-            "id", "user", "student_name",
+            "id", "user", "student_name", "identifier", "user_type",
             "route", "route_name",
-            "status", "valid_from", "valid_until",
-            "boarding_stop", "notes", "is_valid",
+            "academic_year", "status", "valid_from", "valid_until",
+            "boarding_stop", "base_amount", "discount_amount", "discount_reason", "final_amount",
+            "created_by", "created_by_name",
+            "notes", "is_valid",
             "allocated_fee", "paid_fee", "balance_fee", "last_payment_date",
-            "created_at",
+            "created_at", "updated_at",
         ]
-        read_only_fields = ["created_at"]
+        read_only_fields = ["created_at", "updated_at", "created_by", "final_amount"]
 
     def get_student_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+    def get_identifier(self, obj):
+        # Return Student ID (roll number) or Staff Employee ID
+        if hasattr(obj.user, "student_profile") and obj.user.student_profile:
+            return obj.user.student_profile.student_id
+        if hasattr(obj.user, "teaching_staff_profile") and obj.user.teaching_staff_profile:
+            return obj.user.teaching_staff_profile.employee_id
+        if hasattr(obj.user, "non_teaching_staff_profile") and obj.user.non_teaching_staff_profile:
+            return obj.user.non_teaching_staff_profile.employee_id
+        return obj.user.username
+
+    def get_user_type(self, obj):
+        if hasattr(obj.user, "student_profile"):
+            return "Student"
+        if hasattr(obj.user, "teaching_staff_profile"):
+            return "Faculty"
+        if hasattr(obj.user, "non_teaching_staff_profile"):
+            return "Staff"
+        return "User"
 
     def get_route_name(self, obj):
         return obj.route.name
 
     def get_is_valid(self, obj):
         return obj.is_valid
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return None
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            validated_data["created_by"] = request.user
+
+        if validated_data.get("discount_amount") is None:
+            validated_data["discount_amount"] = Decimal("0.00")
+        if validated_data.get("discount_reason") is None:
+            validated_data["discount_reason"] = ""
+
+        # Auto-fetch base_amount from stop fare if not explicitly passed
+        base_amt = validated_data.get("base_amount")
+        if (not base_amt or Decimal(str(base_amt)) == 0) and validated_data.get("route") and validated_data.get("boarding_stop"):
+            stop_fare = BusStopFare.objects.filter(
+                route=validated_data["route"],
+                stop_name__iexact=validated_data["boarding_stop"].strip()
+            ).first()
+            if stop_fare:
+                validated_data["base_amount"] = stop_fare.standard_amount
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "discount_amount" in validated_data and validated_data["discount_amount"] is None:
+            validated_data["discount_amount"] = Decimal("0.00")
+        if "discount_reason" in validated_data and validated_data["discount_reason"] is None:
+            validated_data["discount_reason"] = ""
+        return super().update(instance, validated_data)
 
     def _get_bus_fee_metrics(self, obj):
         if hasattr(obj, "_fee_metrics"):
@@ -294,43 +386,153 @@ class BusRouteRegenQRView(APIView):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Subscription management (Admin)
+# Bus Stop Fare (Location-wise rate decided by Accountant)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BusStopFareListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/bus/stop-fares/?route_id=&term=  — List location-wise fares
+    POST /api/bus/stop-fares/                  — Single or Bulk assign fares for stops in a route.
+    
+    Supports:
+    1. Single stop fare object:
+       {"route": 1, "stop_name": "Wardha Road", "standard_amount": "15000.00", "term": "2026-2027"}
+    2. Bulk assignment for all stops in a route:
+       {
+         "route": 1,
+         "term": "2026-2027",
+         "fares": [
+            {"stop_name": "Station", "standard_amount": "10000.00"},
+            {"stop_name": "Wardha Road", "standard_amount": "15000.00"},
+            {"stop_name": "Hingna T-Point", "standard_amount": "18000.00"}
+         ]
+       }
+    """
+    serializer_class = BusStopFareSerializer
+    permission_classes = BUS_ADMIN_PERMS
+
+    def get_queryset(self):
+        qs = BusStopFare.objects.select_related("route", "created_by").order_by("route__name", "stop_name")
+        route_id = self.request.query_params.get("route_id")
+        term = self.request.query_params.get("term")
+        stop_name = self.request.query_params.get("stop_name")
+        if route_id:
+            qs = qs.filter(route_id=route_id)
+        if term:
+            qs = qs.filter(term=term)
+        if stop_name:
+            qs = qs.filter(stop_name__icontains=stop_name)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        # Check if bulk payload with "fares" list is provided
+        if "fares" in request.data:
+            route_id = request.data.get("route") or request.data.get("route_id")
+            term = request.data.get("term", "")
+            fares_list = request.data.get("fares", [])
+
+            if not route_id:
+                return Response({"error": "route ID is required for bulk fare assignment."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                route = BusRoute.objects.get(pk=route_id)
+            except BusRoute.DoesNotExist:
+                return Response({"error": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            created_objects = []
+            for item in fares_list:
+                stop_name = item.get("stop_name") or item.get("name")
+                amt = item.get("standard_amount") or item.get("amount")
+                if not stop_name or amt is None:
+                    continue
+                item_term = item.get("term", term)
+                obj, _ = BusStopFare.objects.update_or_create(
+                    route=route,
+                    stop_name=stop_name.strip(),
+                    term=item_term,
+                    defaults={
+                        "standard_amount": Decimal(str(amt)),
+                        "created_by": request.user if request.user.is_authenticated else None,
+                    }
+                )
+                created_objects.append(obj)
+
+            serializer = self.get_serializer(created_objects, many=True)
+            return Response({
+                "message": f"Successfully configured fares for {len(created_objects)} stops on {route.name}.",
+                "route_id": route.id,
+                "term": term,
+                "fares": serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        # Standard single create
+        return super().create(request, *args, **kwargs)
+
+
+class BusStopFareDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PUT/PATCH/DELETE /api/bus/stop-fares/<id>/
+    Accountant/Admin modifies or removes location-wise fare rate.
+    """
+    serializer_class = BusStopFareSerializer
+    permission_classes = BUS_ADMIN_PERMS
+    queryset = BusStopFare.objects.select_related("route", "created_by")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subscription management (Accountant / Admin)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BusSubscriptionListCreateView(generics.ListCreateAPIView):
     """
-    GET  /api/bus/subscriptions/?route_id=&user_id=&status=
-    POST /api/bus/subscriptions/   — Assign a student to a route (Admin only)
-    Students can view their own subscriptions.
+    GET  /api/bus/subscriptions/?route_id=&user_id=&status=&user_type=&search=
+    POST /api/bus/subscriptions/   — Assign a student or faculty to a route
+    Allows specifying location, amount, validity dates, discount, and discount reason.
     """
     serializer_class   = BusSubscriptionSerializer
     permission_classes = BUS_PERMS
 
     def get_queryset(self):
         user = self.request.user
-        qs = BusSubscription.objects.select_related("user", "route").order_by("-created_at")
+        qs = BusSubscription.objects.select_related(
+            "user", "route", "created_by",
+            "user__student_profile", "user__teaching_staff_profile", "user__non_teaching_staff_profile"
+        ).order_by("-created_at")
 
-        # Students can only see their own subscriptions
-        if not is_saas_or_college_admin(user):
+        # Students and normal faculty only see their own subscriptions
+        if not is_transport_or_accountant(user):
             return qs.filter(user=user)
 
-        # Admin filters
+        # Admin / Accountant filters
         route_id = self.request.query_params.get("route_id")
         user_id  = self.request.query_params.get("user_id")
         sub_status = self.request.query_params.get("status")
+        search = self.request.query_params.get("search")
         if route_id:
             qs = qs.filter(route_id=route_id)
         if user_id:
             qs = qs.filter(user_id=user_id)
         if sub_status:
             qs = qs.filter(status=sub_status)
+        if search:
+            from django.db.models import Q
+            s = search.strip()
+            qs = qs.filter(
+                Q(user__username__icontains=s) |
+                Q(user__first_name__icontains=s) |
+                Q(user__last_name__icontains=s) |
+                Q(boarding_stop__icontains=s) |
+                Q(user__student_profile__student_id__icontains=s) |
+                Q(user__teaching_staff_profile__employee_id__icontains=s) |
+                Q(user__non_teaching_staff_profile__employee_id__icontains=s)
+            )
         return qs
 
     def create(self, request, *args, **kwargs):
-        # Only admins can create subscriptions
-        if not is_transport_manager(request.user):
+        # Only admins or accountants can create subscriptions
+        if not is_transport_or_accountant(request.user):
             return Response(
-                {"error": "Only admins can assign bus subscriptions."},
+                {"error": "Only accountants or transport managers can assign bus subscriptions."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         return super().create(request, *args, **kwargs)
@@ -338,14 +540,17 @@ class BusSubscriptionListCreateView(generics.ListCreateAPIView):
 
 class BusSubscriptionDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
-    GET/PATCH/DELETE /api/bus/subscriptions/<id>/
-    Admin updates status (active/expired/suspended) or removes a student from route.
+    GET/PUT/PATCH/DELETE /api/bus/subscriptions/<id>/
+    Accountant/Admin updates validity_until, status, boarding_stop, base_amount, discount, etc.
     """
     serializer_class   = BusSubscriptionSerializer
     permission_classes = BUS_ADMIN_PERMS
 
     def get_queryset(self):
-        return BusSubscription.objects.select_related("user", "route")
+        return BusSubscription.objects.select_related(
+            "user", "route", "created_by",
+            "user__student_profile", "user__teaching_staff_profile", "user__non_teaching_staff_profile"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -721,13 +926,14 @@ class BusRouteSerializer(drf_serializers.ModelSerializer):
     driver_name = drf_serializers.SerializerMethodField()
     conductor_name = drf_serializers.SerializerMethodField()
     subscriber_count = drf_serializers.SerializerMethodField()
+    stop_fares = drf_serializers.SerializerMethodField()
 
     class Meta:
         model = BusRoute
         fields = [
             "id", "name", "driver", "driver_name",
             "conductor", "conductor_name",
-            "stops", "is_active", "created_at", "subscriber_count",
+            "stops", "stop_fares", "is_active", "created_at", "subscriber_count",
         ]
 
     def get_driver_name(self, obj):
@@ -742,6 +948,69 @@ class BusRouteSerializer(drf_serializers.ModelSerializer):
 
     def get_subscriber_count(self, obj):
         return obj.subscriptions.filter(status="active").count()
+
+    def get_stop_fares(self, obj):
+        fares = obj.stop_fares.all()
+        return [
+            {
+                "id": f.id,
+                "stop_name": f.stop_name,
+                "standard_amount": str(f.standard_amount),
+                "term": f.term,
+            }
+            for f in fares
+        ]
+
+    def _sync_stop_fares(self, route, request):
+        if not request:
+            return
+        term = request.data.get("term", "")
+
+        # 1. Compact format: Each stop inside "stops" carries "fare" / "amount"
+        if route.stops and isinstance(route.stops, list):
+            for st in route.stops:
+                if isinstance(st, dict):
+                    stop_name = st.get("name")
+                    amt = st.get("fare") if st.get("fare") is not None else st.get("amount")
+                    if stop_name and amt is not None:
+                        BusStopFare.objects.update_or_create(
+                            route=route,
+                            stop_name=stop_name.strip(),
+                            term=st.get("term", term),
+                            defaults={
+                                "standard_amount": Decimal(str(amt)),
+                                "created_by": request.user if request.user.is_authenticated else None,
+                            }
+                        )
+
+        # 2. Or explicit "stop_fares" array:
+        if "stop_fares" in request.data:
+            fares_data = request.data.get("stop_fares", [])
+            for sf in fares_data:
+                stop_name = sf.get("stop_name") or sf.get("name")
+                amt = sf.get("standard_amount") or sf.get("amount") or sf.get("fare")
+                if stop_name and amt is not None:
+                    BusStopFare.objects.update_or_create(
+                        route=route,
+                        stop_name=stop_name.strip(),
+                        term=sf.get("term", term),
+                        defaults={
+                            "standard_amount": Decimal(str(amt)),
+                            "created_by": request.user if request.user.is_authenticated else None,
+                        }
+                    )
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        route = super().create(validated_data)
+        self._sync_stop_fares(route, request)
+        return route
+
+    def update(self, instance, validated_data):
+        request = self.context.get("request")
+        route = super().update(instance, validated_data)
+        self._sync_stop_fares(route, request)
+        return route
 
 
 # ─────────────────────────────────────────────────────────────────────────────

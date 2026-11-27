@@ -125,6 +125,7 @@ from campusflow_app.views.bus_tracking import (
     BusRouteQRView, BusRouteRegenQRView,
     BusLiveLocationsView, BusTrailView,
     BusSubscriptionListCreateView, BusSubscriptionDetailView,
+    BusStopFareListCreateView, BusStopFareDetailView,
     BusBoardingScanView, BusAttendanceListView,
     BusDriverDashboardView, BusSummaryStatsView,
     BusTripStartView, BusTripEndView, BusDriverTripStatsView,
@@ -549,7 +550,10 @@ urlpatterns = [
     path('bus/routes/<int:pk>/', BusRouteDetailView.as_view(), name='bus-route-detail'),
     path('bus/routes/<int:pk>/qr/', BusRouteQRView.as_view(), name='bus-route-qr'),
     path('bus/routes/<int:pk>/regen-qr/', BusRouteRegenQRView.as_view(), name='bus-route-regen-qr'),
-    # Admin: subscription management
+    # Accountant / Admin: stop fare rates
+    path('bus/stop-fares/', BusStopFareListCreateView.as_view(), name='bus-stop-fare-list'),
+    path('bus/stop-fares/<int:pk>/', BusStopFareDetailView.as_view(), name='bus-stop-fare-detail'),
+    # Accountant / Admin: subscription management
     path('bus/subscriptions/', BusSubscriptionListCreateView.as_view(), name='bus-subscription-list'),
     path('bus/subscriptions/<int:pk>/', BusSubscriptionDetailView.as_view(), name='bus-subscription-detail'),
     # Admin: live tracking & trail

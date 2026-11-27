@@ -1152,24 +1152,152 @@ class ScheduleSerializer(serializers.ModelSerializer):
 
 # ── Hostel Management Serializers ──
 class HostelSerializer(serializers.ModelSerializer):
+    total_rooms = serializers.SerializerMethodField()
+    total_capacity = serializers.SerializerMethodField()
+    total_occupied = serializers.SerializerMethodField()
+    vacant_beds = serializers.SerializerMethodField()
+
     class Meta:
         model = Hostel
-        fields = '__all__'
+        fields = [
+            'id', 'name', 'gender_type', 'capacity', 'address',
+            'total_rooms', 'total_capacity', 'total_occupied', 'vacant_beds',
+            'created_at', 'updated_at'
+        ]
+
+    def get_total_rooms(self, obj):
+        return obj.rooms.count()
+
+    def get_total_capacity(self, obj):
+        return sum(r.capacity for r in obj.rooms.all())
+
+    def get_total_occupied(self, obj):
+        # Calculate real active occupied beds
+        return sum(r.allocations.filter(status='Allocated').count() for r in obj.rooms.all())
+
+    def get_vacant_beds(self, obj):
+        cap = self.get_total_capacity(obj)
+        occ = self.get_total_occupied(obj)
+        return max(0, cap - occ)
+
 
 class HostelRoomSerializer(serializers.ModelSerializer):
     hostel_name = serializers.CharField(source='hostel.name', read_only=True)
+    gender_type = serializers.CharField(source='hostel.gender_type', read_only=True)
+    occupied_beds = serializers.SerializerMethodField()
+    available_beds = serializers.SerializerMethodField()
+    is_vacant = serializers.SerializerMethodField()
+    current_occupants = serializers.SerializerMethodField()
+
     class Meta:
         model = HostelRoom
-        fields = '__all__'
+        fields = [
+            'id', 'hostel', 'hostel_name', 'gender_type',
+            'room_number', 'capacity', 'rent_per_semester',
+            'occupied_beds', 'available_beds', 'is_vacant', 'current_occupants'
+        ]
+
+    def get_occupied_beds(self, obj):
+        return obj.allocations.filter(status='Allocated').count()
+
+    def get_available_beds(self, obj):
+        occ = self.get_occupied_beds(obj)
+        return max(0, obj.capacity - occ)
+
+    def get_is_vacant(self, obj):
+        return self.get_available_beds(obj) > 0
+
+    def get_current_occupants(self, obj):
+        allocations = obj.allocations.filter(status='Allocated').select_related('student__user')
+        return [
+            {
+                "allocation_id": a.id,
+                "student_id": a.student.student_id,
+                "student_name": a.student.user.get_full_name() or a.student.user.username,
+                "allocated_date": str(a.allocated_date)
+            }
+            for a in allocations
+        ]
+
 
 class HostelAllocationSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.user.get_full_name', read_only=True)
     student_id = serializers.CharField(source='student.student_id', read_only=True)
+    student_gender = serializers.CharField(source='student.gender', read_only=True)
+    hostel = serializers.PrimaryKeyRelatedField(
+        queryset=Hostel.objects.all(),
+        required=False,
+        write_only=True,
+        help_text="Optional hostel ID to verify room belongs to specified hostel & gender."
+    )
+    hostel_id = serializers.IntegerField(source='room.hostel.id', read_only=True)
     hostel_name = serializers.CharField(source='room.hostel.name', read_only=True)
+    hostel_gender = serializers.CharField(source='room.hostel.gender_type', read_only=True)
     room_number = serializers.CharField(source='room.room_number', read_only=True)
+    rent_per_semester = serializers.DecimalField(source='room.rent_per_semester', max_digits=10, decimal_places=2, read_only=True)
+
     class Meta:
         model = HostelAllocation
-        fields = '__all__'
+        fields = [
+            'id', 'student', 'student_id', 'student_name', 'student_gender',
+            'hostel', 'hostel_id', 'hostel_name', 'hostel_gender',
+            'room', 'room_number', 'rent_per_semester',
+            'allocated_date', 'vacated_date', 'status',
+            'created_at', 'updated_at'
+        ]
+
+    def validate(self, attrs):
+        hostel = attrs.pop('hostel', None)
+        room = attrs.get('room') or (self.instance.room if self.instance else None)
+        student = attrs.get('student') or (self.instance.student if self.instance else None)
+        status_val = attrs.get('status') or (self.instance.status if self.instance else 'Allocated')
+
+        if not room or not student:
+            return attrs
+
+        # 0. If hostel is explicitly passed, verify room belongs to that hostel
+        if hostel and room.hostel_id != hostel.id:
+            raise serializers.ValidationError({
+                "room": f"Room '{room.room_number}' does not belong to hostel '{hostel.name}' (it belongs to '{room.hostel.name}')."
+            })
+
+        # 1. Capacity validation when allocating
+        if status_val == 'Allocated':
+            active_allocations = room.allocations.filter(status='Allocated')
+            if self.instance:
+                active_allocations = active_allocations.exclude(pk=self.instance.pk)
+            
+            occupied_count = active_allocations.count()
+            if occupied_count >= room.capacity:
+                raise serializers.ValidationError({
+                    "room": f"Room '{room.room_number}' in {room.hostel.name} has reached its maximum capacity of {room.capacity} bed(s) ({occupied_count}/{room.capacity} occupied). Cannot allocate more students."
+                })
+
+            # 2. Check if student already has another active allocation
+            student_active = HostelAllocation.objects.filter(student=student, status='Allocated')
+            if self.instance:
+                student_active = student_active.exclude(pk=self.instance.pk)
+            
+            existing = student_active.select_related('room__hostel').first()
+            if existing:
+                raise serializers.ValidationError({
+                    "student": f"Student '{student.student_id}' is already actively allocated to Room '{existing.room.room_number}' in {existing.room.hostel.name}. Please vacate the current room before allocating a new one."
+                })
+
+            # 3. Gender compatibility check
+            target_hostel = hostel or room.hostel
+            hostel_gender = target_hostel.gender_type
+            student_gender = (student.gender or "").strip().capitalize()
+            if hostel_gender == 'Boys' and student_gender == 'Female':
+                raise serializers.ValidationError({
+                    "student": f"Cannot allocate female student '{student.student_id}' to Boys Hostel '{target_hostel.name}'."
+                })
+            elif hostel_gender == 'Girls' and student_gender == 'Male':
+                raise serializers.ValidationError({
+                    "student": f"Cannot allocate male student '{student.student_id}' to Girls Hostel '{target_hostel.name}'."
+                })
+
+        return attrs
 
 
 # ── Training & Placement (TPO) Serializers ──

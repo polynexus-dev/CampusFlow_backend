@@ -13,6 +13,7 @@ an approve/reject action view — duplicated per request type rather than
 abstracted, matching that file's own precedent of one explicit view set per
 workflow instead of a shared generic base.
 """
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -21,9 +22,15 @@ from rest_framework.views import APIView
 
 from ..models.academics import AcademicYear
 from ..models.clearance import ClearanceRequest
+from ..models.exam import Exam
 from ..models.exam_administration import ConvocationRequest, MigrationRequest, RevaluationRequest
+from ..models.offerings import CourseOffering
 from ..models.result import StudentExamResult
-from ..permissions import RequiresModule, IsHMOrAbove, IsSaaSOrCollegeAdmin, is_college_admin, is_faculty_or_above
+from ..models.schedule import Schedule
+from ..permissions import (
+    RequiresModule, IsHMOrAbove, IsFacultyOrAbove, IsSaaSOrCollegeAdmin,
+    is_college_admin, is_faculty_or_above, get_user_group, is_saas_admin,
+)
 from ..services.clearance import is_student_cleared
 from ..services.detention import get_detention_settings
 
@@ -103,28 +110,49 @@ class RevaluationRequestCreateView(APIView):
 
 
 class RevaluationRequestListView(APIView):
-    """GET /api/exam-administration/revaluation-requests/?exam_id= — pending requests,
-    department-scoped for a Department Head, unscoped for College/SaaS Admin."""
-    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("exams")]
+    """GET /api/exam-administration/revaluation-requests/pending/?exam_id= — pending requests,
+    scoped by role:
+      - Faculty: only pending requests for their own subjects/courses (taught or set/invigilated).
+      - Department Head: department-scoped.
+      - College/SaaS Admin / Principal: unscoped across the college."""
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
 
     def get(self, request):
         qs = RevaluationRequest.objects.filter(status=RevaluationRequest.STATUS_PENDING).select_related(
-            "result__student__user", "result__exam", "requested_by",
+            "result__student__user", "result__exam__course", "requested_by",
         )
-        if not is_college_admin(request.user):
-            dept_ids = set()
-            hod_profile = getattr(request.user, "department_head_profile", None)
-            if hod_profile and hod_profile.department_id:
-                dept_ids.add(hod_profile.department_id)
-            departments = getattr(request.user, "departments_led", None)
-            if departments is not None:
-                dept_ids.update(departments.values_list("id", flat=True))
-            staff_profile = getattr(request.user, "teaching_staff_profile", None)
-            if staff_profile and staff_profile.department_id:
-                dept_ids.add(staff_profile.department_id)
+        user = request.user
+        group = get_user_group(user)
 
-            if dept_ids:
-                qs = qs.filter(result__exam__department_id__in=list(dept_ids))
+        if not is_college_admin(user) and not is_saas_admin(user) and group not in ('Management', 'Administrator', 'Principal'):
+            if group == 'Faculty':
+                # Faculty can only see pending requests for subjects/courses they teach or examine
+                faculty_course_ids = set(CourseOffering.objects.filter(faculty=user).values_list("course_id", flat=True))
+                faculty_course_ids.update(Schedule.objects.filter(Q(faculty=user) | Q(substitute_faculty=user)).values_list("course_id", flat=True))
+                faculty_course_ids.update(Exam.objects.filter(Q(created_by=user) | Q(invigilator=user)).values_list("course_id", flat=True))
+
+                qs = qs.filter(
+                    Q(result__exam__course_id__in=faculty_course_ids) |
+                    Q(result__exam__created_by=user) |
+                    Q(result__exam__invigilator=user)
+                )
+            elif group == 'Department Head':
+                dept_ids = set()
+                hod_profile = getattr(user, "department_head_profile", None)
+                if hod_profile and hod_profile.department_id:
+                    dept_ids.add(hod_profile.department_id)
+                departments = getattr(user, "departments_led", None)
+                if departments is not None:
+                    dept_ids.update(departments.values_list("id", flat=True))
+                if dept_ids:
+                    qs = qs.filter(result__exam__department_id__in=list(dept_ids))
+            else:
+                staff_profile = getattr(user, "teaching_staff_profile", None)
+                dept_ids = set()
+                if staff_profile and staff_profile.department_id:
+                    dept_ids.add(staff_profile.department_id)
+                if dept_ids:
+                    qs = qs.filter(result__exam__department_id__in=list(dept_ids))
 
         exam_id = request.query_params.get("exam_id")
         if exam_id:
@@ -136,13 +164,41 @@ class RevaluationRequestActionView(APIView):
     """POST /api/exam-administration/revaluation-requests/<id>/action/
     Payload: {action: "approve" | "reject", revised_marks?}
     revised_marks is required on approve — the reviewer's own re-checked mark."""
-    permission_classes = [IsAuthenticated, IsHMOrAbove, RequiresModule("exams")]
+    permission_classes = [IsAuthenticated, IsFacultyOrAbove, RequiresModule("exams")]
 
     def post(self, request, pk):
         try:
             revaluation = RevaluationRequest.objects.select_related("result__exam", "requested_by").get(pk=pk)
         except RevaluationRequest.DoesNotExist:
             return Response({"error": "Revaluation request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        user = request.user
+        group = get_user_group(user)
+        if not is_college_admin(user) and not is_saas_admin(user) and group not in ('Management', 'Administrator', 'Principal'):
+            if group == 'Faculty':
+                exam = revaluation.result.exam
+                faculty_course_ids = set(CourseOffering.objects.filter(faculty=user).values_list("course_id", flat=True))
+                faculty_course_ids.update(Schedule.objects.filter(Q(faculty=user) | Q(substitute_faculty=user)).values_list("course_id", flat=True))
+                faculty_course_ids.update(Exam.objects.filter(Q(created_by=user) | Q(invigilator=user)).values_list("course_id", flat=True))
+
+                is_their_subject = (
+                    exam.course_id in faculty_course_ids or
+                    exam.created_by_id == user.id or
+                    exam.invigilator_id == user.id
+                )
+                if not is_their_subject:
+                    return Response({"error": "You can only review revaluation requests for your own subjects."}, status=status.HTTP_403_FORBIDDEN)
+            elif group == 'Department Head':
+                hod_profile = getattr(user, "department_head_profile", None)
+                dept_ids = set()
+                if hod_profile and hod_profile.department_id:
+                    dept_ids.add(hod_profile.department_id)
+                departments = getattr(user, "departments_led", None)
+                if departments is not None:
+                    dept_ids.update(departments.values_list("id", flat=True))
+                exam_dept_id = revaluation.result.exam.department_id
+                if dept_ids and exam_dept_id not in dept_ids:
+                    return Response({"error": "You can only review revaluation requests for your own department."}, status=status.HTTP_403_FORBIDDEN)
 
         if revaluation.status != RevaluationRequest.STATUS_PENDING:
             return Response({"error": "This request has already been reviewed."}, status=status.HTTP_400_BAD_REQUEST)

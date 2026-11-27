@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -56,24 +57,72 @@ class BusRoute(models.Model):
         self.save(update_fields=["qr_token"])
 
 
+class BusStopFare(models.Model):
+    """
+    Location-wise fare decided by the Accountant / Transport Manager for a route stop.
+    """
+    route = models.ForeignKey(
+        BusRoute,
+        on_delete=models.CASCADE,
+        related_name="stop_fares",
+        help_text="The bus route this stop/location belongs to",
+    )
+    stop_name = models.CharField(
+        max_length=255,
+        help_text="Name of the stop / location (e.g. Wardha Road, Hingna T-Point)",
+    )
+    standard_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Standard fare amount for this location/stop",
+    )
+    term = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Term or Academic Year (e.g. 2026-2027, Semester 1)",
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_bus_stop_fares",
+        help_text="The accountant or admin who defined this fare",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Bus Stop Fare"
+        verbose_name_plural = "Bus Stop Fares"
+        unique_together = [("route", "stop_name", "term")]
+
+    def __str__(self):
+        return f"{self.route.name} - {self.stop_name} (Rs. {self.standard_amount})"
+
+
 class BusSubscription(models.Model):
     """
-    Records which students are subscribed (paid bus fees) for a route.
-    Only subscribed students can board (scan QR).
+    Records which students or faculty/staff are subscribed for a bus route.
+    Accountant/Admin can configure location, amount, validity dates, and discounts.
     """
     STATUS_ACTIVE = "active"
     STATUS_EXPIRED = "expired"
     STATUS_SUSPENDED = "suspended"
+    STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = [
         (STATUS_ACTIVE,    "Active"),
         (STATUS_EXPIRED,   "Expired"),
         (STATUS_SUSPENDED, "Suspended"),
+        (STATUS_CANCELLED, "Cancelled"),
     ]
 
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
         related_name="bus_subscriptions",
+        help_text="Student or Faculty/Staff user",
     )
     route = models.ForeignKey(
         BusRoute,
@@ -89,21 +138,64 @@ class BusSubscription(models.Model):
     valid_until = models.DateField(
         null=True,
         blank=True,
-        help_text="Leave blank for no expiry",
+        help_text="Leave blank for no expiry; editable by accountant",
     )
     boarding_stop = models.CharField(
         max_length=255,
         blank=True,
-        help_text="Name of the stop where student boards the bus (e.g. Wardha Road stop)",
+        help_text="Name of the stop/location where user boards (e.g. Wardha Road stop)",
+    )
+    base_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        help_text="Base standard amount for this stop/location",
+    )
+    discount_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        help_text="Discount granted by accountant (for special students/staff)",
+    )
+    discount_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Reason for discount (e.g. Merit, Staff Ward, Concession)",
+    )
+    final_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        help_text="Final payable amount (base_amount - discount_amount)",
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_bus_subscriptions",
+        help_text="Accountant / Admin who created this subscription",
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    notes = models.TextField(blank=True, help_text="e.g. Semester 1 fees paid")
-
+    updated_at = models.DateTimeField(auto_now=True)
+    academic_year = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text='Academic year for this subscription, e.g. "2026-2027"',
+    )
+    notes = models.TextField(blank=True, help_text="e.g. Semester 1 fees paid / custom notes")
 
     class Meta:
         verbose_name = "Bus Subscription"
         verbose_name_plural = "Bus Subscriptions"
         unique_together = [("user", "route")]   # one active subscription per user per route
+
+    def save(self, *args, **kwargs):
+        base = Decimal(str(self.base_amount or 0.00))
+        discount = Decimal(str(self.discount_amount or 0.00))
+        self.final_amount = max(Decimal("0.00"), base - discount)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.user.get_full_name()} → {self.route.name} ({self.status})"
@@ -113,10 +205,25 @@ class BusSubscription(models.Model):
         today = timezone.localdate()
         if self.status != self.STATUS_ACTIVE:
             return False
-        if self.valid_from > today:
+
+        # Date range check
+        if self.valid_from and self.valid_from > today:
             return False
         if self.valid_until and self.valid_until < today:
             return False
+
+        # Academic Year check (if linked to an academic year, check if academic year has ended)
+        if self.academic_year:
+            from campusflow_app.models.academics import AcademicYear
+            ay = AcademicYear.objects.filter(name=self.academic_year.strip()).first()
+            if ay:
+                if ay.is_closed:
+                    return False
+                if ay.start_date and today < ay.start_date:
+                    return False
+                if ay.end_date and today > ay.end_date:
+                    return False
+
         return True
 
 

@@ -214,6 +214,52 @@ class RevaluationRequestTests(_Phase4FixtureMixin, TenantTestCase):
             self.result.refresh_from_db()
             self.assertEqual(self.result.marks_obtained, 40)
 
+    def test_faculty_can_view_and_action_pending_revaluations_only_for_their_subject(self):
+        with schema_context(self.tenant.schema_name):
+            fac_group, _ = Group.objects.get_or_create(name="Faculty")
+            self.faculty_user.groups.add(fac_group)
+
+            other_faculty = User.objects.create_user(username="fac2", email="fac2@test.com")
+            other_faculty.groups.add(fac_group)
+            TeachingStaffProfile.objects.create(user=other_faculty, employee_id="EMP002", department=self.dept)
+
+            from .models.schedule import Schedule
+            Schedule.objects.create(
+                course=self.exam.course, faculty=self.faculty_user, semester="1", academic_year="2026-2027",
+                start_time="09:00", end_time="10:00", day_of_week="Monday"
+            )
+
+            req = RevaluationRequest.objects.create(result=self.result, requested_by=self.student.user, reason="Need recheck.")
+
+        # 1. Other faculty (not teaching this course) cannot see this pending request
+        response_other = self.client.get(reverse("revaluationrequest-list"), **self._auth(other_faculty))
+        self.assertEqual(response_other.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response_other.data["results"]), 0)
+
+        # 2. Other faculty cannot action this revaluation request (403 Forbidden)
+        action_other = self.client.post(
+            reverse("revaluationrequest-action", args=[req.id]),
+            json.dumps({"action": "approve", "revised_marks": 50}),
+            content_type="application/json", **self._auth(other_faculty),
+        )
+        self.assertEqual(action_other.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Assigned faculty sees the pending request
+        response_fac = self.client.get(reverse("revaluationrequest-list"), **self._auth(self.faculty_user))
+        self.assertEqual(response_fac.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response_fac.data["results"]), 1)
+        self.assertEqual(response_fac.data["results"][0]["id"], req.id)
+
+        # 4. Assigned faculty can approve the revaluation request
+        action_fac = self.client.post(
+            reverse("revaluationrequest-action", args=[req.id]),
+            json.dumps({"action": "approve", "revised_marks": 52}),
+            content_type="application/json", **self._auth(self.faculty_user),
+        )
+        self.assertEqual(action_fac.status_code, status.HTTP_200_OK)
+        self.assertEqual(action_fac.data["status"], "approved")
+        self.assertEqual(action_fac.data["revised_marks"], 52.0)
+
 
 class MigrationAndConvocationTests(_Phase4FixtureMixin, TenantTestCase):
     def setUp(self):
