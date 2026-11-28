@@ -182,9 +182,15 @@ class StudentFeeInvoiceItemSerializer(drf_serializers.ModelSerializer):
 
 
 class StudentFeeInvoiceSerializer(drf_serializers.ModelSerializer):
-    items = StudentFeeInvoiceItemSerializer(many=True, read_only=True)
+    items = StudentFeeInvoiceItemSerializer(many=True, required=False)
     student_name = drf_serializers.SerializerMethodField()
     remaining_balance = drf_serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    fee_structure = drf_serializers.PrimaryKeyRelatedField(
+        queryset=FeeStructure.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None
+    )
 
     class Meta:
         model = StudentFeeInvoice
@@ -194,9 +200,34 @@ class StudentFeeInvoiceSerializer(drf_serializers.ModelSerializer):
             "discount_amount", "paid_amount", "remaining_balance",
             "status", "items", "created_at", "updated_at"
         ]
+        read_only_fields = ["invoice_number", "paid_amount", "status", "created_at", "updated_at"]
 
     def get_student_name(self, obj):
         return obj.student.get_full_name() or obj.student.username
+
+    @transaction.atomic
+    def create(self, validated_data):
+        validated_data.pop('items', None)
+        # If student passed is a StudentProfile ID (or user without student profile), resolve to the actual User:
+        raw_student = self.context.get('request').data.get('student') if self.context.get('request') else None
+        if raw_student:
+            student_prof = StudentProfile.objects.filter(pk=raw_student).select_related('user').first()
+            if student_prof:
+                validated_data['student'] = student_prof.user
+
+        items_data = self.context.get('request').data.get('items', []) if self.context.get('request') else []
+        invoice = StudentFeeInvoice.objects.create(**validated_data)
+        for item_data in items_data:
+            cat = item_data.get('category')
+            cat_id = cat.get('id') if isinstance(cat, dict) else cat
+            amt = item_data.get('amount')
+            if cat_id is not None and amt is not None:
+                StudentFeeInvoiceItem.objects.create(
+                    invoice=invoice,
+                    category_id=cat_id,
+                    amount=Decimal(str(amt))
+                )
+        return invoice
 
 
 class FeePaymentSerializer(drf_serializers.ModelSerializer):

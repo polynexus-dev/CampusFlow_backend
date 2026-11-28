@@ -1,6 +1,7 @@
 # ── Standard Library Imports ──────────────────────────────────────────────────
 import datetime
 import uuid
+from decimal import Decimal
 
 # ── Django Core Imports ──────────────────────────────────────────────────────
 from django.contrib.auth.models import Group, Permission, User
@@ -1235,6 +1236,16 @@ class HostelAllocationSerializer(serializers.ModelSerializer):
     hostel_gender = serializers.CharField(source='room.hostel.gender_type', read_only=True)
     room_number = serializers.CharField(source='room.room_number', read_only=True)
     rent_per_semester = serializers.DecimalField(source='room.rent_per_semester', max_digits=10, decimal_places=2, read_only=True)
+    discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True, default=Decimal('0.00'))
+    discount_reason = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    base_rent = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True, default=Decimal('0.00'))
+
+    # Live Fee payment metrics
+    allocated_fee = serializers.SerializerMethodField()
+    paid_fee = serializers.SerializerMethodField()
+    balance_fee = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+    last_payment_date = serializers.SerializerMethodField()
 
     class Meta:
         model = HostelAllocation
@@ -1242,9 +1253,74 @@ class HostelAllocationSerializer(serializers.ModelSerializer):
             'id', 'student', 'student_id', 'student_name', 'student_gender',
             'hostel', 'hostel_id', 'hostel_name', 'hostel_gender',
             'room', 'room_number', 'rent_per_semester',
-            'allocated_date', 'vacated_date', 'status',
+            'academic_year', 'base_rent', 'discount_amount', 'discount_reason', 'final_rent',
+            'allocated_fee', 'paid_fee', 'balance_fee', 'payment_status', 'last_payment_date',
+            'allocated_date', 'vacated_date', 'status', 'notes',
             'created_at', 'updated_at'
         ]
+        read_only_fields = ['final_rent', 'created_at', 'updated_at']
+
+    def _get_hostel_fee_metrics(self, obj):
+        if hasattr(obj, "_hostel_fee_metrics"):
+            return obj._hostel_fee_metrics
+
+        from campusflow_app.models import StudentFeeInvoice
+        invoices = StudentFeeInvoice.objects.filter(
+            student=obj.student.user,
+            items__category__name__icontains="Hostel"
+        ).distinct()
+
+        allocated = float(obj.final_rent or obj.room.rent_per_semester or 0)
+        paid = 0.0
+        last_payment = None
+
+        for inv in invoices:
+            hostel_item = inv.items.filter(category__name__icontains="Hostel").first()
+            if not hostel_item:
+                continue
+            item_allocated = float(hostel_item.amount)
+            net_amount = float(inv.total_amount - inv.discount_amount)
+            if net_amount > 0:
+                paid_ratio = min(1.0, float(inv.paid_amount) / net_amount)
+                paid += item_allocated * paid_ratio
+            elif inv.status == "paid":
+                paid += item_allocated
+
+            latest_pay = inv.payments.order_by("-payment_date").first()
+            if latest_pay and (not last_payment or latest_pay.payment_date > last_payment):
+                last_payment = latest_pay.payment_date
+
+        balance = max(0.0, allocated - paid)
+        if paid >= allocated and allocated > 0:
+            status_label = "PAID"
+        elif paid > 0:
+            status_label = "PARTIAL"
+        else:
+            status_label = "UNPAID"
+
+        obj._hostel_fee_metrics = {
+            "allocated": round(allocated, 2),
+            "paid": round(paid, 2),
+            "balance": round(balance, 2),
+            "payment_status": status_label,
+            "last_payment_date": last_payment.strftime("%Y-%m-%d %H:%M:%S") if last_payment else None
+        }
+        return obj._hostel_fee_metrics
+
+    def get_allocated_fee(self, obj):
+        return self._get_hostel_fee_metrics(obj)["allocated"]
+
+    def get_paid_fee(self, obj):
+        return self._get_hostel_fee_metrics(obj)["paid"]
+
+    def get_balance_fee(self, obj):
+        return self._get_hostel_fee_metrics(obj)["balance"]
+
+    def get_payment_status(self, obj):
+        return self._get_hostel_fee_metrics(obj)["payment_status"]
+
+    def get_last_payment_date(self, obj):
+        return self._get_hostel_fee_metrics(obj)["last_payment_date"]
 
     def validate(self, attrs):
         hostel = attrs.pop('hostel', None)
